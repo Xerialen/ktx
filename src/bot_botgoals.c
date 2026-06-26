@@ -342,6 +342,65 @@ void UpdateGoal(gedict_t *self)
 
 	self->fb.goal_refresh_time = g_globalvars.time + 2 + g_random();
 
+	// Lab instrument: pin the navigation goal to a live marker number (1-based,
+	// same numbering as "botcmd goto"). Measurement-clean alternative to
+	// "botcmd debug botpath", which G_Errors under matchless configs and
+	// teleports/freezes the bot with debug side effects. >0 pins, -1 clears,
+	// 0 leaves fixed_goal alone (so the debug command still works).
+	if (self->isBot)
+	{
+		extern gedict_t *markers[];
+		// LD-F1 (#95): per-slot pin k_fb_moveprobe_fixed_goal_s<N> overrides the
+		// global pin for this bot; helpers live in bot_movement.c.
+		extern int BotMoveProbeCvarIntForBot(gedict_t *self, const char *param, int *value,
+											 int *from_slot);
+		extern int BotMoveProbeCvarStringForBot(gedict_t *self, const char *param, char *out,
+												int out_size);
+		extern void BotMoveProbeReportPerSlotError(gedict_t *self, const char *param,
+												   const char *value, const char *reason);
+		extern int fb_moveprobe_perslot_goal_error[MAX_CLIENTS];
+		int pin = 0;
+		int pin_from_slot = 0;
+		int slot = NUM_FOR_EDICT(self) - 1;
+
+		if (BotMoveProbeCvarIntForBot(self, "fixed_goal", &pin, &pin_from_slot) < 0)
+		{
+			// Malformed per-slot pin: loud-fail (#95). The error row was
+			// printed by the resolver; BotApplyMoveProbe holds the bot while
+			// this flag is set. Leave the current goal untouched.
+			if ((slot >= 0) && (slot < MAX_CLIENTS))
+			{
+				fb_moveprobe_perslot_goal_error[slot] = 1;
+			}
+		}
+		else
+		{
+			if ((slot >= 0) && (slot < MAX_CLIENTS))
+			{
+				fb_moveprobe_perslot_goal_error[slot] = 0;
+			}
+			if ((pin >= 1) && (pin <= NUMBER_MARKERS) && markers[pin - 1])
+			{
+				self->fb.fixed_goal = markers[pin - 1];
+			}
+			else if (pin == -1)
+			{
+				self->fb.fixed_goal = NULL;
+			}
+			else if ((pin != 0) && pin_from_slot && (slot >= 0) && (slot < MAX_CLIENTS))
+			{
+				// A per-slot pin naming a marker absent on this map would
+				// silently chase the wrong goal: loud-fail instead. (The
+				// global pin keeps its legacy silent-ignore behavior.)
+				char pin_raw[64];
+
+				BotMoveProbeCvarStringForBot(self, "fixed_goal", pin_raw, sizeof(pin_raw));
+				BotMoveProbeReportPerSlotError(self, "fixed_goal", pin_raw, "no_such_marker");
+				fb_moveprobe_perslot_goal_error[slot] = 1;
+			}
+		}
+	}
+
 	if (self->fb.fixed_goal)
 	{
 		self->s.v.goalentity = NUM_FOR_EDICT(self->fb.fixed_goal);
