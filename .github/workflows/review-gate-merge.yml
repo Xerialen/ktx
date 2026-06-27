@@ -200,7 +200,7 @@ jobs:
             echo "merging #$PR @ $short into '$base' ($n_checks check(s) passing, incl. PR Tests $pt_ok/$pt_total; SHA-bound gate verdict present)"
             gh pr merge "$PR" -R "$REPO" --squash --match-head-commit "$head" $del
             gh pr comment "$PR" -R "$REPO" \
-              --body "**Merged** by review-gate executor. Gate: open, non-draft, base \`\, mergeable, current-head gate verdict for \`\, $n_checks check(s) passing (incl. \PR Tests\), label \gate: ready\."
+              --body "**Merged** by review-gate executor. Gate: open, non-draft, base \`$base\`, mergeable, current-head gate verdict for \`$short\`, $n_checks check(s) passing (incl. \`PR Tests\`), label \`gate: ready\`."
           }
 
           for PR in $PRS; do
