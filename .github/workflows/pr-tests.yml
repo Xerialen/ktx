@@ -1,0 +1,137 @@
+name: PR Tests
+
+# Deterministic CI floor for the review gate. Repositories with an explicit
+# `make test` use that as the authoritative check; otherwise this runs the
+# standard test/build entrypoints advertised by common project files.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-tests-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        if: ${{ hashFiles('go.work', 'go.mod', '**/go.mod') != '' }}
+        with:
+          go-version: stable
+          cache: true
+          cache-dependency-path: "**/go.sum"
+      - uses: actions/setup-node@v5
+        if: ${{ hashFiles('package.json') != '' }}
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v6
+        if: ${{ hashFiles('pyproject.toml', 'requirements.txt', 'setup.py', 'tests/**/*.py') != '' }}
+        with:
+          python-version: "3.13"
+      - name: Run repository checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          checks=0
+
+          echo "::group::Whitespace"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}" || true
+            git diff --check "origin/${{ github.base_ref }}"...HEAD
+          else
+            git diff --check HEAD~1..HEAD || git diff --check
+          fi
+          checks=$((checks + 1))
+          echo "::endgroup::"
+
+          ran_make_test=false
+          if [ -f Makefile ] && grep -Eq '^[[:space:]]*test[[:space:]]*:' Makefile; then
+            echo "::group::make test"
+            make test
+            ran_make_test=true
+            checks=$((checks + 1))
+            echo "::endgroup::"
+          fi
+
+          if [ "$ran_make_test" != "true" ] && { [ -f go.work ] || [ -f go.mod ] || find . -path ./.git -prune -o -name go.mod -print -quit | grep -q .; }; then
+            echo "::group::go test"
+            if [ -f go.work ] || [ -f go.mod ]; then
+              go test ./...
+            else
+              while IFS= read -r mod; do
+                (cd "$(dirname "$mod")" && go test ./...)
+              done < <(find . -path ./.git -prune -o -name go.mod -print)
+            fi
+            checks=$((checks + 1))
+            echo "::endgroup::"
+          fi
+
+          if [ "$ran_make_test" != "true" ] && [ -f package.json ]; then
+            echo "::group::node install"
+            corepack enable || true
+            if [ -f pnpm-lock.yaml ]; then
+              pm=pnpm
+              corepack prepare pnpm@latest --activate
+              pnpm install --frozen-lockfile
+            elif [ -f yarn.lock ]; then
+              pm=yarn
+              corepack prepare yarn@stable --activate
+              yarn install --immutable || yarn install --frozen-lockfile
+            elif [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+              pm=npm
+              npm ci
+            else
+              pm=npm
+              npm install
+            fi
+            echo "::endgroup::"
+
+            if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.test ? 0 : 1)"; then
+              echo "::group::node test"
+              case "$pm" in
+                pnpm) pnpm run test ;;
+                yarn) yarn test ;;
+                npm) npm test ;;
+              esac
+              checks=$((checks + 1))
+              echo "::endgroup::"
+            elif node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.build ? 0 : 1)"; then
+              echo "::group::node build"
+              case "$pm" in
+                pnpm) pnpm run build ;;
+                yarn) yarn build ;;
+                npm) npm run build ;;
+              esac
+              checks=$((checks + 1))
+              echo "::endgroup::"
+            fi
+          fi
+
+          if [ "$ran_make_test" != "true" ] && { [ -d tests ] || find . -path ./.git -prune -o -name 'test_*.py' -print -quit | grep -q .; }; then
+            echo "::group::python tests"
+            python -m pip install --upgrade pip
+            if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+            python -m pip install pytest
+            python -m pytest
+            checks=$((checks + 1))
+            echo "::endgroup::"
+          fi
+
+          if [ "$ran_make_test" != "true" ] && [ -f Cargo.toml ]; then
+            echo "::group::cargo test"
+            cargo test --locked || cargo test
+            checks=$((checks + 1))
+            echo "::endgroup::"
+          fi
+
+          echo "Completed deterministic checks: $checks"
