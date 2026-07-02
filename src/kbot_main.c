@@ -47,6 +47,19 @@ static int KBot_ArmedCells(void)
 	return (v <= 0) ? 15 : v;
 }
 
+// WP3.9: RA desire multiplier for strong kbots (1.0 = exact vanilla A/B).
+static float KBot_RaBiasVal(void)
+{
+	float v = cvar("k_kbot_ra_bias");
+
+	return (v <= 0) ? 1.5f : v;
+}
+
+float KBot_RaBias(void)
+{
+	return KBot_RaBiasVal();
+}
+
 void KBot_MarkBot(gedict_t *bot)
 {
 	char newname[CLIENT_NAME_LEN];
@@ -84,8 +97,9 @@ void KBot_MarkBot(gedict_t *bot)
 	// Ledger honesty (WP3.5): record the effective tunables with every stamp
 	// so run evidence captures the swept settings without perturbing the
 	// identity match above.
-	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d\n",
-				KBot_WeakStack(), KBot_ArmedRockets(), KBot_ArmedCells());
+	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d ra_bias=%.2f\n",
+				KBot_WeakStack(), KBot_ArmedRockets(), KBot_ArmedCells(),
+				KBot_RaBiasVal());
 }
 
 // Per-frame brain entry point. WP2.1: pure delegation -- log identity once,

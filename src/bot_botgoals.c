@@ -84,6 +84,26 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 		return;
 	}
 
+	// KBOT (WP3.9): RA bias. A STRONG kbot (not KBot_AvoidFights -- weak bots
+	// already have the discipline collect flow and must not be double-
+	// weighted) multiplies its desire for RED armor (item_armorInv; NOT
+	// item_armor2/YA or item_armor1/GA -- we already own YA) by
+	// k_kbot_ra_bias. Applied in the DESIRE domain, before the fixed_goal
+	// override (lab pins stay exact), before saved_goal_desire is stored
+	// (EvalGoal2 re-reads it -- consistent both passes), and before the
+	// score shaping goal_desire * (lookahead - t) / (t + 5) -- so travel-
+	// time normalization applies AFTER the bias and the weight can never
+	// convert into distance-seconds (the blackboard mistake: an absolute
+	// bonus in the travel-time domain let far targets beat near ones; a
+	// multiplicative desire weight is relative and preserves locality).
+	// Bias 1.0 is exact vanilla behavior (A/B gate). Baseline bots
+	// (fb.kbot == 0) cannot take this branch.
+	if (self->fb.kbot && (goal_desire > 0) && goal_entity->classname
+		&& streq(goal_entity->classname, "item_armorInv") && !KBot_AvoidFights(self))
+	{
+		goal_desire *= KBot_RaBias();
+	}
+
 	if (self->fb.fixed_goal != NULL)
 	{
 		goal_desire = (self->fb.fixed_goal == goal_entity ? 1000 : 0);
