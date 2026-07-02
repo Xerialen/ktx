@@ -27,7 +27,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.6.0-predatorweave"
+#define KBOT_VERSION "kbot-0.7.0-blackboard"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -61,6 +61,17 @@ qbool KBot_PredatorWeave(gedict_t *self);
 // Side-effect-free query of the current predator-weave engage state
 // (telemetry mirror only).
 qbool KBot_PredatorWeaveActive(gedict_t *self);
+
+// ---- Team blackboard (WP3.2, kbot_main.c) ----
+// Publish this kbot's committed goal (UpdateGoal tail). Major items
+// (RA/YA/mega/quad) create/refresh a TTL'd claim; anything else releases it.
+void KBot_ClaimGoal(gedict_t *self, gedict_t *goal);
+// True when a live same-team kbot holds a fresh, CLOSER claim on this major
+// item -- the (kbot-gated) EvalGoal caller then skips the goal.
+qbool KBot_GoalClaimedByTeammate(gedict_t *self, gedict_t *goal);
+// Focus-fire bonus in score seconds for BestEnemy_apply: enemies a teammate
+// already engages and enemies already hurt score better (lower).
+float KBot_FocusFireBonus(gedict_t *self, gedict_t *enemy);
 
 #endif // BOT_SUPPORT
 
