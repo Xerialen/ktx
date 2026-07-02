@@ -98,6 +98,7 @@ static gedict_t *moveprobe_s23_prec_marker[MAX_CLIENTS];   // mode 23: precision
 static float moveprobe_s23_prec_since[MAX_CLIENTS];        // mode 23: when precision mode engaged (timeout escape)
 static int moveprobe_s23_launch_done[MAX_CLIENTS];         // mode 23: circle-jump launch one-shot latch (A3 #75)
 static float moveprobe_s23_launch_since[MAX_CLIENTS];      // mode 23: launch first-eval time (<=0 = not evaluated yet)
+static float kbot_combat_until[MAX_CLIENTS];               // kbot: weave suppressed until this time (combat + hysteresis)
 static int moveprobe_s23_zjump_phase[MAX_CLIENTS];         // mode 23: ztricks terminal carve phase (0 off, 1 tracking, 2 released)
 static int moveprobe_s23_zjump_armed[MAX_CLIENTS];         // mode 23: ztricks speed/distance release window is active
 static int moveprobe_s23_zjump_release_rule[MAX_CLIENTS];  // mode 23: 0 none, 1 formula, 2 late-lip backstop
@@ -3206,9 +3207,43 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 	// no cvar needed. An explicit per-slot mode assignment still wins (lab
 	// escape hatch), as does the per-slot loud-fail hold. Baseline bots have
 	// fb.kbot == 0 (fb is memset on connect) and cannot take this branch.
+	//
+	// COMBAT GATE (WP2.2b): the weave is a TRAVERSAL layer only. Engaged
+	// bots delegate movement 100% to vanilla frogbot behavior (strafe
+	// dodging, missile dodging, engagement micro) -- the M2 bench showed
+	// weave-in-combat flies fast, straight, predictable lines that get
+	// shredded (kbots 2-78 vs frogbots). "In combat" uses frogbot movement's
+	// own predicate: fb.look_object is a player -- the exact condition
+	// BotOnGroundMovement() gates its dodge logic on (bot_botthink.c) and
+	// TargetEnemyLogic() gates enemy micro on. 1.5 s hysteresis after the
+	// last enemy sight so the weave does not flap mid-fight.
 	if (self->fb.kbot && !perslot_hold && !mode_from_slot)
 	{
-		mode = 23;
+		qbool kbot_in_combat = false;
+
+		if ((slot >= 0) && (slot < MAX_CLIENTS))
+		{
+			if (self->fb.look_object && (self->fb.look_object->ct == ctPlayer))
+			{
+				kbot_combat_until[slot] = g_globalvars.time + 1.5f;
+			}
+			else if (kbot_combat_until[slot] > g_globalvars.time + 1.5f)
+			{
+				kbot_combat_until[slot] = 0; // stale future value (map/time reset)
+			}
+			kbot_in_combat = (g_globalvars.time < kbot_combat_until[slot]);
+			if (kbot_in_combat)
+			{
+				// Never wind up a circle-jump launch mid-fight: expire any
+				// live attempt; re-arm needs the parked conditions again
+				// after the hysteresis window closes.
+				moveprobe_s23_launch_done[slot] = 1;
+			}
+		}
+		if (!kbot_in_combat)
+		{
+			mode = 23;
+		}
 	}
 	if ((slot >= 0) && (slot < MAX_CLIENTS) && fb_moveprobe_perslot_goal_error[slot])
 	{
@@ -5308,7 +5343,9 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		if (corner_aim <= 0) corner_aim = 68.0f;
 		if (corner_thresh <= 0) corner_thresh = 58.0f;
 		if (sv_maxspeed <= 0) sv_maxspeed = 320.0f;
-		if (launch_angle <= 0) launch_angle = 45.0f;
+		// kbot default 42 = the proven launch combo (tail-autopsy r6 winner
+		// cj400a42); an explicitly set cvar still wins for both bot kinds.
+		if (launch_angle <= 0) launch_angle = (self->fb.kbot ? 42.0f : 45.0f);
 		// ZTRICKS TERMINAL CARVE (default-off): route metadata can configure a
 		// landing target/lip pair so mode 23 deliberately reproduces the final
 		// human speedjump "symphony": keep accelerating, then near the lip emit
@@ -5693,7 +5730,11 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 					|| (kbot_since_last >= 1.0f) || (kbot_since_last < 0))
 				&& onground && (self->s.v.waterlevel == 0)
 				&& (hor_speed_sq < 100.0f * 100.0f)
-				&& (marker_dist_sq > 300.0f * 300.0f))
+				&& (marker_dist_sq > 300.0f * 300.0f)
+				// PR #2 P1: never arm on links that need a special maneuver
+				// (jump ledge / waterjump / rocket jump) -- same path-state
+				// doctrine the climb delegation above uses.
+				&& !(path_flags & (JUMP_LEDGE | WATERJUMP_ | ROCKET_JUMP)))
 			{
 				moveprobe_s23_launch_done[slot] = 0;
 				moveprobe_s23_launch_since[slot] = 0;
@@ -5702,10 +5743,9 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 			if (kbot_attempt_live)
 			{
 				launch_vh = 400.0f;
-				if (cvar("k_fb_moveprobe_s23_launch_angle") <= 0)
-				{
-					launch_angle = 42.0f;
-				}
+				// launch_angle: the kbot 42-degree default was applied where
+				// the block reads the cvar (PR #2: no per-frame cvar re-read
+				// on the hot path).
 			}
 		}
 
@@ -6000,9 +6040,13 @@ static void BotLogMoveProbeCommand(gedict_t *self, int cmd_msec, vec3_t directio
 		{
 			mode = -1; // held by the per-slot loud-fail contract; mark the row
 		}
-		else if (self->fb.kbot && !mode_from_slot)
+		else if (self->fb.kbot && !mode_from_slot
+				 && (g_globalvars.time >= kbot_combat_until[slot]))
 		{
-			mode = 23; // KBOT (WP2.2): mirror the dispatch's effective mode
+			// KBOT (WP2.2/2.2b): mirror the dispatch's effective mode,
+			// including the combat gate (runs after BotApplyMoveProbe in
+			// BotSetCommand, so kbot_combat_until is this frame's value).
+			mode = 23;
 		}
 	}
 

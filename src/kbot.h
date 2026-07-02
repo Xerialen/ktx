@@ -7,6 +7,10 @@
  (bot_movement.c) routes kbot-flagged bots into the mode-23 nav-weave by
  default (frogbot navigation decides WHERE, the cs->0 air-accel bunnyhop
  weave decides HOW FAST) plus an auto-armed circle-jump launch when parked.
+ Since WP2.2b the weave is COMBAT-GATED: it only drives out-of-combat
+ traversal; while fb.look_object is a player (frogbot movement's own
+ dodge predicate, +1.5 s hysteresis) movement delegates 100% to vanilla
+ frogbot combat behavior and the auto-launch is disarmed.
  Baseline frogbots are untouched (every kbot branch is fb.kbot-guarded).
 
  Expects g_local.h to have been included first (KTX header convention).
@@ -16,7 +20,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.2.0-weave"
+#define KBOT_VERSION "kbot-0.3.0-combatgate"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
