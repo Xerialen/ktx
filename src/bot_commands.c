@@ -344,8 +344,10 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 			memset(&bots[i].command, 0, sizeof(bots[i].command));
 			g_edicts[entity].fb.last_cmd_sent = g_globalvars.time;
 			// A reused entity slot may have hosted a komodobot earlier; a
-			// plain addbot must never inherit the kbot brain flag.
+			// plain addbot must never inherit the kbot brain flag nor the
+			// kbot userinfo identity stamp (ktxstats/MVD evidence).
 			g_edicts[entity].fb.kbot = KBOT_STATE_OFF;
+			trap_SetBotUserInfo(entity, "kbot", "", 0);
 			g_edicts[entity].fb.skill.skill_level = skill_level;
 			g_edicts[entity].fb.botnumber = i;
 			trap_SetBotUserInfo(entity, "team", teamName, 0);
