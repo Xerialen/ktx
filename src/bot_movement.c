@@ -5376,7 +5376,17 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 			// machinery; do NOT clone its scoring) so the weave aims at the NEXT
 			// hop while flying past this one. Edge-triggered per marker so the
 			// stochastic path scorer is consulted once per pass.
+			//
+			// fl_marker guard (M3 crash): ProcessNewLinkedMarker legitimately
+			// sets linked_marker to a NON-marker goal entity -- a dropped
+			// backpack or powerup ("ProcNewLinked(backpack)") -- whose
+			// fb.goals[] were never route-calc backfilled (all NULL). Handing
+			// touch_marker over to one poisons UpdateGoal:
+			// touch_marker->fb.goals[i].next_marker->virtual_goal SIGSEGVs.
+			// Vanilla only ever STEERS at such goals; touch stays physical.
+			// So do we: weave toward it, never carrot it.
 			if ((marker_dist_sq < pass_r * pass_r)
+				&& self->fb.linked_marker->fb.fl_marker
 				&& (moveprobe_s23_carrot_done[slot] != self->fb.linked_marker)
 				&& !(onground && (marker_dz > 18.0f)
 					 && (marker_dist_sq < 280.0f * 280.0f)
