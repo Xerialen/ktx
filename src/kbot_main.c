@@ -59,4 +59,35 @@ qbool KBot_Frame(gedict_t *self)
 	return false; // not handled: fall through to stock frogbot think
 }
 
+// ---- WP3.3: engage/disengage discipline ----
+
+// "Armed" = a real duel weapon with ammo to use it. Thresholds follow the
+// codebase's own conventions (AttackRespawns treats RL viable at rockets > 3).
+#define KBOT_ARMED_ROCKETS  3	// rockets required to count RL as armed
+#define KBOT_ARMED_CELLS    15	// cells required to count LG as armed
+#define KBOT_WEAK_STACK     70	// health + armor below this = too weak to hunt
+
+// True when this kbot should decline to HUNT (goal-level only): it has no
+// usable duel weapon, or its stack is critically low. Fresh spawns on
+// weapon-stripped maps are disarmed by definition -- this is the post-death
+// discipline: collect armor/weapon first, re-engage once armed. Deliberately
+// side-effect free and marker-free (reads only self->s.v scalars).
+qbool KBot_AvoidFights(gedict_t *self)
+{
+	int held = (int)self->s.v.items;
+	qbool armed = ((held & IT_ROCKET_LAUNCHER) && (self->s.v.ammo_rockets > KBOT_ARMED_ROCKETS))
+			|| ((held & IT_LIGHTNING) && (self->s.v.ammo_cells > KBOT_ARMED_CELLS));
+
+	if (!armed)
+	{
+		return true;
+	}
+	if ((self->s.v.health + self->s.v.armorvalue) < KBOT_WEAK_STACK)
+	{
+		return true;
+	}
+
+	return false;
+}
+
 #endif // BOT_SUPPORT

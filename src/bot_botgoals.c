@@ -11,6 +11,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 //static float best_score;
 #define BACKPACK_CLASSNAME "backpack"
@@ -420,6 +421,20 @@ void UpdateGoal(gedict_t *self)
 		self->fb.virtual_enemy = enemy_;
 		self->fb.goal_enemy_desire =
 				enemy_ && enemy_->fb.desire ? enemy_->fb.desire(self, enemy_) : 0;
+		// KBOT (WP3.3): fight discipline. A weak kbot (disarmed or low stack;
+		// fresh spawns included) never HUNTS: clearing positive enemy-goal
+		// desire here removes the enemy as a goal candidate for this refresh
+		// (also gates EnemyGoalLogic, which tests the same field), so the
+		// vanilla item economy below picks a collect goal instead. Everything
+		// else is untouched: vanilla's repel path (the else-if below, taken
+		// when desire <= 0 and the enemy hunts us) still biases goal choice
+		// AWAY from the threat with its native scale, and combat micro (aim,
+		// dodge, look_object) runs at full vanilla skill in any fight that
+		// finds the bot. Baseline bots (fb.kbot == 0) cannot take this branch.
+		if (self->fb.kbot && (self->fb.goal_enemy_desire > 0) && KBot_AvoidFights(self))
+		{
+			self->fb.goal_enemy_desire = 0;
+		}
 		if (self->fb.goal_enemy_desire > 0)
 		{
 			gedict_t *enemy = &g_edicts[self->s.v.enemy];
