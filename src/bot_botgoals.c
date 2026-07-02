@@ -11,6 +11,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 //static float best_score;
 #define BACKPACK_CLASSNAME "backpack"
@@ -406,6 +407,16 @@ void UpdateGoal(gedict_t *self)
 		self->s.v.goalentity = NUM_FOR_EDICT(self->fb.fixed_goal);
 		self->fb.goal_refresh_time = g_globalvars.time + 2 + g_random();
 
+		return;
+	}
+
+	// KBOT (WP3.1): predictive item-economy goal selection. Placed after the
+	// lab fixed_goal pin (measurement pins still win) and before the vanilla
+	// economy. Returns true only when it committed a goal AND set the same
+	// state this function's tail sets; false falls through to the untouched
+	// vanilla economy. Baseline bots (fb.kbot == 0) never take this branch.
+	if (self->fb.kbot && KBot_SelectGoal(self))
+	{
 		return;
 	}
 

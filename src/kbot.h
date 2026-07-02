@@ -1,5 +1,5 @@
 /*
- kbot.h -- KomodoBrain (WP2.2: navigation + movement)
+ kbot.h -- KomodoBrain (WP3.1: navigation + movement + item economy)
 
  Brain seam: bots flagged as "komodobots" have their think routed through
  KBot_Frame(), which still delegates nav/goals/combat 100% to the stock
@@ -11,6 +11,9 @@
  traversal; while fb.look_object is a player (frogbot movement's own
  dodge predicate, +1.5 s hysteresis) movement delegates 100% to vanilla
  frogbot combat behavior and the auto-launch is disarmed.
+ Since WP3.1 GOAL SELECTION is predictive (kbot_goals.c): respawn-timer-
+ aware scoring of the majors, delegating to the vanilla economy whenever
+ nothing scores a committed rotation.
  Baseline frogbots are untouched (every kbot branch is fb.kbot-guarded).
 
  Expects g_local.h to have been included first (KTX header convention).
@@ -20,7 +23,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.3.0-combatgate"
+#define KBOT_VERSION "kbot-0.4.0-items"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -36,6 +39,12 @@ void KBot_MarkBot(gedict_t *bot);
 // then returns immediately). WP2.1: always returns false -- pure delegation
 // to the stock frogbot code path.
 qbool KBot_Frame(gedict_t *self);
+
+// Predictive item-economy goal selection (WP3.1, kbot_goals.c). Called from
+// UpdateGoal() for kbot-flagged bots, after the lab fixed_goal pin. Returns
+// true when it committed a goal (having set the same state UpdateGoal's tail
+// sets); false delegates to the vanilla goal economy untouched.
+qbool KBot_SelectGoal(gedict_t *self);
 
 #endif // BOT_SUPPORT
 

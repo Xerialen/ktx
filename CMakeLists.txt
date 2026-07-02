@@ -81,6 +81,7 @@ set(SRC_COMMON
 	"${DIR_SRC}/hiprot.c"
 	"${DIR_SRC}/hoonymode.c"
 	"${DIR_SRC}/items.c"
+	"${DIR_SRC}/kbot_goals.c"
 	"${DIR_SRC}/kbot_main.c"
 	"${DIR_SRC}/logs.c"
 	"${DIR_SRC}/maps.c"
