@@ -8,6 +8,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 // Removes the look object for the given player
 void ClearLookObject(gedict_t *player)
@@ -113,8 +114,8 @@ void BotsSoundMadeEvent(gedict_t *entity)
 
 // FIXME: Globals (from_marker, to_marker, etc)
 // Evaluates a potential enemy (globals: path_normal)
-static void BestEnemy_apply(gedict_t *test_enemy, float *best_score, gedict_t **enemy_,
-							float *predict_dist)
+static void BestEnemy_apply(gedict_t *picker, gedict_t *test_enemy, float *best_score,
+							gedict_t **enemy_, float *predict_dist)
 {
 	float enemy_score;
 
@@ -132,6 +133,17 @@ static void BestEnemy_apply(gedict_t *test_enemy, float *best_score, gedict_t **
 	{
 		look_marker = SightMarker(from_marker, to_marker, 0, 0);
 		enemy_score = look_traveltime + g_random();
+	}
+
+	// KBOT (WP3.6): bounded press bias -- a weak visible enemy scores up to
+	// 1.5 s better, i.e. it wins the pick only when already within 1.5 s of
+	// the best candidate (locality bound; never a cross-map chase). Guards:
+	// only real routes (< 1e5) with look_marker != NULL -- subtracting from
+	// the 1e6 unreachable sentinel could otherwise let the look_marker ==
+	// NULL branch win the comparison below and dereference NULL.
+	if (picker->fb.kbot && look_marker && (enemy_score < 100000.0f))
+	{
+		enemy_score -= KBot_PressPickBias(picker, test_enemy);
 	}
 
 	if (enemy_score < *best_score)
@@ -168,10 +180,10 @@ qbool BotsPickBestEnemy(gedict_t *self)
 			if (from_marker)
 			{
 				to_marker = self->fb.touch_marker;
-				BestEnemy_apply(test_enemy, &best_score, &enemy_, &predict_dist);
+				BestEnemy_apply(self, test_enemy, &best_score, &enemy_, &predict_dist);
 				to_marker = from_marker;
 				from_marker = self->fb.touch_marker;
-				BestEnemy_apply(test_enemy, &best_score, &enemy_, &predict_dist);
+				BestEnemy_apply(self, test_enemy, &best_score, &enemy_, &predict_dist);
 			}
 		}
 	}

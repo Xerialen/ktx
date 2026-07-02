@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.8.0-tunable"
+#define KBOT_VERSION "kbot-0.9.0-press"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -44,6 +44,18 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+
+// ---- Press (WP3.6, kbot_main.c) -- the mirror of discipline ----
+// Press predicate for UpdateGoal's enemy-goal hook: strong self, weak
+// visible-or-recently-seen enemy (k_kbot_press_margin stack gap or
+// unarmed-vs-armed; k_kbot_press_memory seconds of same-target memory).
+// Updates the last-seen memory; call once per goal refresh.
+qbool KBot_PressEnemy(gedict_t *self, gedict_t *enemy);
+// Bounded weak-enemy pick bias for BestEnemy_apply, in score seconds
+// (flat 1.5 s cap = the locality bound). Side-effect free.
+float KBot_PressPickBias(gedict_t *self, gedict_t *enemy);
+// Log the effective kbot tunables ([kbot-config] line, ledger honesty).
+void KBot_LogConfig(void);
 
 #endif // BOT_SUPPORT
 

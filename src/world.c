@@ -1074,6 +1074,9 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_rockets", "3");
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
+	// KBOT (WP3.6): press tunables (kbot-0.9.0-press).
+	RegisterCvarEx("k_kbot_press_margin", "50");
+	RegisterCvarEx("k_kbot_press_memory", "2.0");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{

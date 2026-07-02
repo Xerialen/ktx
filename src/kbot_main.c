@@ -84,8 +84,7 @@ void KBot_MarkBot(gedict_t *bot)
 	// Ledger honesty (WP3.5): record the effective tunables with every stamp
 	// so run evidence captures the swept settings without perturbing the
 	// identity match above.
-	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d\n",
-				KBot_WeakStack(), KBot_ArmedRockets(), KBot_ArmedCells());
+	KBot_LogConfig();
 }
 
 // Per-frame brain entry point. WP2.1: pure delegation -- log identity once,
@@ -116,13 +115,18 @@ qbool KBot_Frame(gedict_t *self)
 // first, re-engage once armed. Deliberately side-effect free and marker-free
 // (reads only self->s.v scalars). Called at goal-refresh cadence (~0.5 Hz per
 // bot), so the cvar() trap reads are not hot-path.
+// "Armed" = a real duel weapon with ammo to use it (tunable thresholds).
+static qbool KBot_Armed(gedict_t *p)
+{
+	int held = (int)p->s.v.items;
+
+	return ((held & IT_ROCKET_LAUNCHER) && (p->s.v.ammo_rockets > KBot_ArmedRockets()))
+			|| ((held & IT_LIGHTNING) && (p->s.v.ammo_cells > KBot_ArmedCells()));
+}
+
 qbool KBot_AvoidFights(gedict_t *self)
 {
-	int held = (int)self->s.v.items;
-	qbool armed = ((held & IT_ROCKET_LAUNCHER) && (self->s.v.ammo_rockets > KBot_ArmedRockets()))
-			|| ((held & IT_LIGHTNING) && (self->s.v.ammo_cells > KBot_ArmedCells()));
-
-	if (!armed)
+	if (!KBot_Armed(self))
 	{
 		return true;
 	}
@@ -132,6 +136,136 @@ qbool KBot_AvoidFights(gedict_t *self)
 	}
 
 	return false;
+}
+
+// ---- WP3.6: press (kbot-0.9.0) -- the mirror of discipline ----
+//
+// Motivating data: kbots out-damage frogs by ~15k/batch at only +7..9
+// margin -- wounded enemies escape, re-stack, return. When a kbot is STRONG
+// (not KBot_AvoidFights) and a visible enemy is WEAK (stack trails ours by
+// k_kbot_press_margin, or unarmed-vs-armed), press the kill at the GOAL
+// level only: boost hunt desire in UpdateGoal and (bounded) bias enemy
+// picking. Zero movement changes -- predator taught us the movement-level
+// version fails.
+//
+// Provenance: stack/ammo reads are server-side-omniscient (like the vanilla
+// economy's own desire inputs). Lab-bench acceptable per PRD; flagged for
+// any future public-server readiness review.
+
+static float KBot_PressMargin(void)
+{
+	float v = cvar("k_kbot_press_margin");
+
+	return (v <= 0) ? 50.0f : v;
+}
+
+static float KBot_PressMemory(void)
+{
+	float v = cvar("k_kbot_press_memory");
+
+	return (v <= 0) ? 2.0f : v;
+}
+
+// Log the effective tunables (called from the [kbot] stamp).
+void KBot_LogConfig(void)
+{
+	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d press_margin=%d press_memory=%.1f\n",
+				KBot_WeakStack(), KBot_ArmedRockets(), KBot_ArmedCells(),
+				(int)KBot_PressMargin(), KBot_PressMemory());
+}
+
+// p is significantly weaker than self (same shape the predator experiment
+// used): lacks a usable duel weapon while we are armed, or their stack
+// trails ours by more than the press margin.
+static qbool KBot_SignificantlyWeaker(gedict_t *p, gedict_t *self)
+{
+	if (!KBot_Armed(p) && KBot_Armed(self))
+	{
+		return true;
+	}
+
+	return (p->s.v.health + p->s.v.armorvalue)
+			< (self->s.v.health + self->s.v.armorvalue - KBot_PressMargin());
+}
+
+// Visible-or-recently-seen memory, per slot: pressing persists for
+// k_kbot_press_memory seconds after the target was last visible, and only
+// for the SAME target (a different enemy must be seen to start a new press).
+static gedict_t *kbot_press_target[MAX_CLIENTS];
+static float kbot_press_seen[MAX_CLIENTS];
+
+// Press predicate for the UpdateGoal hunt hook: strong self, weak visible
+// (or recently seen) enemy. Updates the last-seen memory as a side effect;
+// call it once per goal refresh (it is).
+qbool KBot_PressEnemy(gedict_t *self, gedict_t *enemy)
+{
+	int slot = NUM_FOR_EDICT(self) - 1;
+	float now = g_globalvars.time;
+
+	if ((slot < 0) || (slot >= MAX_CLIENTS))
+	{
+		return false;
+	}
+	if (!enemy || (enemy->ct != ctPlayer) || ISDEAD(enemy) || SameTeam(self, enemy))
+	{
+		return false;
+	}
+	if (ISDEAD(self) || KBot_AvoidFights(self))
+	{
+		return false;	// stack dropped mid-chase: discipline takes back over
+	}
+	if (!KBot_SignificantlyWeaker(enemy, self))
+	{
+		return false;
+	}
+
+	if (Visible_360(self, enemy))
+	{
+		kbot_press_target[slot] = enemy;
+		kbot_press_seen[slot] = now;
+		return true;
+	}
+
+	// Recently-seen memory (same target only); heal stale/future stamps.
+	if (kbot_press_target[slot] != enemy)
+	{
+		return false;
+	}
+	if ((kbot_press_seen[slot] > now) || ((now - kbot_press_seen[slot]) > KBot_PressMemory()))
+	{
+		kbot_press_target[slot] = NULL;
+		kbot_press_seen[slot] = 0;
+		return false;
+	}
+
+	return true;
+}
+
+// Bounded enemy-pick bias for BestEnemy_apply, in SCORE SECONDS (the score
+// is a travel time; lower wins). Flat and capped at 1.5 s, which IS the
+// locality bound: a weak enemy can only win the pick if it is within 1.5 s
+// of the best candidate -- never a cross-map chase (the focus-fire lesson).
+// Side-effect free: current visibility only, no memory update.
+float KBot_PressPickBias(gedict_t *self, gedict_t *enemy)
+{
+	if (!enemy || (enemy->ct != ctPlayer) || ISDEAD(enemy) || SameTeam(self, enemy))
+	{
+		return 0;
+	}
+	if (ISDEAD(self) || KBot_AvoidFights(self))
+	{
+		return 0;
+	}
+	if (!KBot_SignificantlyWeaker(enemy, self))
+	{
+		return 0;
+	}
+	if (!Visible_360(self, enemy))
+	{
+		return 0;
+	}
+
+	return 1.5f;
 }
 
 #endif // BOT_SUPPORT

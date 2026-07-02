@@ -435,6 +435,25 @@ void UpdateGoal(gedict_t *self)
 		{
 			self->fb.goal_enemy_desire = 0;
 		}
+		// KBOT (WP3.6): press -- the mirror of discipline. A STRONG kbot
+		// facing a WEAK, visible-or-recently-seen enemy boosts hunt desire so
+		// the wounded enemy outcompetes item goals and cannot escape to
+		// re-stack. The bump reuses vanilla's own "defenceless" desire shape:
+		// goal_client-style desires add +20 damage-equivalents for a
+		// defenceless enemy ((total_damage+120) vs (total_damage+100)) *
+		// firepower * 0.01, so the press adds exactly 0.20 * firepower on a
+		// non-negative base -- vanilla scale, no invented constants. Movement
+		// stays 100% vanilla (goal-level only). KBot_PressEnemy internally
+		// re-checks discipline, so a stack drop mid-chase ends the press at
+		// the next goal refresh. Baseline bots cannot take this branch.
+		else if (self->fb.kbot && KBot_PressEnemy(self, enemy_))
+		{
+			if (self->fb.goal_enemy_desire < 0)
+			{
+				self->fb.goal_enemy_desire = 0;
+			}
+			self->fb.goal_enemy_desire += 0.20f * self->fb.firepower;
+		}
 		if (self->fb.goal_enemy_desire > 0)
 		{
 			gedict_t *enemy = &g_edicts[self->s.v.enemy];
