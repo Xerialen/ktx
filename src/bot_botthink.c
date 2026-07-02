@@ -10,6 +10,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 void AMPHI2BotInLava(void);
 
@@ -460,6 +461,14 @@ void BotEvadeLogic(gedict_t *self)
 // Logic that gets called for every player
 void BotsThinkTime(gedict_t *self)
 {
+	// KomodoBrain seam: flagged bots route through KBot_Frame().  If it
+	// reports the frame as handled, skip the stock frogbot logic entirely
+	// (WP2.1: never handled -- pure delegation, zero behavior change).
+	if (self->isBot && self->fb.kbot && KBot_Frame(self))
+	{
+		return;
+	}
+
 	self->fb.jumping = false; // Don't call SetJumpFlag here
 
 	if (self->fb.prev_touch_marker != self->fb.touch_marker || PAST(frogbot_nextthink))
