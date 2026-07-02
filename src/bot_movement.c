@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 #define ARROW_TIME_INCREASE       0.15  // Seconds to advance after NewVelocityForArrow
 #define MIN_DEAD_TIME 0.2f
@@ -3202,6 +3203,18 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		perslot_hold = 1;
 		mode = 0;
 	}
+	// KBOT (WP3.4): PREDATOR WEAVE -- the mode-23 nav-weave engages as an
+	// attack/chase mode only: nav goal is a visible enemy who is not facing
+	// us (or every facing enemy is significantly weaker), discipline says
+	// fight, with instant-drop / 1 s re-arm hysteresis (all inside
+	// KBot_PredatorWeave, kbot_main.c). Rotation weave stays OFF (measured
+	// -25..-30 frags/game in the 0.2-0.4 benches). An explicit per-slot mode
+	// assignment still wins (lab escape hatch), as does the per-slot
+	// loud-fail hold. Baseline bots (fb.kbot == 0) short-circuit out.
+	if (self->fb.kbot && !perslot_hold && !mode_from_slot && KBot_PredatorWeave(self))
+	{
+		mode = 23;
+	}
 	if ((slot >= 0) && (slot < MAX_CLIENTS) && fb_moveprobe_perslot_goal_error[slot])
 	{
 		perslot_hold = 1;
@@ -5954,6 +5967,13 @@ static void BotLogMoveProbeCommand(gedict_t *self, int cmd_msec, vec3_t directio
 		if (BotMoveProbeCvarIntForBot(self, "mode", &mode, &mode_from_slot) < 0)
 		{
 			mode = -1; // held by the per-slot loud-fail contract; mark the row
+		}
+		else if (self->fb.kbot && !mode_from_slot && KBot_PredatorWeaveActive(self))
+		{
+			// KBOT (WP3.4): mirror the dispatch's effective mode (the logger
+			// runs after BotApplyMoveProbe in BotSetCommand, so the predator
+			// state is this frame's value).
+			mode = 23;
 		}
 	}
 

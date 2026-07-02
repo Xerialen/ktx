@@ -14,6 +14,12 @@
  and combat micro (aim, dodge, look_object) is untouched: fights that find
  the bot are still fought with full vanilla skill.
 
+ WP3.4 adds the PREDATOR WEAVE (owner-directed): the mode-23 nav-weave
+ re-enters as an attack/chase-only mode -- engaged solely when hunting a
+ visible enemy who is not facing us (or every facing enemy is significantly
+ weaker), with instant drop / 1 s re-arm hysteresis. Rotation weave remains
+ off (measured -25..-30 frags/game).
+
  Expects g_local.h to have been included first (KTX header convention).
  */
 #ifndef KTX_KBOT_H
@@ -21,7 +27,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.5.0-discipline"
+#define KBOT_VERSION "kbot-0.6.0-predatorweave"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -44,6 +50,17 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+
+// Predator weave (WP3.4, owner-directed): the mode-23 weave as an attack/
+// chase mode ONLY -- engaged when the bot's nav goal is a visible enemy and
+// no visible facing enemy is a real threat (full rule in kbot_main.c).
+// Called once per frame from the moveprobe dispatch; carries asymmetric
+// hysteresis (instant drop, 1 s continuous re-arm). Rotation weave stays off.
+qbool KBot_PredatorWeave(gedict_t *self);
+
+// Side-effect-free query of the current predator-weave engage state
+// (telemetry mirror only).
+qbool KBot_PredatorWeaveActive(gedict_t *self);
 
 #endif // BOT_SUPPORT
 
