@@ -3202,6 +3202,14 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		perslot_hold = 1;
 		mode = 0;
 	}
+	// KBOT (WP2.2): komodobots run the mode-23 nav-weave actuation by default,
+	// no cvar needed. An explicit per-slot mode assignment still wins (lab
+	// escape hatch), as does the per-slot loud-fail hold. Baseline bots have
+	// fb.kbot == 0 (fb is memset on connect) and cannot take this branch.
+	if (self->fb.kbot && !perslot_hold && !mode_from_slot)
+	{
+		mode = 23;
+	}
 	if ((slot >= 0) && (slot < MAX_CLIENTS) && fb_moveprobe_perslot_goal_error[slot])
 	{
 		perslot_hold = 1;
@@ -3353,8 +3361,16 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		else
 		{
 			moveprobe_spawn_snapped[slot] = 0;
-			moveprobe_s23_launch_done[slot] = 0;
-			moveprobe_s23_launch_since[slot] = 0;
+			// KBOT (WP2.2): with no spawn assignment this branch runs EVERY
+			// frame, so it would wipe the one-shot launch latch per frame.
+			// Harmless for lab bots (launch cvars are per-protocol, always
+			// paired with spawn_origin), but komodobots own their launch
+			// latch via the auto-launch arm logic in the mode-23 block.
+			if (!self->fb.kbot)
+			{
+				moveprobe_s23_launch_done[slot] = 0;
+				moveprobe_s23_launch_since[slot] = 0;
+			}
 		}
 	}
 
@@ -5654,6 +5670,45 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 			}
 		}
 
+		// KBOT AUTO-LAUNCH (WP2.2): komodobots arm the circle-jump launch
+		// themselves -- no lab cvar needed -- when demonstrably parked with a
+		// long leg ahead: grounded, near-standstill (< 100 ups), linked marker
+		// further than 300 qu, fully out of water. The proven lab combo
+		// (launch_vh 400 / launch_angle 42; tail-autopsy r6 winner cj400a42,
+		// a3-live-transfer screens) becomes the default; explicitly set lab
+		// cvars still win (this branch only runs with launch_vh unset).
+		// Everything downstream is the unchanged lab block: LOOK-ray runway
+		// engage gate (>= 0.9 open), aimed release (herr <= swing) and the
+		// 3 s safeguard all still apply. A refused/expended attempt re-arms
+		// only after a 1 s cooldown AND a fresh parked state, so a walled-in
+		// bot does not re-trace every frame.
+		if (self->fb.kbot && (launch_vh <= 0))
+		{
+			qbool kbot_attempt_live = !moveprobe_s23_launch_done[slot]
+				&& (moveprobe_s23_launch_since[slot] > 0);
+			float kbot_since_last = g_globalvars.time - moveprobe_s23_launch_since[slot];
+
+			if (!kbot_attempt_live
+				&& ((moveprobe_s23_launch_since[slot] <= 0)
+					|| (kbot_since_last >= 1.0f) || (kbot_since_last < 0))
+				&& onground && (self->s.v.waterlevel == 0)
+				&& (hor_speed_sq < 100.0f * 100.0f)
+				&& (marker_dist_sq > 300.0f * 300.0f))
+			{
+				moveprobe_s23_launch_done[slot] = 0;
+				moveprobe_s23_launch_since[slot] = 0;
+				kbot_attempt_live = true;
+			}
+			if (kbot_attempt_live)
+			{
+				launch_vh = 400.0f;
+				if (cvar("k_fb_moveprobe_s23_launch_angle") <= 0)
+				{
+					launch_angle = 42.0f;
+				}
+			}
+		}
+
 		// CIRCLE-JUMP LAUNCH (A2b #111 -> A3 #75): one-shot at attempt start.
 		// The >=526 tail tries all entered the final runway already fast via
 		// an ACCIDENTAL grounded circle-strafe; this does it deliberately,
@@ -5944,6 +5999,10 @@ static void BotLogMoveProbeCommand(gedict_t *self, int cmd_msec, vec3_t directio
 		if (BotMoveProbeCvarIntForBot(self, "mode", &mode, &mode_from_slot) < 0)
 		{
 			mode = -1; // held by the per-slot loud-fail contract; mark the row
+		}
+		else if (self->fb.kbot && !mode_from_slot)
+		{
+			mode = 23; // KBOT (WP2.2): mirror the dispatch's effective mode
 		}
 	}
 

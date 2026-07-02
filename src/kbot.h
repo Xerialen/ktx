@@ -1,10 +1,13 @@
 /*
- kbot.h -- KomodoBrain skeleton (WP2.1)
+ kbot.h -- KomodoBrain (WP2.2: navigation + movement)
 
- Minimal brain seam: bots flagged as "komodobots" have their think routed
- through KBot_Frame(), which for this WP delegates 100% to the stock
- frogbot logic (zero behavior change) but stamps its identity into run
- evidence (server log, userinfo, serverinfo).
+ Brain seam: bots flagged as "komodobots" have their think routed through
+ KBot_Frame(), which still delegates nav/goals/combat 100% to the stock
+ frogbot logic. Since WP2.2 their ACTUATION differs: BotApplyMoveProbe()
+ (bot_movement.c) routes kbot-flagged bots into the mode-23 nav-weave by
+ default (frogbot navigation decides WHERE, the cs->0 air-accel bunnyhop
+ weave decides HOW FAST) plus an auto-armed circle-jump launch when parked.
+ Baseline frogbots are untouched (every kbot branch is fb.kbot-guarded).
 
  Expects g_local.h to have been included first (KTX header convention).
  */
@@ -13,7 +16,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.1.0-skeleton"
+#define KBOT_VERSION "kbot-0.2.0-weave"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
