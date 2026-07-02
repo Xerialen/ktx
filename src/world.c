@@ -1067,6 +1067,14 @@ void FirstFrame(void)
 	RegisterCvarEx(FB_CVAR_ITEM_PICKUP_BONUS, "0");
 	RegisterCvarEx(FB_CVAR_EASY_SKILL_MODE, "1");
 
+	// KBOT (WP3.5): discipline tunables + identity-stamp suffix, sweepable
+	// from the server cfg without rebuilds (e.g. "set k_kbot_weak_stack 100").
+	// Defaults reproduce kbot-0.5.0-discipline exactly.
+	RegisterCvarEx("k_kbot_weak_stack", "70");
+	RegisterCvarEx("k_kbot_weak_rockets", "3");
+	RegisterCvarEx("k_kbot_weak_cells", "15");
+	RegisterCvarEx("k_kbot_version_suffix", "");
+
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
 		RegisterCvarEx(va("k_fb_name_%d", i), "");
