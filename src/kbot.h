@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.8.0-tunable"
+#define KBOT_VERSION "kbot-0.10.0-fleespeed"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -44,6 +44,16 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+
+// ---- Flee speed (WP3.7, kbot_main.c, owner-designed) ----
+// Per-frame jump decision for disciplined-weak kbots moving out of combat:
+// bunnyhop along the vanilla-chosen route (speed only, zero steering).
+// Engage gates: weak + no visible enemy + k_kbot_flee_cooldown since damage
+// given/taken + corridor clearance. Instant drop, cooldown re-arm.
+qbool KBot_FleeSpeedJump(gedict_t *self);
+// Damage-GIVEN stamp for the flee cooldown (kbot attackers only); called
+// from BotDamageInflictedEvent.
+void KBot_NoteDamageGiven(gedict_t *attacker);
 
 #endif // BOT_SUPPORT
 

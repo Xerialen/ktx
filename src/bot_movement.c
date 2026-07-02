@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 #define ARROW_TIME_INCREASE       0.15  // Seconds to advance after NewVelocityForArrow
 #define MIN_DEAD_TIME 0.2f
@@ -6109,6 +6110,19 @@ void BotSetCommand(gedict_t *self)
 
 	jumping = self->fb.jumping || self->fb.waterjumping;
 	firing = self->fb.firing;
+
+	// KBOT (WP3.7 fleespeed): speed ONLY on the flee vector. A disciplined-
+	// weak kbot moving out of combat bunnyhops along the route vanilla
+	// already chose -- this only ADDS a jump press; steering/direction stay
+	// 100% vanilla (the jump routes through vanilla's own
+	// BestJumpingDirection below, like any organic jump). Placed BEFORE all
+	// overrides, so dbg_countdown, dead (BotRequestRespawn), prewar freeze
+	// and lab moveprobe modes all retain authority. Never overrides a jump
+	// vanilla itself requested. Baseline bots (fb.kbot == 0) short-circuit.
+	if (!jumping && self->fb.kbot && KBot_FleeSpeedJump(self))
+	{
+		jumping = true;
+	}
 
 	self->fb.waterjumping = false;
 

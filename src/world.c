@@ -1074,6 +1074,8 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_rockets", "3");
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
+	// KBOT (WP3.7): flee-speed cooldown (kbot-0.10.0-fleespeed).
+	RegisterCvarEx("k_kbot_flee_cooldown", "1.5");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
