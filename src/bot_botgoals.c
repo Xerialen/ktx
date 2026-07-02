@@ -472,7 +472,17 @@ void UpdateGoal(gedict_t *self)
 
 	for (i = 0; i < NUMBER_GOALS; ++i)
 	{
-		EvalGoal(self, self->fb.touch_marker->fb.goals[i].next_marker->fb.virtual_goal);
+		// NULL-guard (M3 crash class): route-calc backfills every real
+		// marker's empty goal slots with dropper, so next_marker is never
+		// NULL for markers -- but touch_marker can end up on an entity that
+		// never went through the backfill (fb.goals[] all NULL). Skipping is
+		// exactly what EvalGoal does for a NULL goal entity anyway.
+		gedict_t *goal_next = self->fb.touch_marker->fb.goals[i].next_marker;
+
+		if (goal_next)
+		{
+			EvalGoal(self, goal_next->fb.virtual_goal);
+		}
 	}
 
 	// Dropped backpacks
