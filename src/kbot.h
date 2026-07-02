@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.8.0-tunable"
+#define KBOT_VERSION "kbot-0.12.0-armorbias"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -44,6 +44,10 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+
+// RA bias (WP3.9, kbot_main.c): desire multiplier for RED armor goals of
+// STRONG kbots (k_kbot_ra_bias, default 1.5; 1.0 = exact vanilla A/B gate).
+float KBot_RaBias(void);
 
 #endif // BOT_SUPPORT
 

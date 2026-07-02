@@ -1074,6 +1074,8 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_rockets", "3");
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
+	// KBOT (WP3.9): RA desire multiplier (kbot-0.12.0-armorbias).
+	RegisterCvarEx("k_kbot_ra_bias", "1.5");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
