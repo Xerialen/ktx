@@ -25,7 +25,12 @@
 // ---- tunables (one place; deterministic -- no g_random in scoring) ----
 #define KBOT_GOAL_MIN_SCORE      2.0f   // best score below this: delegate to vanilla
 #define KBOT_GOAL_SWITCH_FACTOR  1.25f  // challenger must beat the committed goal by 25%
-#define KBOT_GOAL_MAX_EARLY      10.0f  // never commit when wait exceeds ETA by more (s)
+// Max seconds the bot may arrive BEFORE the item spawns (its standing-around
+// budget). Was 10 s in 0.4.0: bots parked on contested spawn points -- free
+// frags for the enemy and an idle-honesty-gate risk (one 0.4.0 run was
+// rejected at >10% idle). 4 s keeps the spawn-race play alive (the timing
+// window below is 3 s) while capping stationary time well under the idle bar.
+#define KBOT_GOAL_MAX_EARLY      4.0f
 #define KBOT_GOAL_TIMING_WINDOW  3.0f   // |wait - ETA| window for the timed-arrival bonus
 #define KBOT_GOAL_TIMING_BONUS   1.35f  // reward plays that arrive at the spawn moment
 #define KBOT_GOAL_TEAM_DECAY     0.30f  // a closer same-team player already owns this goal
@@ -60,8 +65,21 @@ static gedict_t *kbot_goal_current[MAX_CLIENTS];
 // the same primitives EvalGoal uses (ZoneMarker + SubZoneArrivalTime -- the
 // latter NULL-guards route-table holes since the M2 crash fix). >= 1000000
 // means unreachable. NULL markers mean unreachable.
+//
+// Sentinel fallback (0.4.1): reachability must never depend on the zone-table
+// primitive alone. Offline reproduction of the zone relaxation over the real
+// dm3 FBMARKER dump measured 1.6% of (from-marker x major-item) pairs at the
+// dropper/1e6 sentinel (5 dead markers account for nearly all of it) -- and
+// other maps' graphs can be sparser. When both markers exist but the table
+// says unreachable, fall back to straight-line 3D distance / 320 ups: an
+// imperfect, roughly distance-ranked ETA that keeps the item selectable.
+// Frogbot's own pathing reaches every goal without this primitive, so a
+// selected goal is still walkable. NULL markers stay unreachable (pathing
+// genuinely cannot route there); the NULL guards stay untouched.
 static float KBot_TravelTime(gedict_t *player, gedict_t *item)
 {
+	float t;
+
 	if (!player || !item || !player->fb.touch_marker || !item->fb.touch_marker)
 	{
 		return KBOT_UNREACHABLE;
@@ -69,8 +87,19 @@ static float KBot_TravelTime(gedict_t *player, gedict_t *item)
 
 	ZoneMarker(player->fb.touch_marker, item->fb.touch_marker, true,
 			   player->fb.canRocketJump);
-	return SubZoneArrivalTime(zone_time, middle_marker, item->fb.touch_marker,
-							  player->fb.canRocketJump);
+	t = SubZoneArrivalTime(zone_time, middle_marker, item->fb.touch_marker,
+						   player->fb.canRocketJump);
+	if (t >= 1000000.0f)
+	{
+		vec3_t item_pos, diff;
+
+		VectorAdd(item->fb.touch_marker->s.v.absmin,
+				  item->fb.touch_marker->s.v.view_ofs, item_pos);
+		VectorSubtract(item_pos, player->s.v.origin, diff);
+		t = VectorLength(diff) / 320.0f;
+	}
+
+	return t;
 }
 
 // Stack-aware need multiplier: how much THIS bot wants THIS item right now.
