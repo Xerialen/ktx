@@ -2,6 +2,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 #define YAW_SNAP_THRESHOLD     4
 #define PITCH_SNAP_THRESHOLD   6
@@ -193,6 +194,24 @@ static void BotsAimAtPlayerLogic(gedict_t *self, vec3_t rel_pos, float *rel_dist
 		else if (cvar("k_midair") && (self->super_damage_finished > g_globalvars.time))
 		{
 			rel_time *= 0.5;
+		}
+
+		// KBOT (WP3.8): second-order rocket lead. Vanilla's rel_time above is
+		// the flight time to the target's CURRENT position (first-order);
+		// refine it toward the true intercept with a fixed-point solve, RL
+		// only (impulse 7), sweep-gated by k_kbot_combat_lead. The effective
+		// projectile speed is back-derived from vanilla's own computation
+		// (*rel_dist / rel_time), so every branch above (incl. midair-quad)
+		// keeps authority. Everything downstream is untouched: the same
+		// PredictEnemyLocationInFuture floor-projects the point (splash aim)
+		// and the vanilla error model / reaction time still apply. Baseline
+		// bots (fb.kbot == 0) short-circuit.
+		if (self->fb.kbot && (self->fb.desired_weapon_impulse == 7) && (rel_time > 0)
+			&& self->s.v.enemy && (self->fb.look_object == &g_edicts[self->s.v.enemy])
+			&& KBot_CombatLeadEnabled())
+		{
+			rel_time = KBot_RefineInterceptTime(self, &g_edicts[self->s.v.enemy],
+												rel_time, *rel_dist / rel_time);
 		}
 
 		if (self->s.v.enemy && (self->fb.look_object == &g_edicts[self->s.v.enemy]))

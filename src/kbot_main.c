@@ -84,8 +84,9 @@ void KBot_MarkBot(gedict_t *bot)
 	// Ledger honesty (WP3.5): record the effective tunables with every stamp
 	// so run evidence captures the swept settings without perturbing the
 	// identity match above.
-	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d\n",
-				KBot_WeakStack(), KBot_ArmedRockets(), KBot_ArmedCells());
+	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d lead=%d\n",
+				KBot_WeakStack(), KBot_ArmedRockets(), KBot_ArmedCells(),
+				KBot_CombatLeadEnabled() ? 1 : 0);
 }
 
 // Per-frame brain entry point. WP2.1: pure delegation -- log identity once,
@@ -132,6 +133,56 @@ qbool KBot_AvoidFights(gedict_t *self)
 	}
 
 	return false;
+}
+
+// ---- WP3.8: rocket lead (kbot-0.11.0-rocketlead) ----
+//
+// Diagnosis: vanilla DOES lead velocity weapons, but only first-order --
+// BotsAimAtPlayerLogic computes rel_time from the distance to the target
+// CURRENT position, then extrapolates linearly. Against a lateral/retreating
+// target at 300+ ups and 500+ qu, the intercept distance differs from the
+// current distance by up to ~30%, so rockets consistently trail. This lever
+// refines ONLY that time with a fixed-point intercept solve; the vanilla
+// error model (volatility/rndaim), reaction time (awareness_delay /
+// min_fire_time) and floor projection (PredictSpot walkmove/droptofloor,
+// i.e. splash aim) all stay untouched. RL only; gated by k_kbot_combat_lead.
+
+qbool KBot_CombatLeadEnabled(void)
+{
+	return cvar("k_kbot_combat_lead") != 0;
+}
+
+// Fixed-point intercept: t_next = |enemy_pos(t) - self_pos| / speed.
+// Three iterations converge to well under a frame of error for any closing
+// speed a QW player can produce (contraction factor ~ target_speed /
+// projectile_speed <= ~0.5). Falls back to vanilla first-order time when
+// the solve leaves sane bounds (diverging geometry / > 2 s intercepts,
+// where PredictSpot validation degrades anyway).
+float KBot_RefineInterceptTime(gedict_t *self, gedict_t *enemy, float t0,
+							   float projectile_speed)
+{
+	float t = t0;
+	vec3_t p, d;
+	int i;
+
+	if (!enemy || (projectile_speed <= 0))
+	{
+		return t0;
+	}
+
+	for (i = 0; i < 3; ++i)
+	{
+		VectorMA(enemy->s.v.origin, t, enemy->s.v.velocity, p);
+		VectorSubtract(p, self->s.v.origin, d);
+		t = VectorLength(d) / projectile_speed;
+	}
+
+	if ((t <= 0) || (t > 2.0f))
+	{
+		return t0;
+	}
+
+	return t;
 }
 
 #endif // BOT_SUPPORT

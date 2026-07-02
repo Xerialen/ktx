@@ -1074,6 +1074,8 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_rockets", "3");
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
+	// KBOT (WP3.8): second-order RL intercept gate (kbot-0.11.0-rocketlead).
+	RegisterCvarEx("k_kbot_combat_lead", "1");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{

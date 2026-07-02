@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.8.0-tunable"
+#define KBOT_VERSION "kbot-0.11.0-rocketlead"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -44,6 +44,14 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+
+// ---- Rocket lead (WP3.8, kbot_main.c) ----
+// Sweep gate for the second-order RL intercept (k_kbot_combat_lead, def 1).
+qbool KBot_CombatLeadEnabled(void);
+// Fixed-point refinement of vanilla first-order projectile flight time
+// toward the true intercept; falls back to t0 outside sane bounds.
+float KBot_RefineInterceptTime(gedict_t *self, gedict_t *enemy, float t0,
+							   float projectile_speed);
 
 #endif // BOT_SUPPORT
 
