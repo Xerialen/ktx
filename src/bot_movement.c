@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 #define ARROW_TIME_INCREASE       0.15  // Seconds to advance after NewVelocityForArrow
 #define MIN_DEAD_TIME 0.2f
@@ -3202,6 +3203,18 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		perslot_hold = 1;
 		mode = 0;
 	}
+	// KBOT (WP4.0): BUNNY TRAVEL -- route through the mode-23 air-strafe
+	// actuation (the +19% law, intact in this file) ONLY when the travel
+	// gates hold: no visible enemy, straight segment, clearance, damage
+	// cooldown (all inside KBot_BunnyTravel, kbot_main.c). Any gate breaks
+	// -> this evaluates false the SAME frame and vanilla movement runs.
+	// Explicit per-slot lab mode cvars and the loud-fail hold still win.
+	// Baseline bots (fb.kbot == 0) short-circuit; k_kbot_bunny 0 disables
+	// entirely (byte-identical vanilla behavior).
+	if (self->fb.kbot && !perslot_hold && !mode_from_slot && KBot_BunnyTravel(self))
+	{
+		mode = 23;
+	}
 	if ((slot >= 0) && (slot < MAX_CLIENTS) && fb_moveprobe_perslot_goal_error[slot])
 	{
 		perslot_hold = 1;
@@ -5954,6 +5967,12 @@ static void BotLogMoveProbeCommand(gedict_t *self, int cmd_msec, vec3_t directio
 		if (BotMoveProbeCvarIntForBot(self, "mode", &mode, &mode_from_slot) < 0)
 		{
 			mode = -1; // held by the per-slot loud-fail contract; mark the row
+		}
+		else if (self->fb.kbot && !mode_from_slot && KBot_BunnyActive(self))
+		{
+			// KBOT (WP4.0): mirror the dispatch effective mode (the logger
+			// runs after BotApplyMoveProbe, so this is the frame value).
+			mode = 23;
 		}
 	}
 

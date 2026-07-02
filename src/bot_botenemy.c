@@ -8,6 +8,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 // Removes the look object for the given player
 void ClearLookObject(gedict_t *player)
@@ -27,6 +28,10 @@ void LookEnemy(gedict_t *player, gedict_t *enemy)
 void BotDamageInflictedEvent(gedict_t *attacker, gedict_t *targ)
 {
 	targ->fb.last_hurt = g_globalvars.time;
+
+	// KBOT (WP4.0): damage-GIVEN stamp for the bunny cooldown (no-op unless
+	// the attacker is a kbot; damage TAKEN reuses last_hurt above).
+	KBot_NoteDamageGiven(attacker);
 
 	if (targ->isBot)
 	{

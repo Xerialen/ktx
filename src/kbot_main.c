@@ -47,6 +47,26 @@ static int KBot_ArmedCells(void)
 	return (v <= 0) ? 15 : v;
 }
 
+// ---- WP4.0 bunny tunables (kbot-0.13.0-bunny) ----
+static qbool KBot_BunnyEnabled(void)
+{
+	return cvar("k_kbot_bunny") != 0;
+}
+
+static float KBot_BunnyMaxTurn(void)
+{
+	float v = cvar("k_kbot_bunny_maxturn");
+
+	return (v <= 0) ? 30.0f : v;
+}
+
+static float KBot_BunnyCooldown(void)
+{
+	float v = cvar("k_kbot_bunny_cooldown");
+
+	return (v <= 0) ? 1.5f : v;
+}
+
 void KBot_MarkBot(gedict_t *bot)
 {
 	char newname[CLIENT_NAME_LEN];
@@ -84,8 +104,10 @@ void KBot_MarkBot(gedict_t *bot)
 	// Ledger honesty (WP3.5): record the effective tunables with every stamp
 	// so run evidence captures the swept settings without perturbing the
 	// identity match above.
-	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d\n",
-				KBot_WeakStack(), KBot_ArmedRockets(), KBot_ArmedCells());
+	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d bunny=%d maxturn=%d cooldown=%.1f\n",
+				KBot_WeakStack(), KBot_ArmedRockets(), KBot_ArmedCells(),
+				KBot_BunnyEnabled() ? 1 : 0, (int)KBot_BunnyMaxTurn(),
+				KBot_BunnyCooldown());
 }
 
 // Per-frame brain entry point. WP2.1: pure delegation -- log identity once,
@@ -132,6 +154,176 @@ qbool KBot_AvoidFights(gedict_t *self)
 	}
 
 	return false;
+}
+
+// ---- WP4.0: bunny travel actuation gate (kbot-0.13.0-bunny) ----
+//
+// Track B (owner decision): real air-strafe-synced bunny as TRAVEL movement.
+// The actuation itself is the intact in-tree mode-23 weave (bot_movement.c:
+// per-frame wishdir held acos(numerator/speed) off velocity toward the nav
+// bearing -- the cs->0 air-accel law that measured +19% straight-line). This
+// gate decides WHEN a kbot may run it; everything about HOW is untouched
+// mode-23 machinery (incl. stairs delegation, water fallthrough, and the
+// fl_marker-guarded carrot -- both crash guards cherry-picked onto this
+// branch). Fleespeed lesson honored: vanilla steering cannot corner in the
+// air, so bunny runs ONLY on straight segments and releases to vanilla
+// ground movement BEFORE curves. Applies to ALL kbots (tempo is the point);
+// travel-only is the gate, never combat.
+
+#define KBOT_BUNNY_PROBE_FWD   80.0f	// forward clearance probe (qu)
+#define KBOT_BUNNY_PROBE_UP    56.0f	// headroom probe (player height)
+#define KBOT_BUNNY_PROBE_APEX  40.0f	// forward probe at jump-apex height
+#define KBOT_BUNNY_MIN_SPEED   100.0f	// below this, heading = route direction
+
+static float kbot_bunny_dmg_given[MAX_CLIENTS];	// last damage DEALT (cooldown)
+static int kbot_bunny_active[MAX_CLIENTS];		// engage state (telemetry)
+
+// Damage-GIVEN stamp, called from BotDamageInflictedEvent (kbot attackers
+// only; damage TAKEN uses the vanilla fb.last_hurt stamp set right there).
+void KBot_NoteDamageGiven(gedict_t *attacker)
+{
+	int slot;
+
+	if (!attacker || !attacker->fb.kbot)
+	{
+		return;
+	}
+	slot = NUM_FOR_EDICT(attacker) - 1;
+	if ((slot < 0) || (slot >= MAX_CLIENTS))
+	{
+		return;
+	}
+	kbot_bunny_dmg_given[slot] = g_globalvars.time;
+}
+
+// Cheap conservative corridor check along the flight heading (the fleespeed
+// probe pattern): headroom + body-height forward + jump-apex forward.
+static qbool KBot_BunnyClearance(gedict_t *self, vec3_t fwd)
+{
+	vec3_t start, end;
+
+	VectorCopy(self->s.v.origin, start);
+	VectorCopy(start, end);
+	end[2] += KBOT_BUNNY_PROBE_UP;
+	traceline(PASSVEC3(start), PASSVEC3(end), false, self);
+	if (g_globalvars.trace_fraction < 1)
+	{
+		return false;
+	}
+
+	VectorMA(self->s.v.origin, KBOT_BUNNY_PROBE_FWD, fwd, end);
+	traceline(PASSVEC3(self->s.v.origin), PASSVEC3(end), false, self);
+	if (g_globalvars.trace_fraction < 1)
+	{
+		return false;
+	}
+
+	VectorCopy(self->s.v.origin, start);
+	start[2] += KBOT_BUNNY_PROBE_APEX;
+	VectorMA(start, KBOT_BUNNY_PROBE_FWD, fwd, end);
+	traceline(PASSVEC3(start), PASSVEC3(end), false, self);
+
+	return g_globalvars.trace_fraction >= 1;
+}
+
+// Per-frame engage decision, called from the moveprobe dispatch. True =
+// route this frame through the mode-23 actuation. Every false path drops
+// the SAME frame (vanilla movement immediately); the damage/enemy paths
+// re-arm only after k_kbot_bunny_cooldown, geometry paths re-arm as soon as
+// the segment is straight and clear again.
+qbool KBot_BunnyTravel(gedict_t *self)
+{
+	int slot = NUM_FOR_EDICT(self) - 1;
+	float now = g_globalvars.time;
+	float cd = KBot_BunnyCooldown();
+	vec3_t cur, bear;
+	float delta, speed_sq;
+
+	if ((slot < 0) || (slot >= MAX_CLIENTS))
+	{
+		return false;
+	}
+	kbot_bunny_active[slot] = 0;
+
+	if (!KBot_BunnyEnabled())	// k_kbot_bunny 0 = byte-identical vanilla
+	{
+		return false;
+	}
+	if (ISDEAD(self) || intermission_running || (self->s.v.waterlevel > 1))
+	{
+		return false;
+	}
+	// TRAVEL ONLY: no visible target enemy (frogbots own engagement signal).
+	if (self->fb.look_object && (self->fb.look_object->ct == ctPlayer))
+	{
+		return false;
+	}
+	// Damage cooldown, given or taken; stale future stamps healed.
+	if (self->fb.last_hurt > now)
+	{
+		self->fb.last_hurt = 0;
+	}
+	if (kbot_bunny_dmg_given[slot] > now)
+	{
+		kbot_bunny_dmg_given[slot] = 0;
+	}
+	if (((now - self->fb.last_hurt) < cd) || ((now - kbot_bunny_dmg_given[slot]) < cd))
+	{
+		return false;
+	}
+	// STRAIGHT SEGMENTS ONLY: current heading (horizontal velocity when
+	// moving, else the route direction) vs bearing to the linked marker must
+	// agree within k_kbot_bunny_maxturn -- release to vanilla BEFORE curves.
+	VectorCopy(self->s.v.velocity, cur);
+	cur[2] = 0;
+	speed_sq = cur[0] * cur[0] + cur[1] * cur[1];
+	if (speed_sq < KBOT_BUNNY_MIN_SPEED * KBOT_BUNNY_MIN_SPEED)
+	{
+		VectorCopy(self->fb.dir_move_, cur);
+		cur[2] = 0;
+	}
+	if (VectorNormalize(cur) <= 0)
+	{
+		return false;
+	}
+	if (self->fb.linked_marker && (self->fb.linked_marker != self->fb.touch_marker))
+	{
+		VectorAdd(self->fb.linked_marker->s.v.absmin,
+				  self->fb.linked_marker->s.v.view_ofs, bear);
+		VectorSubtract(bear, self->s.v.origin, bear);
+	}
+	else
+	{
+		VectorCopy(self->fb.dir_move_, bear);
+	}
+	bear[2] = 0;
+	if (VectorNormalize(bear) <= 0)
+	{
+		return false;
+	}
+	delta = vectoyaw(bear) - vectoyaw(cur);
+	while (delta > 180.0f) delta -= 360.0f;
+	while (delta < -180.0f) delta += 360.0f;
+	if ((delta > KBot_BunnyMaxTurn()) || (delta < -KBot_BunnyMaxTurn()))
+	{
+		return false;
+	}
+	// CLEARANCE along the flight heading.
+	if (!KBot_BunnyClearance(self, cur))
+	{
+		return false;
+	}
+
+	kbot_bunny_active[slot] = 1;
+	return true;
+}
+
+// Side-effect-free engage-state query (telemetry mirror in the logger).
+qbool KBot_BunnyActive(gedict_t *self)
+{
+	int slot = NUM_FOR_EDICT(self) - 1;
+
+	return (slot >= 0) && (slot < MAX_CLIENTS) && (kbot_bunny_active[slot] != 0);
 }
 
 #endif // BOT_SUPPORT

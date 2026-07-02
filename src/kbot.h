@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.8.0-tunable"
+#define KBOT_VERSION "kbot-0.13.0-bunny"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -44,6 +44,17 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+
+// ---- Bunny travel (WP4.0, kbot_main.c, owner track B) ----
+// Per-frame gate routing a kbot through the in-tree mode-23 air-strafe
+// actuation for TRAVEL only: no visible enemy, straight route segment
+// (k_kbot_bunny_maxturn), corridor clearance, damage cooldown
+// (k_kbot_bunny_cooldown). k_kbot_bunny 0 = byte-identical vanilla.
+qbool KBot_BunnyTravel(gedict_t *self);
+// Side-effect-free engage-state query (telemetry mirror only).
+qbool KBot_BunnyActive(gedict_t *self);
+// Damage-GIVEN stamp for the bunny cooldown (kbot attackers only).
+void KBot_NoteDamageGiven(gedict_t *attacker);
 
 #endif // BOT_SUPPORT
 

@@ -1074,6 +1074,10 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_rockets", "3");
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
+	// KBOT (WP4.0): bunny travel actuation gates (kbot-0.13.0-bunny).
+	RegisterCvarEx("k_kbot_bunny", "1");
+	RegisterCvarEx("k_kbot_bunny_maxturn", "30");
+	RegisterCvarEx("k_kbot_bunny_cooldown", "1.5");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
