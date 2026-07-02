@@ -103,6 +103,16 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 			return;
 		}
 
+		// KBOT (WP3.2): item-claim dedup. A live same-team kbot with a fresh
+		// CLOSER claim on this major item owns it -- skip the goal (same
+		// contract as GoalLeaveForTeammate above) so the vanilla economy
+		// picks our next-best goal. Baseline bots (fb.kbot == 0) never take
+		// this branch; claims are only ever written by kbots.
+		if (self->fb.kbot && KBot_GoalClaimedByTeammate(self, goal_entity))
+		{
+			return;
+		}
+
 		// If item isn't going to respawn before match end
 		if (match_end_time && goal_entity->fb.goal_respawn_time > match_end_time)
 		{
@@ -546,10 +556,23 @@ void UpdateGoal(gedict_t *self)
 
 		self->s.v.goalentity = NUM_FOR_EDICT(self->fb.best_goal2);
 		self->fb.goal_respawn_time = g_globalvars.time + self->fb.best_goal2->fb.saved_respawn_time;
+
+		// KBOT (WP3.2): publish the commitment on the team blackboard --
+		// majors create/refresh a TTL'd claim, anything else releases ours.
+		if (self->fb.kbot)
+		{
+			KBot_ClaimGoal(self, self->fb.best_goal2);
+		}
 	}
 	else
 	{
 		self->s.v.goalentity = NUM_FOR_EDICT(world);
+
+		// KBOT (WP3.2): no goal committed -- release any claim we held.
+		if (self->fb.kbot)
+		{
+			KBot_ClaimGoal(self, NULL);
+		}
 	}
 }
 

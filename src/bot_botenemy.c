@@ -8,6 +8,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 // Removes the look object for the given player
 void ClearLookObject(gedict_t *player)
@@ -113,8 +114,8 @@ void BotsSoundMadeEvent(gedict_t *entity)
 
 // FIXME: Globals (from_marker, to_marker, etc)
 // Evaluates a potential enemy (globals: path_normal)
-static void BestEnemy_apply(gedict_t *test_enemy, float *best_score, gedict_t **enemy_,
-							float *predict_dist)
+static void BestEnemy_apply(gedict_t *picker, gedict_t *test_enemy, float *best_score,
+							gedict_t **enemy_, float *predict_dist)
 {
 	float enemy_score;
 
@@ -132,6 +133,16 @@ static void BestEnemy_apply(gedict_t *test_enemy, float *best_score, gedict_t **
 	{
 		look_marker = SightMarker(from_marker, to_marker, 0, 0);
 		enemy_score = look_traveltime + g_random();
+	}
+
+	// KBOT (WP3.2): focus fire. Enemies a teammate already engages / enemies
+	// already hurt score better (enemy_score is travel-time-shaped; lower
+	// wins). Guards: only for kbots; only when the score is a real route
+	// (an unreachable 1e6 sentinel minus a bonus must never win -- and the
+	// look_marker == NULL case below would dereference NULL if it could).
+	if (picker->fb.kbot && look_marker && (enemy_score < 100000.0f))
+	{
+		enemy_score -= KBot_FocusFireBonus(picker, test_enemy);
 	}
 
 	if (enemy_score < *best_score)
@@ -168,10 +179,10 @@ qbool BotsPickBestEnemy(gedict_t *self)
 			if (from_marker)
 			{
 				to_marker = self->fb.touch_marker;
-				BestEnemy_apply(test_enemy, &best_score, &enemy_, &predict_dist);
+				BestEnemy_apply(self, test_enemy, &best_score, &enemy_, &predict_dist);
 				to_marker = from_marker;
 				from_marker = self->fb.touch_marker;
-				BestEnemy_apply(test_enemy, &best_score, &enemy_, &predict_dist);
+				BestEnemy_apply(self, test_enemy, &best_score, &enemy_, &predict_dist);
 			}
 		}
 	}
