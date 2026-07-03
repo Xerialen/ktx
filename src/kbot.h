@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.12.0-armorbias"
+#define KBOT_VERSION "kbot-0.14.0-policyvec"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -45,9 +45,13 @@ qbool KBot_Frame(gedict_t *self);
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
 
-// RA bias (WP3.9, kbot_main.c): desire multiplier for RED armor goals of
-// STRONG kbots (k_kbot_ra_bias, default 1.5; 1.0 = exact vanilla A/B gate).
-float KBot_RaBias(void);
+// Policy vector (WP4.1, kbot_main.c): bounded multiplicative modulations of
+// vanilla desire flow for STRONG kbots. Neutral 1.0 = exact vanilla; reads
+// clamped to [0.25, 4.0] (ES-optimizer robustness).
+float KBot_RaBias(void);	// RED armor (item_armorInv) desire scale
+float KBot_YaBias(void);	// YELLOW armor (item_armor2) desire scale
+float KBot_QuadBias(void);	// quad (item_artifact_super_damage) desire scale
+float KBot_HuntScale(void);	// hunt/enemy-goal desire scale
 
 #endif // BOT_SUPPORT
 

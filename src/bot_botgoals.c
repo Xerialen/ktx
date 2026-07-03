@@ -99,9 +99,20 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 	// Bias 1.0 is exact vanilla behavior (A/B gate). Baseline bots
 	// (fb.kbot == 0) cannot take this branch.
 	if (self->fb.kbot && (goal_desire > 0) && goal_entity->classname
-		&& streq(goal_entity->classname, "item_armorInv") && !KBot_AvoidFights(self))
+		&& !KBot_AvoidFights(self))
 	{
-		goal_desire *= KBot_RaBias();
+		if (streq(goal_entity->classname, "item_armorInv"))
+		{
+			goal_desire *= KBot_RaBias();	// RED armor (NOT armor2 -- that is YA)
+		}
+		else if (streq(goal_entity->classname, "item_armor2"))
+		{
+			goal_desire *= KBot_YaBias();	// YELLOW armor
+		}
+		else if (streq(goal_entity->classname, "item_artifact_super_damage"))
+		{
+			goal_desire *= KBot_QuadBias();
+		}
 	}
 
 	if (self->fb.fixed_goal != NULL)
@@ -454,6 +465,17 @@ void UpdateGoal(gedict_t *self)
 		if (self->fb.kbot && (self->fb.goal_enemy_desire > 0) && KBot_AvoidFights(self))
 		{
 			self->fb.goal_enemy_desire = 0;
+		}
+		// KBOT (WP4.1): hunt scale -- bounded multiplicative modulation of the
+		// hunt desire for STRONG kbots (weak already have hunt = 0 via the
+		// discipline clear above). Desire domain, before travel-time
+		// normalization and before EnemyGoalLogic reads the same field.
+		// 1.0 = exact vanilla (identity); positive-desire guard means the
+		// scale can never resurrect a zeroed/negative desire or touch the
+		// repel path. Baseline bots (fb.kbot == 0) cannot take this branch.
+		else if (self->fb.kbot && (self->fb.goal_enemy_desire > 0))
+		{
+			self->fb.goal_enemy_desire *= KBot_HuntScale();
 		}
 		if (self->fb.goal_enemy_desire > 0)
 		{

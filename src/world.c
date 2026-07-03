@@ -1074,8 +1074,13 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_rockets", "3");
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
-	// KBOT (WP3.9): RA desire multiplier (kbot-0.12.0-armorbias).
-	RegisterCvarEx("k_kbot_ra_bias", "1.5");
+	// KBOT (WP4.1): policy vector (kbot-0.14.0-policyvec). All scales are
+	// neutral at 1.0 (= exact vanilla, the null-probe A/B gate) and clamped
+	// to [0.25, 4.0] on read.
+	RegisterCvarEx("k_kbot_hunt_scale", "1.0");
+	RegisterCvarEx("k_kbot_ra_bias", "1.0");
+	RegisterCvarEx("k_kbot_ya_bias", "1.0");
+	RegisterCvarEx("k_kbot_quad_bias", "1.0");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{

@@ -30,34 +30,69 @@ static int KBot_WeakStack(void)
 {
 	int v = (int)cvar("k_kbot_weak_stack");
 
-	return (v <= 0) ? 70 : v;
+	return (v <= 0) ? 70 : ((v > 400) ? 400 : v);	// cap: optimizer robustness
 }
 
 static int KBot_ArmedRockets(void)
 {
 	int v = (int)cvar("k_kbot_weak_rockets");
 
-	return (v <= 0) ? 3 : v;
+	return (v <= 0) ? 3 : ((v > 100) ? 100 : v);	// cap: optimizer robustness
 }
 
 static int KBot_ArmedCells(void)
 {
 	int v = (int)cvar("k_kbot_weak_cells");
 
-	return (v <= 0) ? 15 : v;
+	return (v <= 0) ? 15 : ((v > 200) ? 200 : v);	// cap: optimizer robustness
 }
 
-// WP3.9: RA desire multiplier for strong kbots (1.0 = exact vanilla A/B).
-static float KBot_RaBiasVal(void)
-{
-	float v = cvar("k_kbot_ra_bias");
+// ---- WP4.1 policy vector (kbot-0.14.0-policyvec) ----
+// Every knob is a BOUNDED MODULATION of vanilla flow: a multiplicative scale
+// (or threshold) whose neutral value reproduces vanilla EXACTLY. The ES
+// optimizer may hand us garbage: scales are clamped to [0.25, 4.0] and never
+// crash the server; unset/<= 0 reads fall back to neutral 1.0.
+#define KBOT_KNOB_MIN 0.25f
+#define KBOT_KNOB_MAX 4.0f
 
-	return (v <= 0) ? 1.5f : v;
+static float KBot_PolicyKnob(const char *cvname)
+{
+	float v = cvar((char *)cvname);
+
+	if (v <= 0)
+	{
+		return 1.0f;	// unset/garbage: neutral = exact vanilla
+	}
+	if (v < KBOT_KNOB_MIN)
+	{
+		return KBOT_KNOB_MIN;
+	}
+	if (v > KBOT_KNOB_MAX)
+	{
+		return KBOT_KNOB_MAX;
+	}
+
+	return v;
 }
 
 float KBot_RaBias(void)
 {
-	return KBot_RaBiasVal();
+	return KBot_PolicyKnob("k_kbot_ra_bias");
+}
+
+float KBot_YaBias(void)
+{
+	return KBot_PolicyKnob("k_kbot_ya_bias");
+}
+
+float KBot_QuadBias(void)
+{
+	return KBot_PolicyKnob("k_kbot_quad_bias");
+}
+
+float KBot_HuntScale(void)
+{
+	return KBot_PolicyKnob("k_kbot_hunt_scale");
 }
 
 void KBot_MarkBot(gedict_t *bot)
@@ -97,9 +132,9 @@ void KBot_MarkBot(gedict_t *bot)
 	// Ledger honesty (WP3.5): record the effective tunables with every stamp
 	// so run evidence captures the swept settings without perturbing the
 	// identity match above.
-	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d ra_bias=%.2f\n",
+	G_cprint("[kbot-config] ws=%d rockets=%d cells=%d hunt=%.2f ra=%.2f ya=%.2f quad=%.2f\n",
 				KBot_WeakStack(), KBot_ArmedRockets(), KBot_ArmedCells(),
-				KBot_RaBiasVal());
+				KBot_HuntScale(), KBot_RaBias(), KBot_YaBias(), KBot_QuadBias());
 }
 
 // Per-frame brain entry point. WP2.1: pure delegation -- log identity once,
