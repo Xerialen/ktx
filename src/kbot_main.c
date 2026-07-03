@@ -134,4 +134,178 @@ qbool KBot_AvoidFights(gedict_t *self)
 	return false;
 }
 
+
+// ---- E1: carve-law verification rig (kbot-0.15.0-e1, lab mode) ----
+//
+// Verifies the bunnyhop-integration-theory decoupling theorem live (theory
+// doc section 2.2 + experiment E1): wishdir depends only on view yaw and the
+// fmove:smove ratio, so a bot can air-strafe optimally with the VIEW PINNED.
+// Two arms, k_kbot_e1_mode: 1 = c=0 carve (world wishdir = horizontal
+// velocity rotated exactly 90 deg, side ALTERNATING EVERY FRAME -> zero net
+// rotation, straight line); 2 = gen-1 mode-13 law (wishdir at
+// acos(26/speed) off velocity, single-sided) as the control arm. Both arms:
+// view yaw pinned to k_kbot_e1_yaw (written as the same constant every
+// frame -- never steered), wishdir projected through the pinned yaw into
+// fmove/smove (the bot_movement.c dir_move_ projection seam), jump released
+// and re-pressed on the exact ground-contact frame (mode-13 toggle latch =
+// frame-perfect, friction-free hops). Telemetry: grep-able [e1] lines every
+// ~0.1 s with horizontal speed and the ACTUAL server-side view yaw (proves
+// the pin). Passes auto-reset by teleport to k_kbot_e1_start every
+// k_kbot_e1_pass seconds. Lab-only: inert at k_kbot_e1_mode 0 (default).
+
+static int e1_mode_active[MAX_CLIENTS];
+static int e1_pass_num[MAX_CLIENTS];
+static float e1_pass_start[MAX_CLIENTS];
+static float e1_flip[MAX_CLIENTS];
+static qbool e1_jump_latch[MAX_CLIENTS];
+static float e1_last_log[MAX_CLIENTS];
+
+static void KBot_E1Teleport(gedict_t *self)
+{
+	char buf[64];
+	float x, y, z;
+
+	trap_cvar_string("k_kbot_e1_start", buf, sizeof(buf));
+	if (buf[0] && (sscanf(buf, "%f %f %f", &x, &y, &z) == 3))
+	{
+		vec3_t org;
+
+		VectorSet(org, x, y, z);
+		setorigin(self, PASSVEC3(org));
+	}
+	VectorSet(self->s.v.velocity, 0, 0, 0);
+}
+
+// Returns true when the lab mode owns this frame (BotSetCommand then sends
+// exactly our command). False = inert, vanilla untouched.
+qbool KBot_E1Frame(gedict_t *self, qbool *jumping, qbool *firing, int *impulse,
+				   vec3_t direction)
+{
+	int slot = NUM_FOR_EDICT(self) - 1;
+	int mode = (int)cvar("k_kbot_e1_mode");
+	float now = g_globalvars.time;
+	float pass_len = cvar("k_kbot_e1_pass");
+	float pinned_yaw = cvar("k_kbot_e1_yaw");
+	float speed, rot;
+	qbool onground = ((int)self->s.v.flags & FL_ONGROUND) ? true : false;
+	qbool press;
+	vec3_t cur, wish, ang;
+
+	if ((mode < 1) || (mode > 2) || (slot < 0) || (slot >= MAX_CLIENTS) || ISDEAD(self))
+	{
+		if ((slot >= 0) && (slot < MAX_CLIENTS))
+		{
+			e1_mode_active[slot] = 0;
+		}
+		return false;
+	}
+	if (pass_len < 2)
+	{
+		pass_len = 6.0f;
+	}
+
+	// (Re)init on mode change; pass reset on timer (also heals time resets).
+	if (e1_mode_active[slot] != mode)
+	{
+		e1_mode_active[slot] = mode;
+		e1_pass_num[slot] = 1;
+		e1_pass_start[slot] = now;
+		e1_flip[slot] = 1;
+		e1_jump_latch[slot] = false;
+		e1_last_log[slot] = 0;
+		KBot_E1Teleport(self);
+		G_cprint("[e1] init mode=%d pass=1 yaw_pin=%.2f\n", mode, pinned_yaw);
+	}
+	else if (((now - e1_pass_start[slot]) >= pass_len) || (e1_pass_start[slot] > now))
+	{
+		e1_pass_num[slot]++;
+		e1_pass_start[slot] = now;
+		e1_flip[slot] = 1;
+		e1_jump_latch[slot] = false;
+		KBot_E1Teleport(self);
+		G_cprint("[e1] pass=%d mode=%d\n", e1_pass_num[slot], mode);
+	}
+
+	cur[0] = self->s.v.velocity[0];
+	cur[1] = self->s.v.velocity[1];
+	cur[2] = 0;
+	speed = VectorLength(cur);
+
+	if ((speed < 200) || (VectorNormalize(cur) <= 0))
+	{
+		// Bootstrap to run speed straight down the runway (pinned heading).
+		vec3_t fwd_ang = { 0, 0, 0 };
+
+		fwd_ang[YAW] = pinned_yaw;
+		trap_makevectors(fwd_ang);
+		VectorCopy(g_globalvars.v_forward, wish);
+		wish[2] = 0;
+		VectorNormalize(wish);
+	}
+	else if (onground)
+	{
+		// Contact frame: run straight along velocity (mode-13 pattern); the
+		// jump below fires this exact frame, so friction never applies.
+		VectorCopy(cur, wish);
+	}
+	else if (mode == 1)
+	{
+		// ARM A: c = 0 carve. Exactly perpendicular, side alternating EVERY
+		// frame -> zero net rotation, straight line, max gain (900 - c^2).
+		vec3_t up = { 0, 0, 1 };
+
+		RotatePointAroundVector(wish, up, cur, 90.0f * e1_flip[slot]);
+		e1_flip[slot] = -e1_flip[slot];
+		wish[2] = 0;
+		VectorNormalize(wish);
+	}
+	else
+	{
+		// ARM B: gen-1 mode-13 law -- hold c ~= 26 (wishdir acos(26/speed)
+		// off velocity), single-sided (its default). Same rig otherwise.
+		vec3_t up = { 0, 0, 1 };
+		float k = 26.0f;
+		float ratio = (speed > k) ? (k / speed) : 1.0f;
+
+		rot = acos(ratio) * 180.0f / M_PI;
+		RotatePointAroundVector(wish, up, cur, rot);
+		wish[2] = 0;
+		VectorNormalize(wish);
+	}
+
+	// Frame-perfect anti-pogo hop chain (mode-13 toggle latch): press only on
+	// a grounded frame with the button released, release otherwise.
+	press = onground && (speed >= 200) && !e1_jump_latch[slot];
+	e1_jump_latch[slot] = press;
+
+	// VIEW PIN + projection seam: the same world->local projection the
+	// vanilla emitter uses for dir_move_, through the PINNED yaw. The view
+	// never steers; fmove/smove carry the whole carve.
+	VectorSet(ang, 0, pinned_yaw, 0);
+	trap_makevectors(ang);
+	self->fb.desired_angle[PITCH] = 0;
+	self->fb.desired_angle[YAW] = pinned_yaw;
+	self->fb.desired_angle[ROLL] = 0;
+	direction[0] = DotProduct(g_globalvars.v_forward, wish) * 800;
+	direction[1] = DotProduct(g_globalvars.v_right, wish) * 800;
+	direction[2] = 0;
+	*jumping = press;
+	*firing = false;
+	*impulse = 0;
+
+	// Telemetry ~10 Hz: t, arm, pass, horizontal speed, the PINNED yaw and
+	// the ACTUAL server-side view yaw (v_angle -- proves the pin held),
+	// ground flag, position (straight-line verification).
+	if (((now - e1_last_log[slot]) >= 0.1f) || (e1_last_log[slot] > now))
+	{
+		e1_last_log[slot] = now;
+		G_cprint("[e1] t=%.3f mode=%d pass=%d speed=%.1f yaw=%.2f vyaw=%.2f og=%d pos=%.0f,%.0f,%.0f\n",
+					now, mode, e1_pass_num[slot], speed, pinned_yaw,
+					self->s.v.v_angle[YAW], onground ? 1 : 0,
+					self->s.v.origin[0], self->s.v.origin[1], self->s.v.origin[2]);
+	}
+
+	return true;
+}
+
 #endif // BOT_SUPPORT

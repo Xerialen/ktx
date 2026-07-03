@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 #define ARROW_TIME_INCREASE       0.15  // Seconds to advance after NewVelocityForArrow
 #define MIN_DEAD_TIME 0.2f
@@ -6179,6 +6180,15 @@ void BotSetCommand(gedict_t *self)
 	}
 
 	BotApplyMoveProbe(self, &jumping, &firing, &impulse, direction);
+
+	// KBOT (E1 lab): carve-law verification override -- final authority over
+	// this frame's command when k_kbot_e1_mode > 0 (inert otherwise; lab
+	// only, never in benches). Placed after the moveprobe so the E1 arms are
+	// exactly what gets sent. Baseline bots (fb.kbot == 0) short-circuit.
+	if (self->fb.kbot)
+	{
+		KBot_E1Frame(self, &jumping, &firing, &impulse, direction);
+	}
 
 	if ((slot >= 0) && (slot < MAX_CLIENTS) && (moveprobe_replay_cmd_msec[slot] > 0))
 	{

@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.8.0-tunable"
+#define KBOT_VERSION "kbot-0.15.0-e1"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -44,6 +44,15 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+
+// ---- E1 carve-law verification rig (lab mode, kbot_main.c) ----
+// Per-frame lab override called from BotSetCommand for kbots when
+// k_kbot_e1_mode is 1 (c=0 alternating carve) or 2 (gen-1 mode-13 K=26
+// control arm). View pinned, wishdir world-frame through the projection
+// seam, frame-perfect hop chain, [e1] telemetry. Returns true when the lab
+// owns the frame; inert (false) at mode 0.
+qbool KBot_E1Frame(gedict_t *self, qbool *jumping, qbool *firing, int *impulse,
+				   vec3_t direction);
 
 #endif // BOT_SUPPORT
 

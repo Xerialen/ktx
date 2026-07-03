@@ -1074,6 +1074,11 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_rockets", "3");
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
+	// KBOT (E1): carve-law verification lab (kbot-0.15.0-e1).
+	RegisterCvarEx("k_kbot_e1_mode", "0");
+	RegisterCvarEx("k_kbot_e1_start", "");
+	RegisterCvarEx("k_kbot_e1_yaw", "0");
+	RegisterCvarEx("k_kbot_e1_pass", "6");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
