@@ -183,31 +183,43 @@ typedef struct
 	vec3_t takeoff;
 	vec3_t landing;
 	float fail_z;
+	float head_off; // per-lane launch-heading offset (deg) to bow around the pillar
 } gj_lane_t;
 
+// E8.1 GEOMETRY CORRECTION (coordinator, verified vs real human ring<->quad MVD
+// jumps + floor traces). The earlier table used ITEM-to-ITEM x (360<->796,
+// ~436u) at y=40/-130, but that whole corridor is OPEN VOID (floor -224 across
+// x~370..765 => ~395u wide, which needs ~600 ups -- unreachable in match).
+// Players do NOT jump item-to-item; they jump the pit VOID lip-to-lip at the
+// NORTHERN corridor (y~146), where the ring/quad ledges have horns that pinch
+// the gap to ~250u:
+//   traced floor y=146: z=32 (ledge) for x<=450, z=-224 (pit) x=470..700,
+//   z=32 (ledge) for x>=720  => near lip ~x=460, far lip ~x=710, span ~250u.
+// A +270 self-jump clears ~250u at only ~344 ups (v_req), BELOW the ~440 the bot
+// reaches in-match. But a STRAIGHT +X hop at y=146 smacks the central PILLAR
+// (~x=496, tall) and pins the bot; humans bow SOUTH to apex y~77 to thread past
+// it (biggz: 466,146 -> apex 565,77 -> 693,142). So each lane carries a launch
+// HEADING OFFSET (bow toward the open corridor); the air-carve then brings the
+// arc back to the far lip. Measured (v0=440, y=146 lips): straight (0 deg) hits
+// the pillar (0% land); head_off -30 lands 17/17 (100%); reverse +30 lands 100%.
+// y=-146 is all void (no southern horns), so there is only ONE crossable pit --
+// lanes 2/3 mirror 0/1 so an RA/YA-context nav goal still uses the valid jump.
 #define GJ_NUM_LANES 4
 static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
-	// 0: ring -> quad. +X level leap over the central hill-pit (traced floor
-	// ~-224, 256 deep below the z=32 ledges; player-rest z=56). The central
-	// PILLAR walls off y>=160 (near-wall at x~512); the OPEN corridor is
-	// y=-160..140, verified wall-free from x430 to x1024 at all heights. Cross
-	// at y=40 (open, drift margin). Takeoff is the LEDGE EDGE (ring x~360, quad
-	// x~796) so the single strafe-hop arc apexes over the void (not over solid
-	// ground); run runup 0 so the launch hop fires at the edge. ~436u open gap.
-	// fail_z=-40 (below the ledge = fell into pit).
-	{ "ring2quad", { 360, 40, 56 }, { 796, 40, 56 }, -40 },
-	// 1: quad -> ring
-	{ "quad2ring", { 796, 40, 56 }, { 360, 40, 56 }, -40 },
-	// 2: ra-entrance -> ya-high. The literal RA-entry (x480,z56) and YA ledges
-	// (x600+,z88) are separated by a WALL (x520-560, solid >=z140), NOT a clean
-	// +X void; the only parallel-to-ring<->quad cross-void is the central pit's
-	// SOUTHERN flank (open corridor y=-160..-80). So this lane crosses that pit
-	// at y=-130 (west rim toward RA <-> east rim toward YA) -- same technique,
-	// distinct lane, +X level ~436u. fail_z=-40.
-	{ "ra2ya", { 360, -130, 56 }, { 796, -130, 56 }, -40 },
-	// 3: ya-high -> ra-entrance
-	{ "ya2ra", { 796, -130, 56 }, { 360, -130, 56 }, -40 },
+	// 0: ring -> quad, northern lips, bow south (-30) around the pillar.
+	{ "ring2quad", { 455, 146, 56 }, { 705, 146, 56 }, -40, -30 },
+	// 1: quad -> ring, reverse (mirror bow, +30).
+	{ "quad2ring", { 705, 146, 56 }, { 455, 146, 56 }, -40, +30 },
+	// 2/3: RA<->YA share the one crossable pit (no southern narrow lane exists).
+	{ "ra2ya", { 455, 146, 56 }, { 705, 146, 56 }, -40, -30 },
+	{ "ya2ra", { 705, 146, 56 }, { 455, 146, 56 }, -40, +30 },
 };
+
+// Effective launch-heading offset for a lane: table default + cvar (for sweeps).
+static float GJ_LaneHeadOff(int lane)
+{
+	return gj_lanes[lane].head_off + cvar("k_kbot_gj_head_off");
+}
 
 // Trial state machine
 #define GJ_IDLE  0
@@ -349,7 +361,7 @@ static void GJ_Seat(gedict_t *self, int lane)
 	// Ballistic launch heading: aim at the far ledge, plus a per-lane offset
 	// (the human -11 deg lever; default 0 -- E8 found straight aim already
 	// lands laterally on dm3). k_kbot_gj_head is an absolute override for sweeps.
-	bearing = GJ_Bearing(takeoff, landing) + cvar("k_kbot_gj_head_off");
+	bearing = GJ_Bearing(takeoff, landing) + GJ_LaneHeadOff(lane);
 	if (cvar("k_kbot_gj_head") > -360)
 	{
 		bearing = cvar("k_kbot_gj_head");
@@ -397,7 +409,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 
 	// Fixed launch heading (ballistic aim at the far ledge + per-lane offset);
 	// used on the ground/launch frame so the hop leaves at the lane heading.
-	launch_bearing = GJ_Bearing(takeoff, landing) + cvar("k_kbot_gj_head_off");
+	launch_bearing = GJ_Bearing(takeoff, landing) + GJ_LaneHeadOff(lane);
 	if (cvar("k_kbot_gj_head") > -360)
 	{
 		launch_bearing = cvar("k_kbot_gj_head");
@@ -593,7 +605,7 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 	{
 		gate = 0.98f;
 	}
-	launch_bearing = GJ_Bearing(takeoff, landing) + cvar("k_kbot_gj_head_off");
+	launch_bearing = GJ_Bearing(takeoff, landing) + GJ_LaneHeadOff(lane);
 	if (cvar("k_kbot_gj_head") > -360)
 	{
 		launch_bearing = cvar("k_kbot_gj_head");
