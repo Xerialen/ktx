@@ -42,7 +42,7 @@ for f in "$SRC"/id1/* ; do ln -s "$f" "$LAB/id1/$(basename "$f")" 2>/dev/null ||
 for f in "$SRC"/qw/*  ; do ln -s "$f" "$LAB/qw/$(basename "$f")"  2>/dev/null || true; done
 for f in "$SRC"/ktx/* ; do ln -s "$f" "$LAB/ktx/$(basename "$f")" 2>/dev/null || true; done
 # qw/maps must be a real dir with the runway map; keep canonical maps too.
-rm -f "$LAB/qw/maps"; mkdir -p "$LAB/qw/maps"
+rm -rf "$LAB/qw/maps"; mkdir -p "$LAB/qw/maps"
 for f in "$SRC"/qw/maps/* ; do ln -s "$f" "$LAB/qw/maps/$(basename "$f")" 2>/dev/null || true; done
 rm -f "$LAB/ktx/qwprogs.so"; cp "$KTX_SO" "$LAB/ktx/qwprogs.so"
 cp "$MAPSRC" "$LAB/qw/maps/ztricks.bsp"
