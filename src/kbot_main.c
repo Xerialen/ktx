@@ -164,6 +164,8 @@ static void KBot_E1Teleport(gedict_t *self)
 {
 	char buf[64];
 	float x, y, z;
+	float v0 = cvar("k_kbot_e1_v0");
+	float pinned_yaw = cvar("k_kbot_e1_yaw");
 
 	trap_cvar_string("k_kbot_e1_start", buf, sizeof(buf));
 	if (buf[0] && (sscanf(buf, "%f %f %f", &x, &y, &z) == 3))
@@ -173,7 +175,30 @@ static void KBot_E1Teleport(gedict_t *self)
 		VectorSet(org, x, y, z);
 		setorigin(self, PASSVEC3(org));
 	}
-	VectorSet(self->s.v.velocity, 0, 0, 0);
+
+	// Initial condition: inject the bot already moving at run speed along the
+	// pinned heading (k_kbot_e1_v0, default 320 ups). The carve LAW is a
+	// steady-state gain (d|v|^2/dt = 900 - c^2); the pre-registered acceptance
+	// targets (490@2s, 610@4s) assume the theory premise v0=320 at t=0. A
+	// teleport-to-rest starts the clock ~0.4 s early on a cold-speed bootstrap
+	// (0 -> 320) that is NOT part of the law under test, time-shifting every
+	// sample and under-reading @2s. Seeding v0 removes that rig artifact so the
+	// measured curve is the carve law itself. v0 <= 0 keeps the old rest start.
+	if (v0 > 0.0f)
+	{
+		vec3_t ang = { 0, 0, 0 }, fwd;
+
+		ang[YAW] = pinned_yaw;
+		trap_makevectors(ang);
+		VectorCopy(g_globalvars.v_forward, fwd);
+		fwd[2] = 0;
+		VectorNormalize(fwd);
+		VectorScale(fwd, v0, self->s.v.velocity);
+	}
+	else
+	{
+		VectorSet(self->s.v.velocity, 0, 0, 0);
+	}
 }
 
 // Returns true when the lab mode owns this frame (BotSetCommand then sends

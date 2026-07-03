@@ -29,6 +29,7 @@ PORT="${PORT:-28640}"
 E1_START="${E1_START:--1700 1760 -540}"
 E1_YAW="${E1_YAW:-0}"
 E1_PASS="${E1_PASS:-6}"
+E1_V0="${E1_V0:-320}"   # inject run speed at teleport (theory premise; 0 = cold rest)
 E1_TEAM="${E1_TEAM:-red}"
 ARM_SECS="${ARM_SECS:-19}"   # ~3 passes of 6 s
 
@@ -123,6 +124,7 @@ set k_kbot_e1_mode 0
 set k_kbot_e1_start "$E1_START"
 set k_kbot_e1_yaw $E1_YAW
 set k_kbot_e1_pass $E1_PASS
+set k_kbot_e1_v0 $E1_V0
 CFG
 
 echo "[e1_run] lab=$LAB port=$PORT so=$(md5sum "$LAB/ktx/qwprogs.so" | cut -c1-8)"
