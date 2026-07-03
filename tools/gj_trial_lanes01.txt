@@ -1,0 +1,11 @@
+1 set k_kbot_gj_probe 0
+0 SEAT
+5 set k_kbot_gj_v0 680
+0 set k_kbot_gj_steer 1.5
+0 set k_kbot_gj_timeout 2.5
+0 set k_kbot_gj_cool 0.4
+0 set k_kbot_gj_landrad 120
+0 set k_kbot_gj_runup 0
+0 set k_kbot_gj_lane 0
+55 set k_kbot_gj_lane 1
+55 set k_kbot_gj_lane -1

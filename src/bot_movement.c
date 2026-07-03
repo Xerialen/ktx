@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 #define ARROW_TIME_INCREASE       0.15  // Seconds to advance after NewVelocityForArrow
 #define MIN_DEAD_TIME 0.2f
@@ -6189,6 +6190,15 @@ void BotSetCommand(gedict_t *self)
 	}
 
 	BotApplyMoveProbe(self, &jumping, &firing, &impulse, direction);
+
+	// KBOT (E6 gap-jump): final-authority movement override for a triggered
+	// gap crossing. Inert (returns false, no effect) unless k_kbot_gapjump != 0
+	// and a lane is selected/passively triggered. Placed after the moveprobe so
+	// the crossing command is exactly what gets sent. Baseline bots short-circuit.
+	if (self->fb.kbot)
+	{
+		KBot_GapjumpFrame(self, &jumping, &firing, &impulse, direction);
+	}
 
 	if ((slot >= 0) && (slot < MAX_CLIENTS) && (moveprobe_replay_cmd_msec[slot] > 0))
 	{

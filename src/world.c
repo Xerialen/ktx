@@ -1075,6 +1075,29 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
 
+	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
+	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).
+	// k_kbot_gj_lane -1 = passive trigger (real feature); 0..3 = trial driver
+	// (isolated E6 landing-% harness). Remaining cvars tune the jump without a
+	// rebuild; k_kbot_gj_head default < -360 means "use computed bearing".
+	RegisterCvarEx("k_kbot_gapjump", "0");
+	RegisterCvarEx("k_kbot_gj_lane", "-1");
+	RegisterCvarEx("k_kbot_gj_probe", "0");
+	RegisterCvarEx("k_kbot_gj_to", "");
+	RegisterCvarEx("k_kbot_gj_land", "");
+	RegisterCvarEx("k_kbot_gj_head", "-1000");
+	RegisterCvarEx("k_kbot_gj_v0", "450");
+	RegisterCvarEx("k_kbot_gj_steer", "5");
+	RegisterCvarEx("k_kbot_gj_runup", "0");
+	RegisterCvarEx("k_kbot_gj_landrad", "64");
+	RegisterCvarEx("k_kbot_gj_failz", "0");
+	RegisterCvarEx("k_kbot_gj_timeout", "4");
+	RegisterCvarEx("k_kbot_gj_cool", "0.6");
+	RegisterCvarEx("k_kbot_gj_zone", "96");
+	RegisterCvarEx("k_kbot_gj_cal", "0");
+	RegisterCvarEx("k_kbot_gj_traj", "0");
+	RegisterCvarEx("k_kbot_gj_caldir", "0");
+
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
 		RegisterCvarEx(va("k_fb_name_%d", i), "");

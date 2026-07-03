@@ -1,0 +1,2 @@
+1 set k_kbot_gj_probe 1
+0 SEAT

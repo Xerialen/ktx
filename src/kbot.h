@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.8.0-tunable"
+#define KBOT_VERSION "kbot-0.17.0-gapjump"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -44,6 +44,16 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+
+// ---- E6: gap-crossing strafe-jump play ----
+// Final-authority movement override for a triggered gap crossing on dm3
+// (Ring<->Quad, RA<->YA lanes, both directions). Reuses the E1 c=0 air-carve
+// as the air-control engine. Fully inert (returns false, vanilla movement
+// stands) unless k_kbot_gapjump != 0 AND (a trial lane is selected via
+// k_kbot_gj_lane, OR the passive trigger fires with no enemy near). Called
+// from the bot_movement.c dir_move_ seam after BotApplyMoveProbe.
+qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
+					   int *impulse, vec3_t direction);
 
 #endif // BOT_SUPPORT
 

@@ -1,0 +1,169 @@
+[2026-07-03 20:53:06] ============= Starting MVDSV 1.20-dev =============
+[2026-07-03 20:53:06] 64.0 megabyte heap
+[2026-07-03 20:53:06] QuakeWorld Initialized
+[2026-07-03 20:53:06] execing server.cfg
+[2026-07-03 20:53:06] Unknown command "sv_public"
+[2026-07-03 20:53:06] execing mvdsv.cfg
+[2026-07-03 20:53:06] Unknown command "sv_enableprofile"
+[2026-07-03 20:53:06] execing ktx.cfg
+[2026-07-03 20:53:06] Unknown command "sv_public"
+[2026-07-03 20:53:06] execing server.cfg
+[2026-07-03 20:53:06] execing mvdsv.cfg
+[2026-07-03 20:53:06] Unknown command "sv_enableprofile"
+[2026-07-03 20:53:06] execing ktx.cfg
+[2026-07-03 20:53:06] Can't find maps/mvdsv-kg.bsp
+[2026-07-03 20:53:06] LoadLibrary (./ktx/qwprogs.so)
+[2026-07-03 20:53:06] execing configs/usermodes/default.cfg
+[2026-07-03 20:53:06] execing configs/usermodes/ffa/default.cfg
+[2026-07-03 20:53:06] SV_BroadcastUpdateServerList: No master servers configured
+[2026-07-03 20:53:13] LoadLibrary (./ktx/qwprogs.so)
+[2026-07-03 20:53:14] execing configs/usermodes/default.cfg
+[2026-07-03 20:53:14] execing configs/usermodes/ffa/default.cfg
+[2026-07-03 20:53:21] Spectator Komodo-gj connected
+[2026-07-03 20:53:23] Using easy bot skill mode
+[2026-07-03 20:53:23] / bro entered the game
+[2026-07-03 20:53:23] skill &cf0020&r
+[2026-07-03 20:53:23] / bro changed name to kb:/ bro
+[2026-07-03 20:53:23] [kbot] slot=2 name=kb:/ bro version=kbot-0.17.0-gapjump
+[2026-07-03 20:53:23] [kbot-config] ws=70 rockets=3 cells=15
+[2026-07-03 20:53:23] Server starts recording (memory):
+[2026-07-03 20:53:23] ffa_1[dm3]20260703-2053.mvd
+[2026-07-03 20:53:23] matchdate: 2026-07-03 20:53:23 CEST
+[2026-07-03 20:53:23] [kbot] frame active slot=2 name=kb:/ bro version=kbot-0.17.0-gapjump time=10.242091
+[2026-07-03 20:53:26] [gapjump] init lane=ra2ya
+[2026-07-03 20:53:26] [gapjump] lane=ra2ya trial=1 result=LAND land_pos=819,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:53:27] [gapjump] lane=ra2ya trial=2 result=LAND land_pos=819,-129,56 hdist=23 peak_speed=712 tair=0.67
+[2026-07-03 20:53:28] [gapjump] lane=ra2ya trial=3 result=LAND land_pos=827,-129,56 hdist=31 peak_speed=712 tair=0.66
+[2026-07-03 20:53:29] [gapjump] lane=ra2ya trial=4 result=LAND land_pos=826,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:30] [gapjump] lane=ra2ya trial=5 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:32] [gapjump] lane=ra2ya trial=6 result=LAND land_pos=833,-132,56 hdist=37 peak_speed=713 tair=0.67
+[2026-07-03 20:53:33] [gapjump] lane=ra2ya trial=7 result=LAND land_pos=819,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:53:34] [gapjump] lane=ra2ya trial=8 result=LAND land_pos=819,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:53:35] [gapjump] lane=ra2ya trial=9 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:36] [gapjump] lane=ra2ya trial=10 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:37] [gapjump] lane=ra2ya trial=11 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:38] [gapjump] lane=ra2ya trial=12 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:39] [gapjump] lane=ra2ya trial=13 result=LAND land_pos=833,-132,56 hdist=37 peak_speed=713 tair=0.67
+[2026-07-03 20:53:40] [gapjump] lane=ra2ya trial=14 result=LAND land_pos=819,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:53:41] [gapjump] lane=ra2ya trial=15 result=LAND land_pos=819,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:53:42] [gapjump] lane=ra2ya trial=16 result=LAND land_pos=827,-129,56 hdist=31 peak_speed=712 tair=0.66
+[2026-07-03 20:53:43] [gapjump] lane=ra2ya trial=17 result=LAND land_pos=833,-128,56 hdist=37 peak_speed=713 tair=0.67
+[2026-07-03 20:53:44] [gapjump] lane=ra2ya trial=18 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:45] [gapjump] lane=ra2ya trial=19 result=LAND land_pos=827,-129,56 hdist=31 peak_speed=712 tair=0.66
+[2026-07-03 20:53:47] [gapjump] lane=ra2ya trial=20 result=LAND land_pos=832,-132,56 hdist=36 peak_speed=713 tair=0.67
+[2026-07-03 20:53:48] [gapjump] lane=ra2ya trial=21 result=LAND land_pos=820,-129,56 hdist=24 peak_speed=712 tair=0.66
+[2026-07-03 20:53:49] [gapjump] lane=ra2ya trial=22 result=LAND land_pos=820,-129,56 hdist=24 peak_speed=712 tair=0.66
+[2026-07-03 20:53:50] [gapjump] lane=ra2ya trial=23 result=LAND land_pos=826,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:51] [gapjump] lane=ra2ya trial=24 result=LAND land_pos=834,-127,56 hdist=38 peak_speed=713 tair=0.67
+[2026-07-03 20:53:52] [gapjump] lane=ra2ya trial=25 result=LAND land_pos=826,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:53] [gapjump] lane=ra2ya trial=26 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:53:54] [gapjump] lane=ra2ya trial=27 result=LAND land_pos=831,-132,56 hdist=35 peak_speed=713 tair=0.67
+[2026-07-03 20:53:55] [gapjump] lane=ra2ya trial=28 result=LAND land_pos=819,-130,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:53:56] [gapjump] lane=ra2ya trial=29 result=LAND land_pos=819,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:53:57] [gapjump] lane=ra2ya trial=30 result=LAND land_pos=827,-131,56 hdist=31 peak_speed=712 tair=0.66
+[2026-07-03 20:53:58] [gapjump] lane=ra2ya trial=31 result=LAND land_pos=827,-129,56 hdist=31 peak_speed=712 tair=0.66
+[2026-07-03 20:53:59] [gapjump] lane=ra2ya trial=32 result=LAND land_pos=827,-131,56 hdist=31 peak_speed=712 tair=0.66
+[2026-07-03 20:54:00] [gapjump] lane=ra2ya trial=33 result=LAND land_pos=827,-129,56 hdist=31 peak_speed=712 tair=0.66
+[2026-07-03 20:54:02] [gapjump] lane=ra2ya trial=34 result=LAND land_pos=832,-132,56 hdist=36 peak_speed=713 tair=0.67
+[2026-07-03 20:54:03] [gapjump] lane=ra2ya trial=35 result=LAND land_pos=819,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:04] [gapjump] lane=ra2ya trial=36 result=LAND land_pos=820,-129,56 hdist=24 peak_speed=712 tair=0.66
+[2026-07-03 20:54:05] [gapjump] lane=ra2ya trial=37 result=LAND land_pos=826,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:06] [gapjump] lane=ra2ya trial=38 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:07] [gapjump] lane=ra2ya trial=39 result=LAND land_pos=826,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:08] [gapjump] lane=ra2ya trial=40 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:09] [gapjump] lane=ra2ya trial=41 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:10] [gapjump] lane=ra2ya trial=42 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:11] [gapjump] lane=ra2ya trial=43 result=LAND land_pos=834,-127,56 hdist=38 peak_speed=713 tair=0.67
+[2026-07-03 20:54:12] [gapjump] lane=ra2ya trial=44 result=LAND land_pos=827,-131,56 hdist=31 peak_speed=712 tair=0.66
+[2026-07-03 20:54:13] [gapjump] lane=ra2ya trial=45 result=LAND land_pos=826,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:14] [gapjump] lane=ra2ya trial=46 result=LAND land_pos=832,-132,56 hdist=36 peak_speed=713 tair=0.67
+[2026-07-03 20:54:15] [gapjump] lane=ra2ya trial=47 result=LAND land_pos=820,-129,56 hdist=24 peak_speed=712 tair=0.66
+[2026-07-03 20:54:17] [gapjump] lane=ra2ya trial=48 result=LAND land_pos=819,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:18] [gapjump] lane=ra2ya trial=49 result=LAND land_pos=834,-128,56 hdist=38 peak_speed=713 tair=0.67
+[2026-07-03 20:54:19] [gapjump] lane=ra2ya trial=50 result=LAND land_pos=819,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:20] [gapjump] lane=ra2ya trial=51 result=LAND land_pos=827,-131,56 hdist=31 peak_speed=712 tair=0.66
+[2026-07-03 20:54:21] [gapjump] init lane=ya2ra
+[2026-07-03 20:54:21] Login time out for 
+[2026-07-03 20:54:21] Spectator  removed
+[2026-07-03 20:54:21] [gapjump] lane=ya2ra trial=1 result=LAND land_pos=336,-131,56 hdist=24 peak_speed=712 tair=0.67
+[2026-07-03 20:54:22] [gapjump] lane=ya2ra trial=2 result=LAND land_pos=336,-131,56 hdist=24 peak_speed=712 tair=0.66
+[2026-07-03 20:54:23] [7] minutes remaining
+[2026-07-03 20:54:23] [gapjump] lane=ya2ra trial=3 result=LAND land_pos=336,-131,56 hdist=24 peak_speed=712 tair=0.66
+[2026-07-03 20:54:24] [gapjump] lane=ya2ra trial=4 result=LAND land_pos=330,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:25] [gapjump] lane=ya2ra trial=5 result=LAND land_pos=330,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:27] [gapjump] lane=ya2ra trial=6 result=LAND land_pos=330,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:28] [gapjump] lane=ya2ra trial=7 result=LAND land_pos=330,-134,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:29] [gapjump] lane=ya2ra trial=8 result=LAND land_pos=324,-129,56 hdist=36 peak_speed=713 tair=0.67
+[2026-07-03 20:54:30] [gapjump] lane=ya2ra trial=9 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:31] [gapjump] lane=ya2ra trial=10 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:32] [gapjump] lane=ya2ra trial=11 result=LAND land_pos=330,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:33] [gapjump] lane=ya2ra trial=12 result=LAND land_pos=330,-134,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:34] [gapjump] lane=ya2ra trial=13 result=LAND land_pos=330,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:35] [gapjump] lane=ya2ra trial=14 result=LAND land_pos=330,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:36] [gapjump] lane=ya2ra trial=15 result=LAND land_pos=324,-129,56 hdist=36 peak_speed=713 tair=0.67
+[2026-07-03 20:54:37] [gapjump] lane=ya2ra trial=16 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:38] [gapjump] lane=ya2ra trial=17 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:39] [gapjump] lane=ya2ra trial=18 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:40] [gapjump] lane=ya2ra trial=19 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:41] [gapjump] lane=ya2ra trial=20 result=LAND land_pos=330,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:43] [gapjump] lane=ya2ra trial=21 result=LAND land_pos=330,-130,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:44] [gapjump] lane=ya2ra trial=22 result=LAND land_pos=324,-129,56 hdist=36 peak_speed=713 tair=0.67
+[2026-07-03 20:54:45] [gapjump] lane=ya2ra trial=23 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:46] [gapjump] lane=ya2ra trial=24 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:47] [gapjump] lane=ya2ra trial=25 result=LAND land_pos=330,-130,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:48] [gapjump] lane=ya2ra trial=26 result=LAND land_pos=337,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:49] [gapjump] lane=ya2ra trial=27 result=LAND land_pos=323,-129,56 hdist=37 peak_speed=713 tair=0.67
+[2026-07-03 20:54:50] [gapjump] lane=ya2ra trial=28 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:51] [gapjump] lane=ya2ra trial=29 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:52] [gapjump] lane=ya2ra trial=30 result=LAND land_pos=337,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:53] [gapjump] lane=ya2ra trial=31 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:54:54] [gapjump] lane=ya2ra trial=32 result=LAND land_pos=330,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:55] [gapjump] lane=ya2ra trial=33 result=LAND land_pos=330,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:54:56] [gapjump] lane=ya2ra trial=34 result=LAND land_pos=324,-132,56 hdist=36 peak_speed=713 tair=0.68
+[2026-07-03 20:54:58] [gapjump] lane=ya2ra trial=35 result=LAND land_pos=337,-127,56 hdist=23 peak_speed=712 tair=0.67
+[2026-07-03 20:54:59] [gapjump] lane=ya2ra trial=36 result=LAND land_pos=330,-134,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:55:00] [gapjump] lane=ya2ra trial=37 result=LAND land_pos=323,-132,56 hdist=37 peak_speed=713 tair=0.67
+[2026-07-03 20:55:01] [gapjump] lane=ya2ra trial=38 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:02] [gapjump] lane=ya2ra trial=39 result=LAND land_pos=330,-131,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:55:03] [gapjump] lane=ya2ra trial=40 result=LAND land_pos=330,-129,56 hdist=30 peak_speed=712 tair=0.66
+[2026-07-03 20:55:04] [gapjump] lane=ya2ra trial=41 result=LAND land_pos=325,-128,56 hdist=35 peak_speed=713 tair=0.67
+[2026-07-03 20:55:05] [gapjump] lane=ya2ra trial=42 result=LAND land_pos=337,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:06] [gapjump] lane=ya2ra trial=43 result=LAND land_pos=337,-129,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:07] [gapjump] lane=ya2ra trial=44 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:08] [gapjump] lane=ya2ra trial=45 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:09] [gapjump] lane=ya2ra trial=46 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:10] [gapjump] lane=ya2ra trial=47 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:11] [gapjump] lane=ya2ra trial=48 result=LAND land_pos=324,-129,56 hdist=36 peak_speed=713 tair=0.67
+[2026-07-03 20:55:12] [gapjump] lane=ya2ra trial=49 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:14] [gapjump] lane=ya2ra trial=50 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:15] [gapjump] lane=ya2ra trial=51 result=LAND land_pos=337,-131,56 hdist=23 peak_speed=712 tair=0.66
+[2026-07-03 20:55:16] [gapjump] lane=ya2ra trial=52 result=LAND land_pos=327,-132,56 hdist=33 peak_speed=713 tair=0.67
+[2026-07-03 20:55:17] [gapjump] lane=ra2ya trial=52 result=FAIL_GAP land_pos=580,-125,-41 hdist=216 peak_speed=394 tair=0.42
+[2026-07-03 20:55:23] [6] minutes remaining
+[2026-07-03 20:55:27] Running mvdfinish.qws
+[2026-07-03 20:55:27] Server recording completed
+[2026-07-03 20:55:27] The match is over
+[2026-07-03 20:55:27] 
+[2026-07-03 20:55:27] Player statistics:
+[2026-07-03 20:55:27] (====================================)
+[2026-07-03 20:55:27] Frags (rank) . efficiency
+[2026-07-03 20:55:27] # kb:/ bro:
+[2026-07-03 20:55:27]   0 (0) 0.0%
+[2026-07-03 20:55:27] Wp:
+[2026-07-03 20:55:27] RL skill: ad:0.0 dh:0
+[2026-07-03 20:55:27] Armr&mhs: ga:0 ya:0 ra:0 mh:1
+[2026-07-03 20:55:27]   Damage: Tkn:0 Gvn:0 Tm:0 Self:50 ToDie:99999
+[2026-07-03 20:55:27]     Time: Quad:0
+[2026-07-03 20:55:27]  Streaks: Frags:0 QuadRun:0
+[2026-07-03 20:55:27]   SpawnFrags: 0
+[2026-07-03 20:55:27] (========)
+[2026-07-03 20:55:27] [dm3] top scorers:
+[2026-07-03 20:55:27] (====================================)
+[2026-07-03 20:55:27]       Frags: 
+[2026-07-03 20:55:27] kb:/ bro [0]
+[2026-07-03 20:55:27]      Deaths: 
+[2026-07-03 20:55:27] kb:/ bro [0]
+[2026-07-03 20:55:27]  Efficiency: 
+[2026-07-03 20:55:27] kb:/ bro [0.0%]
+[2026-07-03 20:55:27] 
+[2026-07-03 20:55:27] (====================================)
