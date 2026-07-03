@@ -213,6 +213,7 @@ static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 #define GJ_IDLE  0
 #define GJ_CROSS 1
 #define GJ_COOL  2
+#define GJ_BUILD 3   // E8: circle-jump run-up to reach v_req before launching
 
 static int   gj_state[MAX_CLIENTS];
 static int   gj_lane_active[MAX_CLIENTS];
@@ -224,6 +225,8 @@ static float gj_flip[MAX_CLIENTS];
 static qbool gj_jump_latch[MAX_CLIENTS];
 static qbool gj_has_flown[MAX_CLIENTS];
 static float gj_probe_log[MAX_CLIENTS];
+static float gj_build_t0[MAX_CLIENTS];   // E8 build-state start time
+static int   gj_build_sign[MAX_CLIENTS]; // E8 circle-jump strafe sign
 
 // Resolve the active lane geometry, honouring cvar overrides (retune without a
 // rebuild). k_kbot_gj_to / _land are "x y z" strings; empty -> table value.
@@ -258,6 +261,83 @@ static float GJ_Bearing(vec3_t from, vec3_t to)
 	return atan2(to[1] - from[1], to[0] - from[0]) * 180.0f / M_PI;
 }
 
+// ---------------------------------------------------------------------------
+//  E8: ballistic launch model (heading + required-speed gate)
+// ---------------------------------------------------------------------------
+// The dm3 ring<->quad cross is a LEVEL ~430u self-jump over a 256-deep pit.
+// A self-jump adds a FIXED vz=+270 (sv_gravity 800), so the airborne arc
+// returns to launch height after T = 2*vz/g = 0.675 s (dz=0). To land ON the
+// far ledge the horizontal speed must carry the bot the full gap D within T:
+//
+//     v_req = D / T,   T = (vz + sqrt(vz*vz - 2*g*dz)) / g
+//
+// (descending root; dz = landing_z - takeoff_z). Measured in the isolated
+// trial harness (E8): launch 475 -> peak 530 lands 0/13; launch 600 -> peak
+// 637 lands 11/16 (69%); launch 640 -> 94%. Air-strafe during the arc adds
+// ~5-8% over the launch speed, so the LAUNCH threshold sits a little below
+// v_req: k_kbot_gj_airgain (default 0.93) models that discount.
+//
+// KEY E8 FINDING (telemetry-backed): at 475 the arc already lands hdist~25
+// LATERALLY on target -- the miss is purely VERTICAL (arrives ~100u too low).
+// Sweeping the launch heading -30..+11 deg at v0=475 lands 0% at every angle.
+// So on dm3 the jump is won by SPEED, not heading (the human -11 deg result
+// was on ztricks' shorter/downhill "Distance" gap, not this level 430u pit).
+// The launch heading is still computed ballistically (bearing + per-lane
+// offset cvar) for lateral precision, but the decisive lever is the
+// REQUIRED-SPEED GATE: the passive trigger only commits a crossing when the
+// approach speed can actually clear the gap -- otherwise it declines, so the
+// bot stops throwing itself into the pit (E7's -9.92 came from 126 pit falls).
+#define GJ_SELFJUMP_VZ 270.0f
+
+static float GJ_Gravity(void)
+{
+	float g = cvar("sv_gravity");
+	return (g > 0) ? g : 800.0f;
+}
+
+// Airborne time until the +vz self-jump arc returns to landing height.
+static float GJ_AirTime(float dz)
+{
+	float g = GJ_Gravity();
+	float vz = GJ_SELFJUMP_VZ;
+	float disc = vz * vz - 2.0f * g * dz;
+
+	if (disc < 0)
+	{
+		disc = 0; // landing higher than the arc peak reaches; clamp
+	}
+	return (vz + sqrt(disc)) / g;
+}
+
+// Minimum horizontal launch speed to land the lane's ballistic arc. Honours a
+// direct override (k_kbot_gj_vreq) for sweeps; else D/T with the air-accel
+// discount k_kbot_gj_airgain.
+static float GJ_RequiredSpeed(vec3_t takeoff, vec3_t landing)
+{
+	float over = cvar("k_kbot_gj_vreq");
+	float dx = landing[0] - takeoff[0];
+	float dy = landing[1] - takeoff[1];
+	float dz = landing[2] - takeoff[2];
+	float D = sqrt(dx * dx + dy * dy);
+	float T, gain;
+
+	if (over > 0)
+	{
+		return over;
+	}
+	T = GJ_AirTime(dz);
+	if (T < 0.01f)
+	{
+		T = 0.01f;
+	}
+	gain = cvar("k_kbot_gj_airgain");
+	if (gain <= 0 || gain > 1.0f)
+	{
+		gain = 0.93f;
+	}
+	return (D / T) * gain;
+}
+
 // Teleport the bot to the lane takeoff (optionally backed off along -bearing by
 // k_kbot_gj_runup) and seed horizontal run speed k_kbot_gj_v0 aimed at landing.
 static void GJ_Seat(gedict_t *self, int lane)
@@ -266,7 +346,10 @@ static void GJ_Seat(gedict_t *self, int lane)
 	float fail_z, bearing, v0, runup;
 
 	GJ_Geometry(lane, takeoff, landing, &fail_z);
-	bearing = GJ_Bearing(takeoff, landing);
+	// Ballistic launch heading: aim at the far ledge, plus a per-lane offset
+	// (the human -11 deg lever; default 0 -- E8 found straight aim already
+	// lands laterally on dm3). k_kbot_gj_head is an absolute override for sweeps.
+	bearing = GJ_Bearing(takeoff, landing) + cvar("k_kbot_gj_head_off");
 	if (cvar("k_kbot_gj_head") > -360)
 	{
 		bearing = cvar("k_kbot_gj_head");
@@ -304,13 +387,22 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 					  qbool *firing, int *impulse, vec3_t direction)
 {
 	vec3_t takeoff, landing, cur, wish, ang, org;
-	float fail_z, bearing, err, deadband, speed, hdist, timeout, landrad, view_yaw;
+	float fail_z, bearing, launch_bearing, err, deadband, speed, hdist, timeout, landrad, view_yaw, vreq;
 	qbool onground = ((int)self->s.v.flags & FL_ONGROUND) ? true : false;
 	float now = g_globalvars.time;
 	qbool press;
 
 	GJ_Geometry(lane, takeoff, landing, &fail_z);
 	VectorCopy(self->s.v.origin, org);
+
+	// Fixed launch heading (ballistic aim at the far ledge + per-lane offset);
+	// used on the ground/launch frame so the hop leaves at the lane heading.
+	launch_bearing = GJ_Bearing(takeoff, landing) + cvar("k_kbot_gj_head_off");
+	if (cvar("k_kbot_gj_head") > -360)
+	{
+		launch_bearing = cvar("k_kbot_gj_head");
+	}
+	vreq = GJ_RequiredSpeed(takeoff, landing);
 
 	cur[0] = self->s.v.velocity[0];
 	cur[1] = self->s.v.velocity[1];
@@ -330,10 +422,12 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 
 	if (onground)
 	{
-		// On the runway: aim straight at the landing, hop (friction-free).
+		// On the runway: aim at the fixed LAUNCH heading (ballistic aim + lane
+		// offset), hop (friction-free). Using launch_bearing (not the live
+		// org->landing bearing) keeps the takeoff direction precise.
 		vec3_t bang = { 0, 0, 0 };
 
-		bang[YAW] = bearing;
+		bang[YAW] = launch_bearing;
 		trap_makevectors(bang);
 		VectorCopy(g_globalvars.v_forward, wish);
 		wish[2] = 0;
@@ -433,9 +527,9 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 		fabs(org[2] - landing[2]) < 64)
 	{
 		G_cprint("[gapjump] lane=%s trial=%d result=LAND land_pos=%.0f,%.0f,%.0f "
-				 "hdist=%.0f peak_speed=%.0f tair=%.2f\n",
+				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
-				 hdist, gj_peak[slot], now - gj_t0[slot]);
+				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -443,9 +537,9 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	if (org[2] < fail_z)
 	{
 		G_cprint("[gapjump] lane=%s trial=%d result=FAIL_GAP land_pos=%.0f,%.0f,%.0f "
-				 "hdist=%.0f peak_speed=%.0f tair=%.2f\n",
+				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
-				 hdist, gj_peak[slot], now - gj_t0[slot]);
+				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -453,9 +547,9 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	if ((now - gj_t0[slot]) > timeout)
 	{
 		G_cprint("[gapjump] lane=%s trial=%d result=FAIL_TIMEOUT land_pos=%.0f,%.0f,%.0f "
-				 "hdist=%.0f peak_speed=%.0f tair=%.2f\n",
+				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
-				 hdist, gj_peak[slot], now - gj_t0[slot]);
+				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -476,6 +570,130 @@ static void GJ_StartTrial(gedict_t *self, int slot, int lane)
 	gj_has_flown[slot] = false;
 	gj_state[slot] = GJ_CROSS;
 	GJ_Seat(self, lane);
+}
+
+// E8: grounded circle-jump run-up (experimental, k_kbot_gj_build > 0). While
+// too slow, hold the wishdir k_kbot_gj_build_angle deg off the velocity with
+// full forwardmove and the jump suppressed -- QW ground accelerate keeps adding
+// speed past maxspeed while |v|.wishdir < maxspeed. Release into GJ_CROSS (the
+// hop fires there) once vh >= v_req. Abort -> decline on timeout or if pushed
+// airborne still under-speed, so the bot never launches a doomed jump.
+static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
+						   qbool *firing, int *impulse, vec3_t direction)
+{
+	vec3_t takeoff, landing, cur, wish, ang, up = { 0, 0, 1 };
+	float fail_z, vreq, gate, vh, launch_bearing, angle, view_yaw, timeout;
+	qbool onground = ((int)self->s.v.flags & FL_ONGROUND) ? true : false;
+	float now = g_globalvars.time;
+
+	GJ_Geometry(lane, takeoff, landing, &fail_z);
+	vreq = GJ_RequiredSpeed(takeoff, landing);
+	gate = cvar("k_kbot_gj_gate");
+	if (gate <= 0)
+	{
+		gate = 0.98f;
+	}
+	launch_bearing = GJ_Bearing(takeoff, landing) + cvar("k_kbot_gj_head_off");
+	if (cvar("k_kbot_gj_head") > -360)
+	{
+		launch_bearing = cvar("k_kbot_gj_head");
+	}
+
+	if (gj_state[slot] != GJ_BUILD)
+	{
+		gj_state[slot] = GJ_BUILD;
+		gj_lane_active[slot] = lane;
+		gj_build_t0[slot] = now;
+		gj_build_sign[slot] = 0;
+		gj_jump_latch[slot] = false;
+	}
+
+	cur[0] = self->s.v.velocity[0];
+	cur[1] = self->s.v.velocity[1];
+	cur[2] = 0;
+	vh = VectorLength(cur);
+
+	timeout = cvar("k_kbot_gj_buildtime");
+	if (timeout <= 0)
+	{
+		timeout = 1.5f;
+	}
+
+	// Abort -> decline (never launch a doomed jump).
+	if ((now - gj_build_t0[slot]) > timeout || (!onground && vh < vreq * gate))
+	{
+		if (cvar("k_kbot_gj_gatelog"))
+		{
+			G_cprint("[gapjump] lane=%s result=BUILD_ABORT vh=%.0f vreq=%.0f og=%d\n",
+					 gj_lanes[lane].name, vh, vreq, onground ? 1 : 0);
+		}
+		gj_state[slot] = GJ_IDLE;
+		return false;
+	}
+
+	// Fast enough while grounded -> release to CROSS (the hop fires there).
+	if (onground && vh >= vreq * gate)
+	{
+		gj_t0[slot] = now;
+		gj_peak[slot] = 0;
+		gj_flip[slot] = 1;
+		gj_jump_latch[slot] = false;
+		gj_has_flown[slot] = false;
+		gj_state[slot] = GJ_CROSS;
+		return GJ_Cross(self, slot, lane, jumping, firing, impulse, direction);
+	}
+
+	// The grounded circle: wishdir = velocity rotated launch_angle*sign toward
+	// the launch heading; view aims along wishdir, full forward, jump suppressed.
+	angle = cvar("k_kbot_gj_build_angle");
+	if (angle <= 0)
+	{
+		angle = 42.0f;
+	}
+	if (gj_build_sign[slot] == 0)
+	{
+		float vyaw = (vh > 1) ? atan2(cur[1], cur[0]) * 180.0f / M_PI : launch_bearing;
+		float e = launch_bearing - vyaw;
+
+		while (e > 180)
+		{
+			e -= 360;
+		}
+		while (e < -180)
+		{
+			e += 360;
+		}
+		gj_build_sign[slot] = (e >= 0) ? 1 : -1;
+	}
+	if (vh > 1)
+	{
+		VectorNormalize(cur);
+		RotatePointAroundVector(wish, up, cur, angle * gj_build_sign[slot]);
+	}
+	else
+	{
+		vec3_t bang = { 0, 0, 0 };
+
+		bang[YAW] = launch_bearing;
+		trap_makevectors(bang);
+		VectorCopy(g_globalvars.v_forward, wish);
+	}
+	wish[2] = 0;
+	VectorNormalize(wish);
+
+	view_yaw = vectoyaw(wish);
+	VectorSet(ang, 0, view_yaw, 0);
+	trap_makevectors(ang);
+	self->fb.desired_angle[PITCH] = 0;
+	self->fb.desired_angle[YAW] = view_yaw;
+	self->fb.desired_angle[ROLL] = 0;
+	direction[0] = DotProduct(g_globalvars.v_forward, wish) * 800;
+	direction[1] = DotProduct(g_globalvars.v_right, wish) * 800;
+	direction[2] = 0;
+	*jumping = false;
+	*firing = false;
+	*impulse = 0;
+	return true;
 }
 
 qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
@@ -611,6 +829,17 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 		return GJ_Cross(self, slot, gj_lane_active[slot], jumping, firing,
 						impulse, direction);
 	}
+	// Continue an in-flight circle-jump run-up (experimental build path).
+	if (gj_state[slot] == GJ_BUILD)
+	{
+		if (ISDEAD(self))
+		{
+			gj_state[slot] = GJ_IDLE;
+			return false;
+		}
+		return GJ_BuildFrame(self, slot, gj_lane_active[slot], jumping, firing,
+							 impulse, direction);
+	}
 	if (gj_state[slot] == GJ_COOL)
 	{
 		gj_state[slot] = GJ_IDLE; // release movement back to vanilla nav
@@ -675,6 +904,52 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 			{
 				return false; // goal is not across the gap
 			}
+
+			// ---- E8 REQUIRED-SPEED GATE (the real in-match fix) ----
+			// The dm3 gap is a level ~430u self-jump; the fixed +270 arc lands
+			// short unless horizontal speed >= v_req (~600 launch here). E7 lost
+			// -9.92 frags because the bot committed the jump at ~450 ups and fell
+			// into the pit 126/128 times. Only commit when the approach speed can
+			// actually clear the gap; otherwise DECLINE and let vanilla nav walk
+			// the bot around (no pit suicide). k_kbot_gj_build (default off) may
+			// try a circle-jump run-up to reach v_req before declining.
+			{
+				vec3_t hv;
+				float vreq = GJ_RequiredSpeed(take, land);
+				float gate = cvar("k_kbot_gj_gate");
+				float vh;
+
+				if (gate <= 0)
+				{
+					gate = 0.98f;
+				}
+				hv[0] = self->s.v.velocity[0];
+				hv[1] = self->s.v.velocity[1];
+				hv[2] = 0;
+				vh = VectorLength(hv);
+
+				if (gj_state[slot] != GJ_CROSS && vh < vreq * gate)
+				{
+					if (cvar("k_kbot_gj_build") > 0)
+					{
+						// Experimental: grounded circle-jump accel toward the
+						// launch heading until fast enough, then release to CROSS.
+						return GJ_BuildFrame(self, slot, pick, jumping, firing,
+											 impulse, direction);
+					}
+					if (cvar("k_kbot_gj_gatelog"))
+					{
+						G_cprint("[gapjump] lane=%s result=DECLINE_SLOW vh=%.0f "
+								 "vreq=%.0f pos=%.0f,%.0f,%.0f\n",
+								 gj_lanes[pick].name, vh, vreq,
+								 self->s.v.origin[0], self->s.v.origin[1],
+								 self->s.v.origin[2]);
+					}
+					gj_state[slot] = GJ_IDLE;
+					return false; // too slow -> decline, vanilla nav continues
+				}
+			}
+
 			// Execute one crossing (no teleport; use live position/speed).
 			if (gj_state[slot] != GJ_CROSS || gj_lane_active[slot] != pick)
 			{

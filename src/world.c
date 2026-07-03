@@ -1097,6 +1097,19 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_gj_cal", "0");
 	RegisterCvarEx("k_kbot_gj_traj", "0");
 	RegisterCvarEx("k_kbot_gj_caldir", "0");
+	// E8 ballistic launch model: per-lane heading offset (human -11 deg lever;
+	// default 0), air-accel discount for v_req, direct v_req override, and the
+	// required-speed GATE (decline a crossing unless approach speed >= v_req*gate
+	// so the bot stops falling into the pit -- E7's -9.92 came from that).
+	RegisterCvarEx("k_kbot_gj_head_off", "0");
+	RegisterCvarEx("k_kbot_gj_airgain", "0.93");
+	RegisterCvarEx("k_kbot_gj_vreq", "0");
+	RegisterCvarEx("k_kbot_gj_gate", "0.98");
+	RegisterCvarEx("k_kbot_gj_gatelog", "0");
+	// E8 experimental circle-jump run-up (default off): build to v_req before launch.
+	RegisterCvarEx("k_kbot_gj_build", "0");
+	RegisterCvarEx("k_kbot_gj_buildtime", "1.5");
+	RegisterCvarEx("k_kbot_gj_build_angle", "42");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
