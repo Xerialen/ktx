@@ -1075,6 +1075,11 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
 
+	// KBOT (E3): in-match carve motor gate. 0 = OFF (default) = vanilla
+	// movement, byte-for-byte, so every existing bench version is unaffected.
+	// 1 = motor ON (fmove/smove + jump only; never the view channel).
+	RegisterCvarEx("k_kbot_carve", "0");
+
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
 		RegisterCvarEx(va("k_fb_name_%d", i), "");

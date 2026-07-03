@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h" // KBot_CarveFrame (E3 in-match carve motor)
 
 #define ARROW_TIME_INCREASE       0.15  // Seconds to advance after NewVelocityForArrow
 #define MIN_DEAD_TIME 0.2f
@@ -6179,6 +6180,20 @@ void BotSetCommand(gedict_t *self)
 	}
 
 	BotApplyMoveProbe(self, &jumping, &firing, &impulse, direction);
+
+	// KBOT (E3): in-match carve motor -- final authority over the MOVEMENT
+	// channel (fmove/smove + jump) when k_kbot_carve is on; inert otherwise, so
+	// every existing bench version is byte-for-byte unchanged. It reads the
+	// current aim-owned view yaw BY VALUE (desired_angle[YAW]) and the nav
+	// course (dir_move_), projects through the view, and writes only direction
+	// and jumping -- never desired_angle. firing is the combat veto: a grounded
+	// shot suppresses the hop.
+	if (self->fb.kbot)
+	{
+		KBot_CarveFrame(self, self->fb.desired_angle[YAW], firing,
+						self->fb.dir_move_[0], self->fb.dir_move_[1],
+						&jumping, direction);
+	}
 
 	if ((slot >= 0) && (slot < MAX_CLIENTS) && (moveprobe_replay_cmd_msec[slot] > 0))
 	{

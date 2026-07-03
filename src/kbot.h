@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.8.0-tunable"
+#define KBOT_VERSION "kbot-0.16.0-carve"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -44,6 +44,23 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+
+// E3 in-match carve motor (kbot-0.16.0-carve). Rebuilds the bunnyhop carve
+// controller (theory doc section 5B) as a stateless-per-frame feedback law.
+//
+// CHANNEL CONTRACT (section 5A, non-negotiable): writes ONLY the movement
+// channel (direction[0]/direction[1] = fmove/smove) and the jump bit -- it
+// NEVER writes desired_angle/v_angle/view. The aim-owned view yaw enters BY
+// VALUE (view_yaw), so no code path in the motor can steer the view; the motor
+// only PROJECTS its world-frame wishdir through it. combat_nojump is the combat
+// veto: when the aim/fire layer wants a grounded shot, it suppresses the hop.
+// course_x/course_y are the world-frame desired course (nav dir_move_). Returns
+// true when the motor owned movement this frame (direction + *jumping set);
+// inert (returns false, touches nothing) when k_kbot_carve == 0 -> vanilla
+// movement is byte-for-byte unchanged.
+qbool KBot_CarveFrame(gedict_t *self, float view_yaw, qbool combat_nojump,
+					  float course_x, float course_y, qbool *jumping,
+					  vec3_t direction);
 
 #endif // BOT_SUPPORT
 

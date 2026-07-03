@@ -151,7 +151,15 @@ static void BotOnGroundMovement(gedict_t *self, vec3_t dir_move)
 {
 	float dodge_factor = 0;
 
-	if ((int)self->s.v.flags & FL_ONGROUND)
+	// E3 air-dodge: the dodge budget is normally FL_ONGROUND-gated. Extend it to
+	// also fire AIRBORNE, with the SAME lateral budget (self->fb.skill.dodge_amount
+	// via BotDodgeMovement), but ONLY for carve-motor kbots (self->fb.kbot &&
+	// k_kbot_carve). This keeps the frogbot baseline and every non-carve bot
+	// byte-for-byte identical on the ground AND in the air; the ground path is
+	// unchanged for everyone. Like the ground dodge, it writes only the movement
+	// vector (dir_move), never the view -- so the channel contract holds.
+	if (((int)self->s.v.flags & FL_ONGROUND)
+			|| (self->fb.kbot && cvar("k_kbot_carve")))
 	{
 		if (!(self->fb.path_state & NO_DODGE))
 		{
