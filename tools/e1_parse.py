@@ -76,7 +76,12 @@ def main():
         # per-pass curve points
         passes = sorted(set(r["pass"] for r in rows))
         at2, at4, peak = [], [], []
-        vyaws = [r["view_yaw"] for r in rows]
+        # View-yaw variance over CARVE frames only (speed > 100): the first
+        # sample of each pass is the teleport frame, logged before the E1 pin
+        # snaps the view, so it carries the stale pre-pin yaw and would inflate
+        # the variance. During actual carving the view is pinned (vyaw ~ const).
+        vyaws = [r["view_yaw"] for r in rows if r["speed"] > 100.0] or \
+                [r["view_yaw"] for r in rows]
         for p in passes:
             series = [r for r in rows if r["pass"] == p]
             s2 = speed_at(series, 2.0)
