@@ -1,5 +1,9 @@
-import collections, sys
-OUT = open("/mnt/c/Users/benya/kbot-e6/loc_out.txt", "w")
+import collections, sys, os
+from pathlib import Path
+E6_DIR = Path(os.environ.get("KBOT_E6_DIR", Path(__file__).resolve().parent.parent))
+E6_DIR.mkdir(parents=True, exist_ok=True)
+SERVERDIR = Path(os.environ.get("KBOT_SERVERDIR", Path.home() / "kbot" / "serverdir"))
+OUT = open(E6_DIR / "loc_out.txt", "w")
 def print(*a, **k):
     __builtins__.print(*a, file=OUT, **k)
 TOK = "$loc_name_"
@@ -17,7 +21,7 @@ def expand(s):
             out = out[:i] + "?" + out[i+len(TOK):]
     return out
 areas = collections.defaultdict(list)
-for line in open("/home/xerial/kbot/serverdir/ktx/locs/dm3.loc"):
+for line in open(SERVERDIR / "ktx" / "locs" / "dm3.loc"):
     p = line.split()
     if len(p) < 4: continue
     try: x, y, z = int(p[0])/8, int(p[1])/8, int(p[2])/8

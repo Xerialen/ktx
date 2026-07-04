@@ -1,6 +1,10 @@
-import struct, sys, collections
-BSP = "/home/xerial/kbot/serverdir/qw/maps/dm3.bsp"
-OUT = open("/mnt/c/Users/benya/kbot-e6/bsp_floor.txt", "w")
+import struct, sys, collections, os
+from pathlib import Path
+E6_DIR = Path(os.environ.get("KBOT_E6_DIR", Path(__file__).resolve().parent.parent))
+E6_DIR.mkdir(parents=True, exist_ok=True)
+SERVERDIR = Path(os.environ.get("KBOT_SERVERDIR", Path.home() / "kbot" / "serverdir"))
+BSP = str(SERVERDIR / "qw" / "maps" / "dm3.bsp")
+OUT = open(E6_DIR / "bsp_floor.txt", "w")
 def P(*a): __builtins__.print(*a, file=OUT)
 d = open(BSP, "rb").read()
 ver = struct.unpack_from("<i", d, 0)[0]

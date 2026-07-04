@@ -1,6 +1,9 @@
-import re, collections, sys
-LOG = sys.argv[1] if len(sys.argv)>1 else "/home/xerial/kbot/gj-lab/server.log"
-OUT=open("/mnt/c/Users/benya/kbot-e6/cal_classify.txt","w")
+import re, collections, sys, os
+from pathlib import Path
+E6_DIR = Path(os.environ.get("KBOT_E6_DIR", Path(__file__).resolve().parent.parent))
+E6_DIR.mkdir(parents=True, exist_ok=True)
+LOG = sys.argv[1] if len(sys.argv)>1 else str(E6_DIR / "server.log")
+OUT=open(E6_DIR / "cal_classify.txt","w")
 def P(*a): __builtins__.print(*a,file=OUT)
 rx=re.compile(r"\[gjcal\] to=\((.*?)\) settle=(-?\d+),(-?\d+),(-?\d+) og=(\d) loc=(.+)$")
 byto=collections.OrderedDict()

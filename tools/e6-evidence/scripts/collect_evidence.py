@@ -1,7 +1,9 @@
 import re, os
-logs = ["/mnt/c/Users/benya/kbot-e6/rq_server.log",
-        "/mnt/c/Users/benya/kbot-e6/ry2_server.log"]
-ev_dir = "/home/xerial/kbot/ktx-gapjump/tools/e6-evidence"
+from pathlib import Path
+E6_DIR = Path(os.environ.get("KBOT_E6_DIR", Path(__file__).resolve().parent.parent))
+logs = [str(E6_DIR / "rq_server.log"),
+        str(E6_DIR / "ry2_server.log")]
+ev_dir = str(Path(__file__).resolve().parent.parent)
 os.makedirs(ev_dir, exist_ok=True)
 rx = re.compile(r"(\[gapjump\] lane=\S+ trial=\d+ result=\S+.*)$")
 lines = []

@@ -1,6 +1,9 @@
-import re
-LOG="/mnt/c/Users/benya/kbot-e6/wall_server.log"
-OUT=open("/mnt/c/Users/benya/kbot-e6/wall_map.txt","w")
+import re, os
+from pathlib import Path
+E6_DIR = Path(os.environ.get("KBOT_E6_DIR", Path(__file__).resolve().parent.parent))
+E6_DIR.mkdir(parents=True, exist_ok=True)
+LOG=str(E6_DIR / "wall_server.log")
+OUT=open(E6_DIR / "wall_map.txt","w")
 def P(*a): __builtins__.print(*a,file=OUT)
 rx=re.compile(r"\[gjcal\] to=\((-?\d+) (-?\d+) (-?\d+)\) dir=1 hit=(-?\d+),(-?\d+),(-?\d+) nz=([\d.\-]+) frac=([\d.]+)")
 data={}

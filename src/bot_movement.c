@@ -5386,6 +5386,7 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 			// Vanilla only ever STEERS at such goals; touch stays physical.
 			// So do we: weave toward it, never carrot it.
 			if ((marker_dist_sq < pass_r * pass_r)
+				&& self->fb.linked_marker
 				&& self->fb.linked_marker->fb.fl_marker
 				&& (moveprobe_s23_carrot_done[slot] != self->fb.linked_marker)
 				&& !(onground && (marker_dz > 18.0f)

@@ -488,7 +488,7 @@ void UpdateGoal(gedict_t *self)
 		// NULL for markers -- but touch_marker can end up on an entity that
 		// never went through the backfill (fb.goals[] all NULL). Skipping is
 		// exactly what EvalGoal does for a NULL goal entity anyway.
-		gedict_t *goal_next = self->fb.touch_marker->fb.goals[i].next_marker;
+		gedict_t *goal_next = self->fb.touch_marker ? self->fb.touch_marker->fb.goals[i].next_marker : NULL;
 
 		if (goal_next)
 		{

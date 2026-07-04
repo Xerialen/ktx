@@ -1,6 +1,9 @@
-import re, collections
-LOG="/mnt/c/Users/benya/kbot-e6/trace_server.log"
-OUT=open("/mnt/c/Users/benya/kbot-e6/floor_maps.txt","w")
+import re, collections, os
+from pathlib import Path
+E6_DIR = Path(os.environ.get("KBOT_E6_DIR", Path(__file__).resolve().parent.parent))
+E6_DIR.mkdir(parents=True, exist_ok=True)
+LOG=str(E6_DIR / "trace_server.log")
+OUT=open(E6_DIR / "floor_maps.txt","w")
 def P(*a): __builtins__.print(*a,file=OUT)
 rx=re.compile(r"\[gjcal\] to=\((-?\d+) (-?\d+) (-?\d+)\) floorz=(-?\d+) nz=([\d.\-]+) frac=([\d.]+) loc=(.+)$")
 floor={}
