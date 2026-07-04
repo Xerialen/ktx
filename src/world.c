@@ -1121,6 +1121,46 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_gj_maxprog", "40");
 	RegisterCvarEx("k_kbot_gj_ymax", "48");
 
+	// E9 ACTIVE jump-intent (the nav-integration layer). Default 0 = pure E8.2
+	// passive (byte-identical to the passive .so). When k_kbot_gj_active != 0 and
+	// k_kbot_gapjump != 0, a kbot whose nav GOAL is across a gap-lane and which is
+	// on the takeoff side (no enemy near) DELIBERATELY drives to the takeoff lip,
+	// aligns to the launch bow and builds to v_req, then launches -- instead of
+	// waiting for nav to incidentally satisfy the passive gates.
+	RegisterCvarEx("k_kbot_gj_active", "0");
+	// Intent region: engage when the bot is within intent_back units BEHIND the
+	// lip along the lane and within intent_perp units of the lane line, and the
+	// goal is on the far side. Height band keeps us on the takeoff ledge.
+	RegisterCvarEx("k_kbot_gj_intent_back", "384");
+	RegisterCvarEx("k_kbot_gj_intent_perp", "176");
+	RegisterCvarEx("k_kbot_gj_intent_zband", "56");
+	// Approach: abort to vanilla nav after apptime seconds; the drive steers at a
+	// lookahead point on the launch ray; launch when within launch_win (along) and
+	// launch_perp (lateral) of the lip AND fast enough. app_build 1 lets the drive
+	// circle-accel toward the lip when under v_req (short lane: v_req~344).
+	RegisterCvarEx("k_kbot_gj_apptime", "3.5");
+	RegisterCvarEx("k_kbot_gj_lookahead", "112");
+	RegisterCvarEx("k_kbot_gj_launch_win", "48");
+	RegisterCvarEx("k_kbot_gj_launch_perp", "28");
+	RegisterCvarEx("k_kbot_gj_app_build", "1");
+	// Launch speed floor = v_req * launch_mul (v_req~344; seeded 100% used ~450).
+	// Launching at bare v_req lands short (air-carve scrubs speed); require margin.
+	// 1.2 (~413) is the landing floor: launches at 413-445 land ~75%, launches at
+	// ~389 (mul 1.13) fall short. The asymmetric north gate handles the pillar-clip
+	// that was the OTHER cause of short-fall pit dives.
+	RegisterCvarEx("k_kbot_gj_launch_mul", "1.2");
+	// E9 re-engage cooldown after a decline (s) -- short, just breaks per-frame
+	// flicker so the bot gets a running restart without pinning at the lip.
+	RegisterCvarEx("k_kbot_gj_app_cool", "0.3");
+	// Active launch alignment tolerance (deg) vs the corridor axis -- the bot is
+	// driven along the corridor, so its arrival heading is ~u; allow this spread.
+	RegisterCvarEx("k_kbot_gj_app_align", "45");
+	// Pillar clearance: the corridor line is the NORTHERN edge; launching north of
+	// it clips the central pillar and falls. Reject launches with lat > north_max,
+	// and bias the drive south_bias units into the open corridor (south).
+	RegisterCvarEx("k_kbot_gj_north_max", "12");
+	RegisterCvarEx("k_kbot_gj_south_bias", "24");
+
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
 		RegisterCvarEx(va("k_fb_name_%d", i), "");

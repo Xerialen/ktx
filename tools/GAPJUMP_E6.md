@@ -49,3 +49,53 @@ Runner clears masters + sv_public 0 before server.cfg advertises; every run
 reports `heartbeat/A2A: 0`. Bots seated via qw_min_client.py (`botcmd addkbot`),
 editor OFF, dm3's shipped .bot. Geometry timelines: gj_timeline_{probe,trace,
 wall,south}.txt; analysis in e6-evidence/scripts/. No-op check: gj_noop_check.txt.
+
+---
+
+# E9 — ACTIVE jump-intent / nav integration (kbot-0.19.0-gapjump-nav)
+
+E8.2 is PASSIVE: the crossing only fires when nav INCIDENTALLY passes the takeoff
+lip already aligned + fast (~1.6 attempts/match, ~31% land). E9 makes the launch
+conditions TRUE BY CONSTRUCTION: when a kbot's nav GOAL is across a gap-lane and
+the bot is on the takeoff side (no enemy near), it DELIBERATELY drives to the lip,
+converges south of the central pillar, builds to the launch speed floor, and hands
+off to the E8.2 crossing. Never launches a doomed jump (declines instead).
+
+## Gating (k_kbot_gapjump 0 = FULL no-op, unchanged)
+- `k_kbot_gj_active` 0/1 — E9 master. 0 = pure E8.2 passive (byte-identical .so
+  behaviour to the passive path). Requires k_kbot_gapjump != 0 to do anything.
+
+## Intent detection
+`GJ_PickIntentLane`: the GOAL is `self->s.v.goalentity` (the item the bot routes
+to; falls back to linked_marker/look_object). For each lane: engage if the bot is
+on the takeoff side (along-lane in [-intent_back, 32], within intent_perp of the
+lane line, on the ledge z-band) AND the goal projects past the lane midpoint toward
+the landing (goal is across the gap). Nearest-to-lip lane wins.
+
+## Approach (`GJ_ApproachFrame`, state GJ_APPROACH)
+- Drive ALONG the corridor axis u (not the launch bow -- the bow points partly off
+  the ledge into the void and stalls the bot at the edge). Carrot on the corridor
+  line, clamped never past the lip, biased `south_bias` units SOUTH (into the open
+  corridor, clear of the pillar).
+- Circle-accel (`app_build`, reuses the E8 build primitive) toward the carrot when
+  under the speed floor with runway behind the lip.
+- LAUNCH when grounded at the lip window, fast (vh >= v_req*launch_mul) and aligned,
+  with an ASYMMETRIC perp gate: reject NORTH-of-line launches (they clip the pillar
+  and fall; every measured LAND had lat<=0). Then hand to GJ_Cross (E8.2 launch).
+- DECLINE/ABORT (-> vanilla nav, no pit dive): enemy near, timeout, past the lip
+  without launching, or stalled-slow at the lip. A short `cool` re-engage guard
+  stops engage/decline flicker so the bot gets a running restart.
+
+## Cvars (E9, all safe at defaults; k_kbot_gj_active 0 = off)
+`k_kbot_gj_active` 0, `_intent_back` 384, `_intent_perp` 176, `_intent_zband` 56,
+`_apptime` 3.5, `_lookahead` 112, `_launch_win` 48, `_launch_perp` 28,
+`_launch_mul` 1.2, `_app_align` 45, `_north_max` 12, `_south_bias` 24,
+`_app_build` 1. Reuses `_gate`/`_build_angle`/`_cool`/`_gatelog` from E8.
+
+## Diagnostic (lab-only, contained; --skip-ledger)
+    python3 lab/run_bench.py --serverdir .../serverdir --mvdsv .../mvdsv \
+      --team-a kbot --team-b frog --candidate-version kbot-0.19.0-gapjump-nav \
+      --matches N --jobs 4 --set k_kbot_weak_stack 100 \
+      --set k_kbot_gapjump 1 --set k_kbot_gj_active 1 --set k_kbot_gj_gatelog 1 \
+      --skip-ledger
+Grep server.log for `[gapjump] result=APP_LAUNCH|LAND|FAIL_GAP` counts.

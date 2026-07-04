@@ -274,6 +274,7 @@ static void GJ_CarveTarget(int lane, vec3_t takeoff, vec3_t landing, vec3_t org,
 #define GJ_CROSS 1
 #define GJ_COOL  2
 #define GJ_BUILD 3   // E8: circle-jump run-up to reach v_req before launching
+#define GJ_APPROACH 4 // E9: deliberate drive-to-lip + align + build, then launch
 
 static int   gj_state[MAX_CLIENTS];
 static int   gj_lane_active[MAX_CLIENTS];
@@ -287,6 +288,8 @@ static qbool gj_has_flown[MAX_CLIENTS];
 static float gj_probe_log[MAX_CLIENTS];
 static float gj_build_t0[MAX_CLIENTS];   // E8 build-state start time
 static int   gj_build_sign[MAX_CLIENTS]; // E8 circle-jump strafe sign
+static float gj_app_t0[MAX_CLIENTS];     // E9 approach-state start time
+static float gj_app_supp[MAX_CLIENTS];   // E9 re-engage suppress-until time
 
 // Resolve the active lane geometry, honouring cvar overrides (retune without a
 // rebuild). k_kbot_gj_to / _land are "x y z" strings; empty -> table value.
@@ -782,6 +785,365 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 	return true;
 }
 
+// ---------------------------------------------------------------------------
+//  E9: ACTIVE jump-intent (nav integration)
+// ---------------------------------------------------------------------------
+// The E8.2 passive trigger only fires when nav INCIDENTALLY passes the takeoff
+// lip already aligned + fast -- rare (~1.6 attempts/match) and low yield (~31%
+// land). E9 makes the launch conditions TRUE BY CONSTRUCTION: when a kbot's nav
+// GOAL is on the far side of a gap-lane and the bot is on the takeoff side (no
+// enemy near), it DELIBERATELY drives to the lip, converges onto the launch
+// ray, builds to v_req if slow, and hands off to the proven E8.2 crossing when
+// it arrives at the lip aligned + fast. If it cannot complete (blocked, timeout,
+// enemy) it aborts to vanilla nav -- it never launches a doomed jump, and the
+// existing pit-fall gates remain the final safety.
+
+// Resolve the bot's NAV GOAL entity: the item it is routing to (goalentity),
+// else the current path/aim marker. NULL if none.
+static gedict_t *GJ_GoalEntity(gedict_t *self)
+{
+	gedict_t *goal = NULL;
+	int gn = (int)self->s.v.goalentity;
+
+	if (gn > 0 && gn < MAX_EDICTS)
+	{
+		goal = &g_edicts[gn];
+	}
+	if (!goal || goal == world)
+	{
+		goal = self->fb.linked_marker ? self->fb.linked_marker : self->fb.look_object;
+	}
+	if (!goal || goal == world)
+	{
+		return NULL;
+	}
+	return goal;
+}
+
+// Pick the gap-lane the bot should deliberately set up: bot on the takeoff side
+// (behind the lip along the lane, within the corridor band, on the ledge) AND
+// the GOAL is across the gap (projects past the lane midpoint toward landing).
+// Returns lane index, or -1. Nearest-to-lip wins.
+static int GJ_PickIntentLane(gedict_t *self)
+{
+	int i, pick = -1;
+	float best = 1e30f;
+	vec3_t org, goalorg;
+	gedict_t *goal;
+	float back = cvar("k_kbot_gj_intent_back");
+	float pmax = cvar("k_kbot_gj_intent_perp");
+	float zband = cvar("k_kbot_gj_intent_zband");
+
+	if (back <= 0)  { back = 384; }
+	if (pmax <= 0)  { pmax = 176; }
+	if (zband <= 0) { zband = 56; }
+
+	goal = GJ_GoalEntity(self);
+	if (!goal)
+	{
+		return -1;
+	}
+	VectorCopy(goal->s.v.origin, goalorg);
+	VectorCopy(self->s.v.origin, org);
+
+	for (i = 0; i < GJ_NUM_LANES; i++)
+	{
+		vec3_t take, land, u, perp, rel;
+		float lanelen, along, lat, galong;
+
+		VectorCopy(gj_lanes[i].takeoff, take);
+		VectorCopy(gj_lanes[i].landing, land);
+		u[0] = land[0] - take[0];
+		u[1] = land[1] - take[1];
+		u[2] = 0;
+		lanelen = VectorLength(u);
+		if (lanelen < 1)
+		{
+			continue;
+		}
+		VectorNormalize(u);
+		perp[0] = -u[1];
+		perp[1] = u[0];
+		perp[2] = 0;
+		rel[0] = org[0] - take[0];
+		rel[1] = org[1] - take[1];
+		rel[2] = 0;
+		along = DotProduct(rel, u);
+		lat = rel[0] * perp[0] + rel[1] * perp[1];
+
+		if (along > 32 || along < -back)   // must be on the takeoff side
+		{
+			continue;
+		}
+		if (fabs(lat) > pmax)              // within the approach corridor
+		{
+			continue;
+		}
+		if (fabs(org[2] - take[2]) > zband) // on the takeoff ledge
+		{
+			continue;
+		}
+		galong = (goalorg[0] - take[0]) * u[0] + (goalorg[1] - take[1]) * u[1];
+		if (galong < lanelen * 0.5f)       // goal must be across the gap
+		{
+			continue;
+		}
+		if (fabs(along) < best)
+		{
+			best = fabs(along);
+			pick = i;
+		}
+	}
+	return pick;
+}
+
+// One deliberate-approach frame. Drives the bot onto the launch ray toward the
+// lip, builds to v_req when slow, and commits the E8.2 crossing at the lip.
+// Returns true (owns the command) while approaching; on abort sets IDLE and
+// returns false so vanilla nav resumes.
+static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping,
+							  qbool *firing, int *impulse, vec3_t direction)
+{
+	vec3_t take, land, org, u, rel, tgt, wish, ang, up = { 0, 0, 1 };
+	float fail_z, vreq, lanelen, view_yaw, u_yaw;
+	float along_u, lat_n, vh, floor, now, apptime, vyaw, aerr;
+	float launch_win, launch_perp, lookahead, build_angle, ca, align_tol;
+	qbool onground = ((int)self->s.v.flags & FL_ONGROUND) ? true : false;
+	qbool at_lip, fast, aligned;
+
+	GJ_Geometry(lane, take, land, &fail_z);
+	vreq = GJ_RequiredSpeed(take, land);
+	now = g_globalvars.time;
+	VectorCopy(self->s.v.origin, org);
+
+	// Corridor axis u (lip -> landing, the wall-free y~146 line). We drive the
+	// bot ALONG the corridor, not along the launch bow: the bow (-30 deg) points
+	// partly off the ledge into the void, so nosing toward it stalls the bot at
+	// the edge (measured: it reached the lip at vh~12-96 and timed out). Driving
+	// along u keeps the bot on the ledge building speed; GJ_Cross applies the bow
+	// on the hop frame and the air-carve corrects the arc.
+	u[0] = land[0] - take[0];
+	u[1] = land[1] - take[1];
+	u[2] = 0;
+	lanelen = VectorLength(u);
+	if (lanelen < 1)
+	{
+		gj_state[slot] = GJ_IDLE;
+		return false;
+	}
+	VectorNormalize(u);
+	u_yaw = vectoyaw(u);
+
+	rel[0] = org[0] - take[0];
+	rel[1] = org[1] - take[1];
+	rel[2] = 0;
+	along_u = DotProduct(rel, u);
+	// Lateral offset in WORLD +Y = NORTH (toward the central pillar) for BOTH lanes
+	// -- the corridor runs along world X at y~146 and the pillar is always north of
+	// it. Using u's perpendicular would flip sign between ring2quad and quad2ring
+	// (quad2ring's -X axis makes uperp point south), which drove quad2ring INTO the
+	// pillar. lat_n > 0 = north (pillar, reject); lat_n < 0 = south (open, allow).
+	lat_n = org[1] - take[1];
+
+	{
+		vec3_t hv = { self->s.v.velocity[0], self->s.v.velocity[1], 0 };
+
+		vh = VectorLength(hv);
+	}
+	apptime = cvar("k_kbot_gj_apptime");
+	if (apptime <= 0) { apptime = 3.5f; }
+	launch_win = cvar("k_kbot_gj_launch_win");
+	if (launch_win <= 0) { launch_win = 48; }
+	launch_perp = cvar("k_kbot_gj_launch_perp");
+	if (launch_perp <= 0) { launch_perp = 28; }
+	lookahead = cvar("k_kbot_gj_lookahead");
+	if (lookahead <= 0) { lookahead = 112; }
+	align_tol = cvar("k_kbot_gj_app_align");
+	if (align_tol <= 0) { align_tol = 45; }
+	{
+		float cool = cvar("k_kbot_gj_app_cool");
+
+		gj_app_supp[slot] = now + ((cool > 0) ? cool : 0.3f); // decline re-engage guard
+	}
+	// Launch SPEED FLOOR = v_req * launch_mul. v_req (~344) is the bare ballistic
+	// minimum, but the air-carve scrubs speed while correcting heading, so a bot
+	// launching AT v_req lands short in the pit (measured: 344 -> falls mid-gap;
+	// the clean lands all left at 418-453). Require the margin; app_build tops the
+	// bot up. Launching below the floor DECLINES rather than dives.
+	{
+		float mul = cvar("k_kbot_gj_launch_mul");
+
+		if (mul <= 0) { mul = 1.2f; }
+		floor = vreq * mul;
+	}
+	fast = vh >= floor;
+
+	// Velocity heading error vs the corridor axis (the direction we deliver).
+	vyaw = (vh > 1) ? atan2(self->s.v.velocity[1], self->s.v.velocity[0])
+						  * 180.0f / M_PI
+					: u_yaw;
+	aerr = u_yaw - vyaw;
+	while (aerr > 180) { aerr -= 360; }
+	while (aerr < -180) { aerr += 360; }
+	if (aerr < 0) { aerr = -aerr; }
+	aligned = (aerr <= align_tol);
+
+	// Abort -> vanilla nav (never launch a doomed jump).
+	if ((now - gj_app_t0[slot]) > apptime)
+	{
+		if (cvar("k_kbot_gj_gatelog"))
+		{
+			G_cprint("[gapjump] lane=%s result=APP_ABORT_TIMEOUT along=%.0f lat=%.0f "
+					 "vh=%.0f floor=%.0f\n",
+					 gj_lanes[lane].name, along_u, lat_n, vh, floor);
+		}
+		gj_state[slot] = GJ_IDLE;
+		return false;
+	}
+	if (self->fb.enemy_visible)   // enemy showed up mid-setup -> yield
+	{
+		gj_state[slot] = GJ_IDLE;
+		return false;
+	}
+
+	// LAUNCH: grounded at the lip window (on the corridor line), fast enough AND
+	// aligned -> commit the proven E8.2 crossing (hop fires on its first grounded
+	// frame; GJ_Cross applies the launch bow + air-carve).
+	// ASYMMETRIC perp gate: the corridor line (y~146) is the NORTHERN edge, and the
+	// central pillar sits just north of it. Launches from NORTH of the line clip
+	// the pillar and fall (measured: lat=+15/+18 -> FAIL_GAP; every LAND had
+	// lat<=0). So allow the bot to sit SOUTH (into the open corridor) but reject
+	// north-of-line launches: -launch_perp <= lat_n <= north_max.
+	{
+		float north_max = cvar("k_kbot_gj_north_max");
+
+		if (north_max <= 0) { north_max = 12; }
+		at_lip = (along_u >= -launch_win && along_u <= launch_win) &&
+				 (lat_n >= -launch_perp && lat_n <= north_max) && aligned;
+	}
+	if (onground && at_lip && fast)
+	{
+		if (cvar("k_kbot_gj_gatelog"))
+		{
+			G_cprint("[gapjump] lane=%s result=APP_LAUNCH along=%.0f lat=%.0f vh=%.0f "
+					 "vreq=%.0f floor=%.0f vyaw=%.0f uyaw=%.0f t=%.2f\n",
+					 gj_lanes[lane].name, along_u, lat_n, vh, vreq, floor, vyaw,
+					 u_yaw, now - gj_app_t0[slot]);
+		}
+		gj_t0[slot] = now;
+		gj_peak[slot] = 0;
+		gj_flip[slot] = 1;
+		gj_jump_latch[slot] = false;
+		gj_has_flown[slot] = false;
+		gj_state[slot] = GJ_CROSS;
+		return GJ_Cross(self, slot, lane, jumping, firing, impulse, direction);
+	}
+
+	// PAST THE LIP without launching (fast but mis-aligned, or drifted past the
+	// window): decline immediately so we never steer a non-committed bot further
+	// toward the gap. The ca<=0 carrot never drives here deliberately; this only
+	// catches momentum overshoot.
+	if (onground && along_u > launch_win)
+	{
+		if (cvar("k_kbot_gj_gatelog"))
+		{
+			G_cprint("[gapjump] lane=%s result=APP_DECLINE_PAST along=%.0f lat=%.0f "
+					 "vh=%.0f aerr=%.0f\n",
+					 gj_lanes[lane].name, along_u, lat_n, vh, aerr);
+		}
+		gj_state[slot] = GJ_IDLE;
+		return false;
+	}
+
+	// STALLED AT THE LIP EDGE: reached the lip (along_u >= 0) grounded but not fast
+	// enough to launch. The bot cannot walk off the ledge, so it just decelerates
+	// here -- decline NOW (rather than burn the whole timeout) so vanilla nav
+	// re-carries it and it re-approaches with a running start. Behind the lip
+	// (along_u < 0) it still has runway to build, so we do NOT decline there.
+	if (onground && (along_u >= 0) && !fast)
+	{
+		if (cvar("k_kbot_gj_gatelog"))
+		{
+			G_cprint("[gapjump] lane=%s result=APP_DECLINE_SLOW along=%.0f lat=%.0f "
+					 "vh=%.0f floor=%.0f\n",
+					 gj_lanes[lane].name, along_u, lat_n, vh, floor);
+		}
+		gj_state[slot] = GJ_IDLE;
+		return false;
+	}
+
+	// Drive carrot: a point on the corridor line, ahead toward the lip but never
+	// past it (ca clamped <= 0 so we never steer into the gap), and biased SOUTH of
+	// the line (into the open corridor, away from the pillar) by south_bias so the
+	// bot arrives south-of-line where the crossing is clear. Steering at this point
+	// converges the bot onto the (biased) corridor AND forward to the lip.
+	{
+		float south_bias = cvar("k_kbot_gj_south_bias");
+
+		if (south_bias < 0) { south_bias = 0; }
+		ca = along_u + lookahead;
+		if (ca > 0) { ca = 0; }
+		tgt[0] = take[0] + u[0] * ca;
+		tgt[1] = take[1] + u[1] * ca - south_bias; // bias toward world -Y (south)
+		tgt[2] = org[2];
+	}
+	wish[0] = tgt[0] - org[0];
+	wish[1] = tgt[1] - org[1];
+	wish[2] = 0;
+	if (VectorNormalize(wish) <= 0)
+	{
+		VectorCopy(u, wish);
+	}
+
+	// Under-speed with runway behind the lip -> circle-accel toward the drive
+	// heading to build speed along the corridor (v_req ~344; nav momentum often
+	// already meets the floor, so this fires mainly on slow arrivals).
+	build_angle = cvar("k_kbot_gj_build_angle");
+	if (build_angle <= 0) { build_angle = 42; }
+	if (cvar("k_kbot_gj_app_build") && onground && !fast && along_u < 0)
+	{
+		vec3_t cur = { self->s.v.velocity[0], self->s.v.velocity[1], 0 };
+
+		if (VectorLength(cur) > 40)   // need real velocity to circle off
+		{
+			float cyaw = atan2(cur[1], cur[0]) * 180.0f / M_PI;
+			float e = vectoyaw(wish) - cyaw;
+			int sgn;
+
+			while (e > 180) { e -= 360; }
+			while (e < -180) { e += 360; }
+			sgn = (e >= 0) ? 1 : -1;
+			VectorNormalize(cur);
+			RotatePointAroundVector(wish, up, cur, build_angle * sgn);
+			wish[2] = 0;
+			VectorNormalize(wish);
+		}
+	}
+
+	// Projection seam: wishdir -> fmove/smove through the view yaw (cancels).
+	view_yaw = vectoyaw(wish);
+	VectorSet(ang, 0, view_yaw, 0);
+	trap_makevectors(ang);
+	self->fb.desired_angle[PITCH] = 0;
+	self->fb.desired_angle[YAW] = view_yaw;
+	self->fb.desired_angle[ROLL] = 0;
+	direction[0] = DotProduct(g_globalvars.v_forward, wish) * 800;
+	direction[1] = DotProduct(g_globalvars.v_right, wish) * 800;
+	direction[2] = 0;
+	*jumping = false;
+	*firing = false;
+	*impulse = 0;
+
+	if (cvar("k_kbot_gj_traj"))
+	{
+		G_cprint("[gjapp] t=%.2f pos=%.0f,%.0f,%.0f along=%.0f lat=%.0f vh=%.0f "
+				 "floor=%.0f og=%d\n",
+				 now - gj_app_t0[slot], org[0], org[1], org[2], along_u, lat_n,
+				 vh, floor, onground ? 1 : 0);
+	}
+	return true;
+}
+
 qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 					   int *impulse, vec3_t direction)
 {
@@ -926,6 +1288,17 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 		return GJ_BuildFrame(self, slot, gj_lane_active[slot], jumping, firing,
 							 impulse, direction);
 	}
+	// Continue an in-flight E9 deliberate approach.
+	if (gj_state[slot] == GJ_APPROACH)
+	{
+		if (ISDEAD(self))
+		{
+			gj_state[slot] = GJ_IDLE;
+			return false;
+		}
+		return GJ_ApproachFrame(self, slot, gj_lane_active[slot], jumping, firing,
+								impulse, direction);
+	}
 	if (gj_state[slot] == GJ_COOL)
 	{
 		gj_state[slot] = GJ_IDLE; // release movement back to vanilla nav
@@ -939,6 +1312,41 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 	{
 		return false;
 	}
+
+	// ---- E9 ACTIVE jump-intent (k_kbot_gj_active) ----
+	// Deliberately set up the jump: if the nav goal is across a gap-lane and the
+	// bot is on the takeoff side, drive to the lip / align / build, then launch.
+	// Supersedes the passive incidental trigger when enabled.
+	if (cvar("k_kbot_gj_active"))
+	{
+		int pick;
+
+		// Re-engage cooldown: after a decline/abort we suppress re-engaging for a
+		// short window so the bot is carried clear by nav and comes back with a
+		// running start, instead of flickering engage/decline at the lip every frame.
+		if (now < gj_app_supp[slot])
+		{
+			return false;
+		}
+		pick = GJ_PickIntentLane(self);
+
+		if (pick >= 0)
+		{
+			gj_lane_active[slot] = pick;
+			gj_app_t0[slot] = now;
+			gj_build_sign[slot] = 0;
+			gj_state[slot] = GJ_APPROACH;
+			if (cvar("k_kbot_gj_gatelog"))
+			{
+				G_cprint("[gapjump] lane=%s result=APP_ENGAGE\n",
+						 gj_lanes[pick].name);
+			}
+			return GJ_ApproachFrame(self, slot, pick, jumping, firing, impulse,
+									direction);
+		}
+		return false; // no intent this frame -> vanilla nav
+	}
+
 	{
 		// Find the takeoff lane whose zone contains us and whose landing is the
 		// side our nav goal is on. Zone = within GJ_ZONE of a takeoff origin.
