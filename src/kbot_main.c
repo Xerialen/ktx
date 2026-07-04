@@ -654,7 +654,10 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	if (press && cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3) &&
 		cvar("k_kbot_gj_aimlaunch") >= 0 && speed > 1)
 	{
-		vec3_t la = { 0, launch_bearing, 0 };
+		vec3_t la;
+		la[0] = 0;
+		la[1] = launch_bearing;
+		la[2] = 0;
 
 		trap_makevectors(la);
 		self->s.v.velocity[0] = g_globalvars.v_forward[0] * speed;
@@ -1171,7 +1174,10 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	lat_n = org[1] - take[1];
 
 	{
-		vec3_t hv = { self->s.v.velocity[0], self->s.v.velocity[1], 0 };
+		vec3_t hv;
+		hv[0] = self->s.v.velocity[0];
+		hv[1] = self->s.v.velocity[1];
+		hv[2] = 0;
 
 		vh = VectorLength(hv);
 	}
@@ -1367,7 +1373,10 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		if (cvar("k_kbot_gj_app_build") && onground && (vh < build_hi) &&
 			along_u < 0)
 		{
-			vec3_t cur = { self->s.v.velocity[0], self->s.v.velocity[1], 0 };
+			vec3_t cur;
+			cur[0] = self->s.v.velocity[0];
+			cur[1] = self->s.v.velocity[1];
+			cur[2] = 0;
 
 			if (VectorLength(cur) > 40)   // need real velocity to circle off
 			{

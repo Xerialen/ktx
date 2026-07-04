@@ -4066,7 +4066,10 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		if (VectorNormalize(cur_dir) <= 0)
 		{
 			// At rest: seed the heading from the current view.
-			vec3_t view_angles = { 0, self->fb.desired_angle[YAW], 0 };
+			vec3_t view_angles;
+			view_angles[0] = 0;
+			view_angles[1] = self->fb.desired_angle[YAW];
+			view_angles[2] = 0;
 
 			trap_makevectors(view_angles);
 			VectorCopy(g_globalvars.v_forward, cur_dir);
@@ -4217,7 +4220,10 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		cur_dir[2] = 0;
 		if (VectorNormalize(cur_dir) <= 0)
 		{
-			vec3_t view_angles = { 0, self->fb.desired_angle[YAW], 0 };
+			vec3_t view_angles;
+			view_angles[0] = 0;
+			view_angles[1] = self->fb.desired_angle[YAW];
+			view_angles[2] = 0;
 
 			trap_makevectors(view_angles);
 			VectorCopy(g_globalvars.v_forward, cur_dir);
@@ -4336,7 +4342,10 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		// (identical accel to v3), but the bot now faces the direction it travels --
 		// mostly strafe + look-ahead, like a human, not a forward-stare at the infield.
 		{
-			vec3_t view_ang = { 0, base_yaw, 0 };
+			vec3_t view_ang;
+			view_ang[0] = 0;
+			view_ang[1] = base_yaw;
+			view_ang[2] = 0;
 
 			trap_makevectors(view_ang);
 			self->fb.desired_angle[PITCH] = 0;
@@ -4554,7 +4563,10 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		cur_dir[2] = 0;
 		if (VectorNormalize(cur_dir) <= 0)
 		{
-			vec3_t view_angles = { 0, self->fb.desired_angle[YAW], 0 };
+			vec3_t view_angles;
+			view_angles[0] = 0;
+			view_angles[1] = self->fb.desired_angle[YAW];
+			view_angles[2] = 0;
 
 			trap_makevectors(view_angles);
 			VectorCopy(g_globalvars.v_forward, cur_dir);
@@ -4743,7 +4755,10 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		cur_dir[2] = 0;
 		if (VectorNormalize(cur_dir) <= 0)
 		{
-			vec3_t va = { 0, self->fb.desired_angle[YAW], 0 };
+			vec3_t va;
+			va[0] = 0;
+			va[1] = self->fb.desired_angle[YAW];
+			va[2] = 0;
 
 			trap_makevectors(va);
 			VectorCopy(g_globalvars.v_forward, cur_dir);
@@ -4885,7 +4900,10 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		cur_dir[2] = 0;
 		if (VectorNormalize(cur_dir) <= 0)
 		{
-			vec3_t view_angles = { 0, self->fb.desired_angle[YAW], 0 };
+			vec3_t view_angles;
+			view_angles[0] = 0;
+			view_angles[1] = self->fb.desired_angle[YAW];
+			view_angles[2] = 0;
 
 			trap_makevectors(view_angles);
 			VectorCopy(g_globalvars.v_forward, cur_dir);
@@ -4999,7 +5017,10 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 
 		if (VectorNormalize(cur_dir) <= 0)
 		{
-			vec3_t view_angles = { 0, self->fb.desired_angle[YAW], 0 };
+			vec3_t view_angles;
+			view_angles[0] = 0;
+			view_angles[1] = self->fb.desired_angle[YAW];
+			view_angles[2] = 0;
 
 			trap_makevectors(view_angles);
 			VectorCopy(g_globalvars.v_forward, cur_dir);
@@ -5146,7 +5167,10 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 
 		if (VectorNormalize(cur_dir) <= 0)
 		{
-			vec3_t view_angles = { 0, self->fb.desired_angle[YAW], 0 };
+			vec3_t view_angles;
+			view_angles[0] = 0;
+			view_angles[1] = self->fb.desired_angle[YAW];
+			view_angles[2] = 0;
 
 			trap_makevectors(view_angles);
 			VectorCopy(g_globalvars.v_forward, cur_dir);
