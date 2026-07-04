@@ -3298,6 +3298,19 @@ static void BotApplyMoveProbe(gedict_t *self, qbool *jumping, qbool *firing, int
 		{
 			moveprobe_assign_signature[slot][0] = '\0';
 		}
+		// PR #2 P2: a kbot that dies (or is frozen/idled) mid-windup must not
+		// carry a stale circle-jump launch attempt into respawn. Without this,
+		// a fast respawn before the 3 s safeguard fires would treat the old
+		// attempt as still live (launch_since > 0 && !launch_done), set
+		// launch_vh below, and bypass the parked-distance / water-path /
+		// runway-trace gates for the new spawn. Clear the one-shot launch
+		// latch here, exactly as the spawn-snap re-arm does. kbot-gated so
+		// baseline frogbot behaviour on this path stays byte-identical.
+		if ((slot >= 0) && (slot < MAX_CLIENTS) && self->fb.kbot)
+		{
+			moveprobe_s23_launch_done[slot] = 0;
+			moveprobe_s23_launch_since[slot] = 0;
+		}
 		return;
 	}
 
