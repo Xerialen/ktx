@@ -202,17 +202,40 @@ typedef struct
 // HEADING OFFSET (bow toward the open corridor); the air-carve then brings the
 // arc back to the far lip. Measured (v0=440, y=146 lips): straight (0 deg) hits
 // the pillar (0% land); head_off -30 lands 17/17 (100%); reverse +30 lands 100%.
-// y=-146 is all void (no southern horns), so there is only ONE crossable pit --
-// lanes 2/3 mirror 0/1 so an RA/YA-context nav goal still uses the valid jump.
+// E10b MIRROR LANE (RA-entrance <-> YA-high, owner "parallel exactly across the
+// big ring"). E8.1 traced ONLY y=-146 (the pit's WIDEST point, all void) and
+// wrongly concluded no southern lane exists. But the Ring and Quad platforms
+// grow HORNS toward each other further south: fine floor-traces (this .so, cal
+// mode) show the void narrows y=-200 (x~430..730, ~290u wide) -> y=-245
+// (x~490..610) -> y=-290 (x~550..610). So there IS a second crossable file.
+// Real human proof (mvd game 217186, .ParadokS t~533.05): crosses this southern
+// void takeoff (444,-218,56) apex (566,-157,99) land (676,-268,56) ~232u level
+// ~0.70s ~370 ups (== lane 0 difficulty), then chains south to YA.Quad
+// (661,-588,116 = "YA high"). The human flies an S-curve (bow north over the
+// wide void, then south to the quad horn); the bot's single carve-target can't
+// track the S, and a straight line at y=-220..-290 clips the Ring/Quad HORNS
+// (seeded: y-220/-245 0% FAIL_GAP, y-270 0% stuck-on-horn). But at y=-200 the
+// void is clean and WIDE, but its SOLID ledges are recessed (ring x<=~440,
+// quad x>=~715), so a lane must span ~290u lip-to-lip to seat + land on solid
+// ground BOTH ways (a 250u span leaves the west landing in void -> ya2ra only
+// 57% seeded). Lanes 2/3 therefore use the full clean span (430..720) at y=-200,
+// straight, no pillar -> head_off 0. Seeded lands ~100% both ways. This is the
+// same physical void the human uses (.ParadokS game 217186 crosses it y-218..-268
+// at ~370 ups, then chains south to YA.Quad "YA-high"). NOTE: at 290u the launch
+// floor (~479) exceeds the ~450 the bot reaches in-match, so in-match the RA/YA
+// nav SEES + ROUTES + STAGES to this lane (gjroute prices quad, unreachable
+// before) but mostly DECLINEs the launch -- the E9/E10 actuation wall, not a
+// geometry defect. Seeded 100% is the landability proof.
 #define GJ_NUM_LANES 4
 static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 	// 0: ring -> quad, northern lips, bow south (-30) around the pillar.
 	{ "ring2quad", { 455, 146, 56 }, { 705, 146, 56 }, -40, -30 },
 	// 1: quad -> ring, reverse (mirror bow, +30).
 	{ "quad2ring", { 705, 146, 56 }, { 455, 146, 56 }, -40, +30 },
-	// 2/3: RA<->YA share the one crossable pit (no southern narrow lane exists).
-	{ "ra2ya", { 455, 146, 56 }, { 705, 146, 56 }, -40, -30 },
-	{ "ya2ra", { 705, 146, 56 }, { 455, 146, 56 }, -40, +30 },
+	// 2/3: RA<->YA southern parallel file -- full clean y=-200 span (solid both ends).
+	//      Straight, no pillar -> head_off 0. Seeded ~100% both ways.
+	{ "ra2ya", { 430, -200, 56 }, { 720, -200, 56 }, -40, 0 },
+	{ "ya2ra", { 720, -200, 56 }, { 430, -200, 56 }, -40, 0 },
 };
 
 // Effective launch-heading offset for a lane: table default + cvar (for sweeps).
