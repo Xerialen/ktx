@@ -1161,6 +1161,18 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_gj_north_max", "12");
 	RegisterCvarEx("k_kbot_gj_south_bias", "24");
 
+	// E10 route shim: expose the gap-jump as a kbot-only travel-time edge in
+	// goal selection (EvalGoal -> KBot_GJ_RouteShim) plus STAGE steering from
+	// anywhere on the takeoff plate into the E9 intent box. Default 0 = pure
+	// E9 behavior. edge_time = priced cost of the hop itself (measured 0.65 s
+	// flight + speed build); route_back/route_lat bound the takeoff-side
+	// region where the route is considered (the whole plate, vs the tight
+	// intent box).
+	RegisterCvarEx("k_kbot_gj_route", "0");
+	RegisterCvarEx("k_kbot_gj_edge_time", "1.3");
+	RegisterCvarEx("k_kbot_gj_route_back", "512");
+	RegisterCvarEx("k_kbot_gj_route_lat", "352");
+
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
 		RegisterCvarEx(va("k_fb_name_%d", i), "");

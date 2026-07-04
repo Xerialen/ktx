@@ -290,6 +290,8 @@ static float gj_build_t0[MAX_CLIENTS];   // E8 build-state start time
 static int   gj_build_sign[MAX_CLIENTS]; // E8 circle-jump strafe sign
 static float gj_app_t0[MAX_CLIENTS];     // E9 approach-state start time
 static float gj_app_supp[MAX_CLIENTS];   // E9 re-engage suppress-until time
+static qbool gj_stage_on[MAX_CLIENTS];   // E10 stage-transition log latch
+static float gj_route_log[MAX_CLIENTS];  // E10 [gjroute] log throttle
 
 // Resolve the active lane geometry, honouring cvar overrides (retune without a
 // rebuild). k_kbot_gj_to / _land are "x y z" strings; empty -> table value.
@@ -615,9 +617,9 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	if (gj_has_flown[slot] && onground && hdist < landrad &&
 		fabs(org[2] - landing[2]) < 64)
 	{
-		G_cprint("[gapjump] lane=%s trial=%d result=LAND land_pos=%.0f,%.0f,%.0f "
+		G_cprint("[gapjump] lane=%s slot=%d name=%s trial=%d result=LAND land_pos=%.0f,%.0f,%.0f "
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
-				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
+				 gj_lanes[lane].name, slot, self->netname, gj_trial[slot], org[0], org[1], org[2],
 				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
@@ -821,22 +823,16 @@ static gedict_t *GJ_GoalEntity(gedict_t *self)
 }
 
 // Pick the gap-lane the bot should deliberately set up: bot on the takeoff side
-// (behind the lip along the lane, within the corridor band, on the ledge) AND
-// the GOAL is across the gap (projects past the lane midpoint toward landing).
-// Returns lane index, or -1. Nearest-to-lip wins.
-static int GJ_PickIntentLane(gedict_t *self)
+// (behind the lip along the lane, within the given corridor band, on the ledge)
+// AND the GOAL is across the gap (projects past the lane midpoint toward
+// landing). Returns lane index, or -1. Nearest-to-lip wins. Core shared by the
+// E9 intent box (tight bounds) and the E10 route/staging region (wide bounds).
+static int GJ_PickLaneWithin(gedict_t *self, float back, float pmax, float zband)
 {
 	int i, pick = -1;
 	float best = 1e30f;
 	vec3_t org, goalorg;
 	gedict_t *goal;
-	float back = cvar("k_kbot_gj_intent_back");
-	float pmax = cvar("k_kbot_gj_intent_perp");
-	float zband = cvar("k_kbot_gj_intent_zband");
-
-	if (back <= 0)  { back = 384; }
-	if (pmax <= 0)  { pmax = 176; }
-	if (zband <= 0) { zband = 56; }
 
 	goal = GJ_GoalEntity(self);
 	if (!goal)
@@ -895,6 +891,128 @@ static int GJ_PickIntentLane(gedict_t *self)
 		}
 	}
 	return pick;
+}
+
+// E9 intent box: the tight engage region right behind the lip.
+static int GJ_PickIntentLane(gedict_t *self)
+{
+	float back = cvar("k_kbot_gj_intent_back");
+	float pmax = cvar("k_kbot_gj_intent_perp");
+	float zband = cvar("k_kbot_gj_intent_zband");
+
+	if (back <= 0)  { back = 384; }
+	if (pmax <= 0)  { pmax = 176; }
+	if (zband <= 0) { zband = 56; }
+
+	return GJ_PickLaneWithin(self, back, pmax, zband);
+}
+
+// E10 route/staging region: the whole takeoff-side plate. A hit means the
+// gap-jump is a plausible route for the current goal, not yet a committed run.
+static int GJ_PickRouteLane(gedict_t *self)
+{
+	float back = cvar("k_kbot_gj_route_back");
+	float pmax = cvar("k_kbot_gj_route_lat");
+	float zband = cvar("k_kbot_gj_intent_zband");
+
+	if (back <= 0)  { back = 512; }
+	if (pmax <= 0)  { pmax = 352; }
+	if (zband <= 0) { zband = 56; }
+
+	return GJ_PickLaneWithin(self, back, pmax, zband);
+}
+
+// E10 ROUTE SHIM (called from EvalGoal for kbots when k_kbot_gj_route != 0).
+// The shared marker graph has no ring<->quad hop edge, so the vanilla travel
+// table prices that trip at the walk-around time (~8-10 s). Price the jump as
+// a route instead: walk-to-lip + edge_time + walk-from-landing (straight-line
+// legs -- both plates are open floor). Returning the cheaper time changes this
+// bot's GOAL SELECTION only; the shared subzone tables (and thus baseline
+// frogbots) are untouched. goal_time here is pure travel time -- EvalGoal
+// max()es the respawn wait in afterwards, so item timing math is preserved.
+float KBot_GJ_RouteShim(gedict_t *self, gedict_t *goal_entity, float goal_time)
+{
+	int i, slot = NUM_FOR_EDICT(self) - 1;
+	float sv_ms, edge_time, back, latmax, zband;
+	vec3_t org, goalorg;
+
+	if (!cvar("k_kbot_gapjump") || !cvar("k_kbot_gj_active"))
+	{
+		return goal_time;
+	}
+	if ((slot < 0) || (slot >= MAX_CLIENTS) || !goal_entity || (goal_entity == world))
+	{
+		return goal_time;
+	}
+
+	sv_ms = cvar("sv_maxspeed");
+	if (sv_ms <= 0) { sv_ms = 320; }
+	edge_time = cvar("k_kbot_gj_edge_time");
+	if (edge_time <= 0) { edge_time = 1.3f; }
+	back = cvar("k_kbot_gj_route_back");
+	if (back <= 0) { back = 512; }
+	latmax = cvar("k_kbot_gj_route_lat");
+	if (latmax <= 0) { latmax = 352; }
+	zband = cvar("k_kbot_gj_intent_zband");
+	if (zband <= 0) { zband = 56; }
+
+	VectorCopy(self->s.v.origin, org);
+	VectorCopy(goal_entity->s.v.origin, goalorg);
+
+	for (i = 0; i < GJ_NUM_LANES; i++)
+	{
+		vec3_t take, land, u;
+		float fail_z, lanelen, along, lat, galong, d_in, d_out, t_gj;
+
+		GJ_Geometry(i, take, land, &fail_z);
+		u[0] = land[0] - take[0];
+		u[1] = land[1] - take[1];
+		u[2] = 0;
+		lanelen = VectorLength(u);
+		if (lanelen < 1)
+		{
+			continue;
+		}
+		VectorNormalize(u);
+		along = (org[0] - take[0]) * u[0] + (org[1] - take[1]) * u[1];
+		lat = (org[0] - take[0]) * (-u[1]) + (org[1] - take[1]) * u[0];
+		if ((along > 32) || (along < -back))
+		{
+			continue;
+		}
+		if (fabs(lat) > latmax)
+		{
+			continue;
+		}
+		if (fabs(org[2] - take[2]) > zband)
+		{
+			continue;
+		}
+		galong = (goalorg[0] - take[0]) * u[0] + (goalorg[1] - take[1]) * u[1];
+		if (galong < lanelen * 0.5f)
+		{
+			continue;
+		}
+		d_in = sqrt((take[0] - org[0]) * (take[0] - org[0])
+					+ (take[1] - org[1]) * (take[1] - org[1]));
+		d_out = sqrt((goalorg[0] - land[0]) * (goalorg[0] - land[0])
+					 + (goalorg[1] - land[1]) * (goalorg[1] - land[1]));
+		t_gj = (d_in / sv_ms) + edge_time + (d_out / sv_ms);
+		if (t_gj < goal_time)
+		{
+			if (cvar("k_kbot_gj_gatelog")
+					&& (((g_globalvars.time - gj_route_log[slot]) >= 1.0f)
+						|| (gj_route_log[slot] > g_globalvars.time)))
+			{
+				gj_route_log[slot] = g_globalvars.time;
+				G_cprint("[gjroute] lane=%s slot=%d goal=%s t_gj=%.2f t_std=%.2f\n",
+						 gj_lanes[i].name, slot, goal_entity->classname, t_gj, goal_time);
+			}
+			return t_gj;
+		}
+	}
+
+	return goal_time;
 }
 
 // One deliberate-approach frame. Drives the bot onto the launch ray toward the
@@ -1343,6 +1461,58 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 			}
 			return GJ_ApproachFrame(self, slot, pick, jumping, firing, impulse,
 									direction);
+		}
+
+		// ---- E10 STAGE (k_kbot_gj_route): goal is across the gap but we're
+		// outside the tight intent box. Walk toward the staging point on the
+		// lane line 160u behind the lip; once inside the box the APP_ENGAGE
+		// branch above takes over. Combat-yield already handled (enemy_visible
+		// bail earlier in this function) -- no movement override in a fight.
+		if (cvar("k_kbot_gj_route"))
+		{
+			int rlane = GJ_PickRouteLane(self);
+
+			if (rlane >= 0)
+			{
+				vec3_t take, land, u, sp, wish;
+				float fail_z, lanelen;
+
+				GJ_Geometry(rlane, take, land, &fail_z);
+				u[0] = land[0] - take[0];
+				u[1] = land[1] - take[1];
+				u[2] = 0;
+				lanelen = VectorLength(u);
+				if (lanelen >= 1)
+				{
+					VectorNormalize(u);
+					VectorMA(take, -160, u, sp); // staging point behind the lip
+					sp[2] = take[2];
+					VectorSubtract(sp, self->s.v.origin, wish);
+					wish[2] = 0;
+					if (VectorLength(wish) > 24)
+					{
+						VectorNormalize(wish);
+						VectorScale(wish, 320, direction);
+						direction[2] = 0;
+						*jumping = false;
+						if (!gj_stage_on[slot] && cvar("k_kbot_gj_gatelog"))
+						{
+							G_cprint("[gjstage] lane=%s slot=%d engage\n",
+									 gj_lanes[rlane].name, slot);
+						}
+						gj_stage_on[slot] = true;
+						return true;
+					}
+				}
+			}
+			else if (gj_stage_on[slot])
+			{
+				gj_stage_on[slot] = false;
+				if (cvar("k_kbot_gj_gatelog"))
+				{
+					G_cprint("[gjstage] slot=%d release\n", slot);
+				}
+			}
 		}
 		return false; // no intent this frame -> vanilla nav
 	}

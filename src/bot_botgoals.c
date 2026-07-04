@@ -119,6 +119,17 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 										self->fb.canRocketJump);
 		goal_time = traveltime;
 
+		// E10 (kbot-only): price the ring<->quad gap-jump as a route edge. The
+		// shared subzone tables know only the walk-around; komodobots that can
+		// make the jump see the true (shorter) travel time for cross-gap goals.
+		// Baseline frogbots (fb.kbot == 0) and k_kbot_gj_route 0 are untouched.
+		if (self->isBot && self->fb.kbot && cvar("k_kbot_gj_route"))
+		{
+			extern float KBot_GJ_RouteShim(gedict_t *s, gedict_t *goal, float t);
+
+			goal_time = KBot_GJ_RouteShim(self, goal_entity, goal_time);
+		}
+
 		if (self->fb.goal_enemy_repel)
 		{
 			// Time for our enemy to get there
