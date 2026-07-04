@@ -184,6 +184,12 @@ typedef struct
 	vec3_t landing;
 	float fail_z;
 	float head_off; // per-lane launch-heading offset (deg) to bow around the pillar
+	// E12 (issue #11): optional mid-flight WAYPOINT for curve-required lanes.
+	// {0,0,0} = none (straight lane, all pre-E12 behaviour byte-identical).
+	// A wp lane launches AT the waypoint (seg1) and air-carves onto the landing
+	// (seg2) once past it -- the 2-segment "curve-carve" both the RL descent and
+	// the human reference line (blaze, mvd 224744 t~241.7) fly.
+	vec3_t wp;
 } gj_lane_t;
 
 // E8.1 GEOMETRY CORRECTION (coordinator, verified vs real human ring<->quad MVD
@@ -226,16 +232,44 @@ typedef struct
 // nav SEES + ROUTES + STAGES to this lane (gjroute prices quad, unreachable
 // before) but mostly DECLINEs the launch -- the E9/E10 actuation wall, not a
 // geometry defect. Seeded 100% is the landability proof.
-#define GJ_NUM_LANES 4
+// E12 RL DESCENT LANE (issue #11, lane 4). High-bridge deck (floor -48, origin
+// -24) -> RL pad in the pent yard (floor -112, standing -88; RL item 1520,496).
+// BSP-exact geometry (dm3.bsp faces, 07-04): the yard's south wall (y=368) has
+// a 72u-tall FIRING SLOT, z -88..-16, x 1568..~1792, and the slot is a 16u-deep
+// TUNNEL (wall band y368-384, sill top -88, ceiling -16). A jumping player
+// (hull -24..+32) fits through ONLY with origin-z inside (-64,-48) at the wall
+// -- a ~16u window on the descent arc, crossed t~0.75-0.80 after the hop.
+// That pins the launch SPEED: path-to-slot ~392u from the deck => v0 ~490-519
+// ("the needle"). blaze (mvd 224744 t~241.7) flies exactly this line at ~475+
+// and clips the slot's UPPER lip by ~10u (origin -38 > -48) -- the human proof
+// of both the line and the needle. The window-wall fin (x1440-1472, y>=112)
+// forces the line to cross y112 east of x1488; air-turn radius at these speeds
+// (~570u at 415) makes any compensating curve impossible, so the lane is
+// STRAIGHT and the decisive lever is launch speed, not path shape. Landing on
+// the slot SILL (org -64, fits under the -16 ceiling) or the pad behind both
+// count -- table landing (1600,400) covers both within landrad. fail_z -150:
+// below pad top, above the pool splash, so undershoot logs FAIL before the
+// swim; waterlevel>=2 logs FAIL_WATER (E11c discharge guard). In-match the
+// approach gate needs BOTH a floor and a CEILING (k_kbot_gj_rl_mul/_max) --
+// too slow clips the sill, too fast clips the upper lip. Gated by k_kbot_gj_rl.
+#define GJ_NUM_LANES 5
 static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 	// 0: ring -> quad, northern lips, bow south (-30) around the pillar.
-	{ "ring2quad", { 455, 146, 56 }, { 705, 146, 56 }, -40, -30 },
+	{ "ring2quad", { 455, 146, 56 }, { 705, 146, 56 }, -40, -30, { 0, 0, 0 } },
 	// 1: quad -> ring, reverse (mirror bow, +30).
-	{ "quad2ring", { 705, 146, 56 }, { 455, 146, 56 }, -40, +30 },
+	{ "quad2ring", { 705, 146, 56 }, { 455, 146, 56 }, -40, +30, { 0, 0, 0 } },
 	// 2/3: RA<->YA southern parallel file -- full clean y=-200 span (solid both ends).
 	//      Straight, no pillar -> head_off 0. Seeded ~100% both ways.
-	{ "ra2ya", { 430, -200, 56 }, { 720, -200, 56 }, -40, 0 },
-	{ "ya2ra", { 720, -200, 56 }, { 430, -200, 56 }, -40, 0 },
+	{ "ra2ya", { 430, -200, 56 }, { 720, -200, 56 }, -40, 0, { 0, 0, 0 } },
+	{ "ya2ra", { 720, -200, 56 }, { 430, -200, 56 }, -40, 0, { 0, 0, 0 } },
+	// 4: bridge deck -> RL slot sill, straight line through the firing slot.
+	//    ORIGIN-space design (the clip hull expands solids by the player half-
+	//    extents): fin corner (1488,96), slot wall plane y352, slot jambs
+	//    org-x 1584..1776, entry needle org-z (-64,-48). Bearing 67 deg clears
+	//    the fin (y96 at x~1495) and crosses y352 at x~1603; the arc then sets
+	//    feet down ON the sill (org -64) inside the slot. wp sits ON the line
+	//    (x1520 -> y156); retune live via k_kbot_gj_rlwp without a rebuild.
+	{ "bridge2rl", { 1454, 0, -24 }, { 1608, 368, -64 }, -150, 0, { 1520, 156, 0 } },
 };
 
 // Effective launch-heading offset for a lane: table default + cvar (for sweeps).
@@ -255,6 +289,43 @@ static float GJ_LaneHeadOff(int lane)
 		base = (lane == 2) ? +40.0f : -45.0f;
 	}
 	return base + cvar("k_kbot_gj_head_off");
+}
+
+// E12: does this lane fly through a mid-flight waypoint? Returns true and fills
+// wp. k_kbot_gj_rlwp "x y z" overrides the table value (retune without a
+// rebuild, mirrors k_kbot_gj_to/_land). Lanes without a wp return false and are
+// byte-identical to pre-E12 behaviour everywhere this is consulted.
+static qbool GJ_LaneWaypoint(int lane, vec3_t wp)
+{
+	char buf[64];
+	float x, y, z;
+
+	if (gj_lanes[lane].wp[0] == 0 && gj_lanes[lane].wp[1] == 0)
+	{
+		return false;
+	}
+	VectorCopy(gj_lanes[lane].wp, wp);
+	trap_cvar_string("k_kbot_gj_rlwp", buf, sizeof(buf));
+	if (buf[0] && sscanf(buf, "%f %f %f", &x, &y, &z) == 3)
+	{
+		VectorSet(wp, x, y, z);
+	}
+	return true;
+}
+
+// E12: the point the LAUNCH aims at -- the waypoint on a wp lane (fly seg1),
+// else the landing (straight lane, pre-E12 behaviour).
+static void GJ_LaneLaunchTarget(int lane, vec3_t takeoff, vec3_t landing,
+								vec3_t target)
+{
+	vec3_t wp;
+
+	if (GJ_LaneWaypoint(lane, wp))
+	{
+		VectorCopy(wp, target);
+		return;
+	}
+	VectorCopy(landing, target);
 }
 
 // E8.2 PILLAR-GAP AIR WAYPOINT. In-match the bot arrives with its NAV heading,
@@ -286,6 +357,43 @@ static void GJ_CarveTarget(int lane, vec3_t takeoff, vec3_t landing, vec3_t org,
 		if (bow_north <= 0)
 		{
 			bow_north = 40; // baked default; set the cvar >0 to retune in-match
+		}
+	}
+
+	// E12 wp-lane 2-segment carve: steer at the lane WAYPOINT until the bot's
+	// progress along seg1 (takeoff->wp) reaches the waypoint minus a lead
+	// distance (start the turn early -- the air-carve needs time to rotate the
+	// velocity), then steer at the landing (seg2). Scoped to lanes that carry a
+	// waypoint; all other lanes fall through to the pre-E12 logic untouched.
+	{
+		vec3_t lwp;
+
+		if (GJ_LaneWaypoint(lane, lwp))
+		{
+			vec3_t u1;
+			float seg1len, prog1, lead;
+
+			u1[0] = lwp[0] - takeoff[0];
+			u1[1] = lwp[1] - takeoff[1];
+			u1[2] = 0;
+			seg1len = VectorLength(u1);
+			if (seg1len >= 1)
+			{
+				VectorNormalize(u1);
+				prog1 = (org[0] - takeoff[0]) * u1[0] + (org[1] - takeoff[1]) * u1[1];
+				lead = cvar("k_kbot_gj_wp_lead");
+				if (lead <= 0)
+				{
+					lead = 48;
+				}
+				if (prog1 < seg1len - lead)
+				{
+					VectorCopy(lwp, target);
+					return;
+				}
+			}
+			VectorCopy(landing, target);
+			return;
 		}
 	}
 
@@ -458,6 +566,29 @@ static float GJ_AirTime(float dz)
 	return (vz + sqrt(disc)) / g;
 }
 
+// E12: lane-aware horizontal distance -- the POLYLINE length through the lane
+// waypoint when one exists, else the straight chord. Keeps the ballistic
+// required-speed honest on curve lanes (the arc is flown, not the chord).
+static float GJ_LaneDistance(int lane, vec3_t takeoff, vec3_t landing)
+{
+	vec3_t wp;
+	float dx, dy, d1, d2;
+
+	if (GJ_LaneWaypoint(lane, wp))
+	{
+		dx = wp[0] - takeoff[0];
+		dy = wp[1] - takeoff[1];
+		d1 = sqrt(dx * dx + dy * dy);
+		dx = landing[0] - wp[0];
+		dy = landing[1] - wp[1];
+		d2 = sqrt(dx * dx + dy * dy);
+		return d1 + d2;
+	}
+	dx = landing[0] - takeoff[0];
+	dy = landing[1] - takeoff[1];
+	return sqrt(dx * dx + dy * dy);
+}
+
 // Minimum horizontal launch speed to land the lane's ballistic arc. Honours a
 // direct override (k_kbot_gj_vreq) for sweeps; else D/T with the air-accel
 // discount k_kbot_gj_airgain.
@@ -487,6 +618,32 @@ static float GJ_RequiredSpeed(vec3_t takeoff, vec3_t landing)
 	return (D / T) * gain;
 }
 
+// E12: lane-aware required speed -- polyline distance on wp lanes, straight
+// chord otherwise (identical to GJ_RequiredSpeed for lanes 0..3).
+static float GJ_LaneRequiredSpeed(int lane, vec3_t takeoff, vec3_t landing)
+{
+	float over = cvar("k_kbot_gj_vreq");
+	float dz = landing[2] - takeoff[2];
+	float D = GJ_LaneDistance(lane, takeoff, landing);
+	float T, gain;
+
+	if (over > 0)
+	{
+		return over;
+	}
+	T = GJ_AirTime(dz);
+	if (T < 0.01f)
+	{
+		T = 0.01f;
+	}
+	gain = cvar("k_kbot_gj_airgain");
+	if (gain <= 0 || gain > 1.0f)
+	{
+		gain = 0.93f;
+	}
+	return (D / T) * gain;
+}
+
 // Teleport the bot to the lane takeoff (optionally backed off along -bearing by
 // k_kbot_gj_runup) and seed horizontal run speed k_kbot_gj_v0 aimed at landing.
 static void GJ_Seat(gedict_t *self, int lane)
@@ -497,8 +654,14 @@ static void GJ_Seat(gedict_t *self, int lane)
 	GJ_Geometry(lane, takeoff, landing, &fail_z);
 	// Ballistic launch heading: aim at the far ledge, plus a per-lane offset
 	// (the human -11 deg lever; default 0 -- E8 found straight aim already
-	// lands laterally on dm3). k_kbot_gj_head is an absolute override for sweeps.
-	bearing = GJ_Bearing(takeoff, landing) + GJ_LaneHeadOff(lane);
+	// lands laterally on dm3). E12: wp lanes aim seg1 (at the waypoint).
+	// k_kbot_gj_head is an absolute override for sweeps.
+	{
+		vec3_t ltgt;
+
+		GJ_LaneLaunchTarget(lane, takeoff, landing, ltgt);
+		bearing = GJ_Bearing(takeoff, ltgt) + GJ_LaneHeadOff(lane);
+	}
 	if (cvar("k_kbot_gj_head") > -360)
 	{
 		bearing = cvar("k_kbot_gj_head");
@@ -520,6 +683,23 @@ static void GJ_Seat(gedict_t *self, int lane)
 	// Back the spawn off toward the takeoff side so the bot runs onto the lip.
 	org[0] -= fwd[0] * runup;
 	org[1] -= fwd[1] * runup;
+
+	// E12 AIR-SEAT (lane 4, k_kbot_gj_airseat, default on): seed the bot
+	// ALREADY AIRBORNE with the hop's vz=+270 and the exact v0. The grounded
+	// seat costs a variable 3-5 friction frames before the engine actuates the
+	// hop (measured: v0 504 decayed to launch ~407, jitter ~1 frame = ~26 ups)
+	// -- fatal for the slot's ~29-ups launch window. Injecting the launched
+	// state makes the seeded arc deterministic; the in-match path still uses
+	// the real approach + hop.
+	if (lane == 4 && cvar("k_kbot_gj_airseat") >= 0)
+	{
+		org[2] += 1;
+		setorigin(self, PASSVEC3(org));
+		self->s.v.flags = (int)self->s.v.flags & ~FL_ONGROUND;
+		VectorScale(fwd, v0, self->s.v.velocity);
+		self->s.v.velocity[2] = 270;
+		return;
+	}
 	setorigin(self, PASSVEC3(org));
 
 	// Seed grounded at the ledge so the frame-perfect launch hop fires on the
@@ -544,14 +724,20 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	GJ_Geometry(lane, takeoff, landing, &fail_z);
 	VectorCopy(self->s.v.origin, org);
 
-	// Fixed launch heading (ballistic aim at the far ledge + per-lane offset);
-	// used on the ground/launch frame so the hop leaves at the lane heading.
-	launch_bearing = GJ_Bearing(takeoff, landing) + GJ_LaneHeadOff(lane);
+	// Fixed launch heading (ballistic aim at the far ledge + per-lane offset,
+	// E12: wp lanes aim seg1); used on the ground/launch frame so the hop
+	// leaves at the lane heading.
+	{
+		vec3_t ltgt;
+
+		GJ_LaneLaunchTarget(lane, takeoff, landing, ltgt);
+		launch_bearing = GJ_Bearing(takeoff, ltgt) + GJ_LaneHeadOff(lane);
+	}
 	if (cvar("k_kbot_gj_head") > -360)
 	{
 		launch_bearing = cvar("k_kbot_gj_head");
 	}
-	vreq = GJ_RequiredSpeed(takeoff, landing);
+	vreq = GJ_LaneRequiredSpeed(lane, takeoff, landing);
 
 	cur[0] = self->s.v.velocity[0];
 	cur[1] = self->s.v.velocity[1];
@@ -651,8 +837,9 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	// gap-jump on lanes 2/3 (the combat-yield in KBot_GapjumpFrame/GJ_ApproachFrame
 	// bails on enemy_visible BEFORE any launch), so it never touches combat
 	// movement. k_kbot_gj_aimlaunch (default on) can disable it for A/B isolation.
-	if (press && cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3) &&
-		cvar("k_kbot_gj_aimlaunch") >= 0 && speed > 1)
+	if (press && speed > 1 && cvar("k_kbot_gj_aimlaunch") >= 0 &&
+		((cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3)) ||
+		 (lane == 4 && cvar("k_kbot_gj_rl"))))
 	{
 		vec3_t la;
 		la[0] = 0;
@@ -734,6 +921,20 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 		gj_cool_t0[slot] = now;
 		return true;
 	}
+	// E12 WATER-OVERSHOOT GUARD (lane 4): the RL pad is flanked by the pent-yard
+	// pool; any water entry is a hard FAIL (E11c discharge rule -- a stacked bot
+	// must never dive). waterlevel >= 2 = origin submerged = swim physics took
+	// over. Logged separately from FAIL_GAP so the A/B can count water entries.
+	if (lane == 4 && ((int)self->s.v.waterlevel >= 2))
+	{
+		G_cprint("[gapjump] lane=%s trial=%d result=FAIL_WATER land_pos=%.0f,%.0f,%.0f "
+				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
+				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
+				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		gj_state[slot] = GJ_COOL;
+		gj_cool_t0[slot] = now;
+		return true;
+	}
 	if (org[2] < fail_z)
 	{
 		G_cprint("[gapjump] lane=%s trial=%d result=FAIL_GAP land_pos=%.0f,%.0f,%.0f "
@@ -787,13 +988,18 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 	float now = g_globalvars.time;
 
 	GJ_Geometry(lane, takeoff, landing, &fail_z);
-	vreq = GJ_RequiredSpeed(takeoff, landing);
+	vreq = GJ_LaneRequiredSpeed(lane, takeoff, landing);
 	gate = cvar("k_kbot_gj_gate");
 	if (gate <= 0)
 	{
 		gate = 0.98f;
 	}
-	launch_bearing = GJ_Bearing(takeoff, landing) + GJ_LaneHeadOff(lane);
+	{
+		vec3_t ltgt;
+
+		GJ_LaneLaunchTarget(lane, takeoff, landing, ltgt);
+		launch_bearing = GJ_Bearing(takeoff, ltgt) + GJ_LaneHeadOff(lane);
+	}
 	if (cvar("k_kbot_gj_head") > -360)
 	{
 		launch_bearing = cvar("k_kbot_gj_head");
@@ -956,6 +1162,10 @@ static int GJ_PickLaneWithin(gedict_t *self, float back, float pmax, float zband
 		vec3_t take, land, u, perp, rel;
 		float lanelen, along, lat, galong, fz;
 
+		if ((i == 4) && !cvar("k_kbot_gj_rl"))
+		{
+			continue; // E12 RL lane disabled -> invisible to intent/route
+		}
 		// Use GJ_Geometry (not raw table) so the E10c mirror-carve relocation of
 		// lanes 2/3 is honoured by the active-path intent/route lane picker too.
 		GJ_Geometry(i, take, land, &fz);
@@ -1074,6 +1284,10 @@ float KBot_GJ_RouteShim(gedict_t *self, gedict_t *goal_entity, float goal_time)
 		vec3_t take, land, u;
 		float fail_z, lanelen, along, lat, galong, d_in, d_out, t_gj;
 
+		if ((i == 4) && !cvar("k_kbot_gj_rl"))
+		{
+			continue; // E12 RL lane disabled -> not priced as a route edge
+		}
 		GJ_Geometry(i, take, land, &fail_z);
 		u[0] = land[0] - take[0];
 		u[1] = land[1] - take[1];
@@ -1140,7 +1354,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	qbool at_lip, fast, aligned;
 
 	GJ_Geometry(lane, take, land, &fail_z);
-	vreq = GJ_RequiredSpeed(take, land);
+	vreq = GJ_LaneRequiredSpeed(lane, take, land);
 	now = g_globalvars.time;
 	VectorCopy(self->s.v.origin, org);
 
@@ -1172,6 +1386,13 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// (quad2ring's -X axis makes uperp point south), which drove quad2ring INTO the
 	// pillar. lat_n > 0 = north (pillar, reject); lat_n < 0 = south (open, allow).
 	lat_n = org[1] - take[1];
+	// E12 RL lane: no central pillar, and the lane axis has a large +Y component
+	// so raw world-Y offset mixes along and lateral. Use the TRUE perpendicular
+	// (the asymmetric north gate below then acts as a plain +- band).
+	if (lane == 4)
+	{
+		lat_n = rel[0] * (-u[1]) + rel[1] * u[0];
+	}
 
 	{
 		vec3_t hv;
@@ -1183,8 +1404,23 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	}
 	apptime = cvar("k_kbot_gj_apptime");
 	if (apptime <= 0) { apptime = 3.5f; }
+	// E12 RL lane: the slot window sits ~60 ups above what a 42-deg ground
+	// circle can build (wishspeed/cos(42) caps ~430), so give the build more
+	// time on the long deck runway; the steeper lane build angle (below)
+	// raises the cap itself.
+	if (lane == 4) { apptime = 6.0f; }
 	launch_win = cvar("k_kbot_gj_launch_win");
 	if (launch_win <= 0) { launch_win = 48; }
+	// E12 RL lane: a +-48u along-window shifts the path-to-slot by +-48u of
+	// arc height timing at the wall. The slot needle tolerates ~+-24 (the
+	// wall face above catches too-high arrivals and drops them onto the sill;
+	// the 18u air step-up catches slightly-low ones) but not the full 48.
+	if (lane == 4)
+	{
+		float rw = cvar("k_kbot_gj_rl_win");
+
+		launch_win = (rw > 0) ? rw : 24;
+	}
 	launch_perp = cvar("k_kbot_gj_launch_perp");
 	if (launch_perp <= 0) { launch_perp = 28; }
 	lookahead = cvar("k_kbot_gj_lookahead");
@@ -1221,9 +1457,31 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 			// frequency (the ~415-built vs ~425-needed wall) -- see findings.
 			mul = (mm > 0) ? mm : 1.20f;
 		}
+		// E12 RL lane: the slot needle needs a SPEED WINDOW, not just a floor
+		// (too slow clips the sill, too fast the upper lip). Floor via rl_mul:
+		// 0.99*vreq ~ 459 = just above the measured hard edge (455 seeded 96%,
+		// 440 0%) -- the 18u air step-up catches low-edge entries.
+		if (lane == 4)
+		{
+			float rm = cvar("k_kbot_gj_rl_mul");
+
+			mul = (rm > 0) ? rm : 0.99f;
+		}
 		floor = vreq * mul;
 	}
 	fast = vh >= floor;
+	// E12 RL lane speed CEILING: launching above it overshoots the slot's upper
+	// lip (org > -48 at the wall) -> upper wall face -> pool. Decline instead.
+	if (lane == 4)
+	{
+		float rmax = cvar("k_kbot_gj_rl_max");
+		float ceilv = vreq * ((rmax > 0) ? rmax : 1.13f);
+
+		if (vh > ceilv)
+		{
+			fast = false; // treated as not-launchable this frame
+		}
+	}
 
 	// Velocity heading error vs the corridor axis (the direction we deliver).
 	vyaw = (vh > 1) ? atan2(self->s.v.velocity[1], self->s.v.velocity[0])
@@ -1265,6 +1523,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		float north_max = cvar("k_kbot_gj_north_max");
 
 		if (north_max <= 0) { north_max = 12; }
+		if (lane == 4) { north_max = launch_perp; } // no pillar: symmetric band
 		at_lip = (along_u >= -launch_win && along_u <= launch_win) &&
 				 (lat_n >= -launch_perp && lat_n <= north_max) && aligned;
 	}
@@ -1328,6 +1587,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		float south_bias = cvar("k_kbot_gj_south_bias");
 
 		if (south_bias < 0) { south_bias = 0; }
+		if (lane == 4) { south_bias = 0; } // no pillar to bias away from
 		ca = along_u + lookahead;
 		if (ca > 0) { ca = 0; }
 		tgt[0] = take[0] + u[0] * ca;
@@ -1347,6 +1607,18 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// already meets the floor, so this fires mainly on slow arrivals).
 	build_angle = cvar("k_kbot_gj_build_angle");
 	if (build_angle <= 0) { build_angle = 42; }
+	// E12 RL lane: ANGLE SCHEDULE. The ground-accelerate cap is
+	// wishspeed/cos(angle) (42 deg -> ~430, 60 deg -> ~640), but a steep
+	// angle from low speed stalls completely (measured: 62 deg flat ->
+	// ABORT_TIMEOUT at vh 14-22). So build flat (46 deg, fast) until the
+	// mid-range, then steepen (rl_bangle, default 60) for the top-up past
+	// the 430 wall toward the slot window (~459+).
+	if (lane == 4)
+	{
+		float rb = cvar("k_kbot_gj_rl_bangle");
+
+		build_angle = (vh < 400) ? 46 : ((rb > 0) ? rb : 60);
+	}
 	// OPTION-2 approach speed-build (E11-first increment). The launch floor
 	// (vreq*mul ~413) is where the bot is ALLOWED to launch; but on the north-
 	// bowed mirror lanes the air-carve scrubs ~10-15 ups, so a bot arriving AT
@@ -1369,6 +1641,19 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 
 			build_hi = floor * ((tgt_mul > 0) ? tgt_mul : 1.06f);
 			if (ba > 0) { build_angle = ba; }   // steeper carve builds faster
+		}
+		// E12 RL lane: build to the MIDDLE of the slot speed window (not the
+		// floor) on the long bridge-deck runway -- the launch-aim snaps the
+		// velocity direction at the hop, so approach-line curvature from the
+		// circle-build is harmless here (unlike the mirror-lane appcarve,
+		// where the free launch line was the binding constraint).
+		if (lane == 4)
+		{
+			float rm = cvar("k_kbot_gj_rl_mul");
+			float rx = cvar("k_kbot_gj_rl_max");
+
+			build_hi = vreq * 0.5f * (((rm > 0) ? rm : 0.99f)
+									  + ((rx > 0) ? rx : 1.09f));
 		}
 		if (cvar("k_kbot_gj_app_build") && onground && (vh < build_hi) &&
 			along_u < 0)

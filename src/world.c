@@ -1190,6 +1190,22 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_gj_appcarve_target", "1.06");
 	RegisterCvarEx("k_kbot_gj_appcarve_angle", "0");
 
+	// E12 (issue #11): bridge->RL descent through the pent-yard firing slot
+	// (lane 4). rl 1 = lane exists (kbot-only; rides the default-ON gapjump
+	// stack like the mirror lanes). The slot is a 16u origin-z needle at the
+	// wall => the approach commit needs a speed WINDOW (floor rl_mul, ceiling
+	// rl_max, times the lane vreq) and a tight along-lip commit window
+	// (rl_win). rlwp "x y z" overrides the lane waypoint live; wp_lead = how
+	// early (units before the waypoint) the air-carve switches to the landing.
+	RegisterCvarEx("k_kbot_gj_rl", "1");
+	RegisterCvarEx("k_kbot_gj_rl_mul", "0.99");
+	RegisterCvarEx("k_kbot_gj_rl_max", "1.09");
+	RegisterCvarEx("k_kbot_gj_rl_win", "24");
+	RegisterCvarEx("k_kbot_gj_rlwp", "");
+	RegisterCvarEx("k_kbot_gj_wp_lead", "48");
+	RegisterCvarEx("k_kbot_gj_airseat", "1");
+	RegisterCvarEx("k_kbot_gj_rl_bangle", "60");
+
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
 		RegisterCvarEx(va("k_fb_name_%d", i), "");
