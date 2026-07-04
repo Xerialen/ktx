@@ -1180,6 +1180,15 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_gj_mirrorcarve", "1");
 	RegisterCvarEx("k_kbot_gj_mcarve_mul", "1.20");
 	RegisterCvarEx("k_kbot_gj_mcarve_bow", "40");
+	// OPTION-2 approach-carve (E11): keep building past the launch floor up to
+	// appcarve_target*floor (~425) in the approach runway so the mirror jump
+	// arrives hot enough to survive the north-bow air-carve scrub (closes the
+	// ~415-built vs ~425-needed wall without raising the launch floor). Default
+	// OFF pending A/B validation; lanes 0/1 unaffected. appcarve_angle 0 => use
+	// the shared build_angle (42 deg).
+	RegisterCvarEx("k_kbot_gj_appcarve", "0");
+	RegisterCvarEx("k_kbot_gj_appcarve_target", "1.06");
+	RegisterCvarEx("k_kbot_gj_appcarve_angle", "0");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{

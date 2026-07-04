@@ -1341,23 +1341,48 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// already meets the floor, so this fires mainly on slow arrivals).
 	build_angle = cvar("k_kbot_gj_build_angle");
 	if (build_angle <= 0) { build_angle = 42; }
-	if (cvar("k_kbot_gj_app_build") && onground && !fast && along_u < 0)
+	// OPTION-2 approach speed-build (E11-first increment). The launch floor
+	// (vreq*mul ~413) is where the bot is ALLOWED to launch; but on the north-
+	// bowed mirror lanes the air-carve scrubs ~10-15 ups, so a bot arriving AT
+	// the floor lands short (~40% pit-fall, findings 07-04). Instead of raising
+	// the floor (which collapsed launch frequency 32->2 without better land-rate)
+	// keep circle-building PAST the floor up to appcarve_target*floor (~425) in
+	// the runway BEHIND the launch window (at along_u < -launch_win the launch
+	// gate above hasn't fired), so the bot ARRIVES hot and the scrub still leaves
+	// it clearing the void. Lane-scoped to 2/3 + mirrorcarve, combat-gated
+	// (enemy_visible yields above), cvar-gated default 0 for A/B. When off (or
+	// lanes 0/1) build_hi==floor so (vh<build_hi) is byte-identical to !fast.
 	{
-		vec3_t cur = { self->s.v.velocity[0], self->s.v.velocity[1], 0 };
+		float build_hi = floor;
 
-		if (VectorLength(cur) > 40)   // need real velocity to circle off
+		if (cvar("k_kbot_gj_appcarve") && cvar("k_kbot_gj_mirrorcarve") &&
+			(lane == 2 || lane == 3))
 		{
-			float cyaw = atan2(cur[1], cur[0]) * 180.0f / M_PI;
-			float e = vectoyaw(wish) - cyaw;
-			int sgn;
+			float tgt_mul = cvar("k_kbot_gj_appcarve_target");
+			float ba = cvar("k_kbot_gj_appcarve_angle");
 
-			while (e > 180) { e -= 360; }
-			while (e < -180) { e += 360; }
-			sgn = (e >= 0) ? 1 : -1;
-			VectorNormalize(cur);
-			RotatePointAroundVector(wish, up, cur, build_angle * sgn);
-			wish[2] = 0;
-			VectorNormalize(wish);
+			build_hi = floor * ((tgt_mul > 0) ? tgt_mul : 1.06f);
+			if (ba > 0) { build_angle = ba; }   // steeper carve builds faster
+		}
+		if (cvar("k_kbot_gj_app_build") && onground && (vh < build_hi) &&
+			along_u < 0)
+		{
+			vec3_t cur = { self->s.v.velocity[0], self->s.v.velocity[1], 0 };
+
+			if (VectorLength(cur) > 40)   // need real velocity to circle off
+			{
+				float cyaw = atan2(cur[1], cur[0]) * 180.0f / M_PI;
+				float e = vectoyaw(wish) - cyaw;
+				int sgn;
+
+				while (e > 180) { e -= 360; }
+				while (e < -180) { e += 360; }
+				sgn = (e >= 0) ? 1 : -1;
+				VectorNormalize(cur);
+				RotatePointAroundVector(wish, up, cur, build_angle * sgn);
+				wish[2] = 0;
+				VectorNormalize(wish);
+			}
 		}
 	}
 
