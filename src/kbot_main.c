@@ -241,7 +241,20 @@ static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 // Effective launch-heading offset for a lane: table default + cvar (for sweeps).
 static float GJ_LaneHeadOff(int lane)
 {
-	return gj_lanes[lane].head_off + cvar("k_kbot_gj_head_off");
+	float base = gj_lanes[lane].head_off;
+
+	// E10c MIRROR-CARVE north launch bow (lanes 2/3 only, gated). Rotate the
+	// launch heading toward NORTH so the hop leaves the lip aimed over the clean
+	// void, clearing the central x=496 block, before the air-carve pulls it back
+	// to the landing (mirror of Ring<->Quad's +-30 south bow around the pillar).
+	// MIRRORED per direction: ra2ya flies EAST -> +north = CCW = +offset; ya2ra
+	// flies WEST -> +north = CW = -offset. Lane-scoped so Ring<->Quad (0/1) and
+	// the global k_kbot_gj_head_off sweep knob are unaffected.
+	if (cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3))
+	{
+		base = (lane == 2) ? +40.0f : -45.0f;
+	}
+	return base + cvar("k_kbot_gj_head_off");
 }
 
 // E8.2 PILLAR-GAP AIR WAYPOINT. In-match the bot arrives with its NAV heading,
@@ -257,17 +270,34 @@ static void GJ_CarveTarget(int lane, vec3_t takeoff, vec3_t landing, vec3_t org,
 						   vec3_t target)
 {
 	float wp = cvar("k_kbot_gj_wp");
+	float bow_north = 0; // E10c mirror lanes: +Y (NORTH) world-frame carve bow
 	vec3_t mid, dir;
 	float lanelen, prog, wpprog;
 
-	(void)lane;
-	if (wp == 0)
+	// E10c MIRROR-CARVE north bow (lanes 2/3 only, gated). The human clears the
+	// southern pinch by bowing NORTH over the clean void, then dropping onto the
+	// quad horn. Applied lane-scoped here (NOT via the global k_kbot_gj_wp, which
+	// would perturb Ring<->Quad lanes 0/1) so Ring<->Quad stays byte-identical.
+	// Tunable in-match via k_kbot_gj_mcarve_bow WITHOUT touching lanes 0/1;
+	// default 0 = fly the straight diagonal (already seeds ~100% both ways).
+	if (cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3))
+	{
+		bow_north = cvar("k_kbot_gj_mcarve_bow");
+		if (bow_north <= 0)
+		{
+			bow_north = 40; // baked default; set the cvar >0 to retune in-match
+		}
+	}
+
+	if (wp == 0 && bow_north == 0)
 	{
 		VectorCopy(landing, target); // waypoint disabled
 		return;
 	}
 	mid[0] = (takeoff[0] + landing[0]) * 0.5f;
-	mid[1] = (takeoff[1] + landing[1]) * 0.5f - wp; // bow south (open corridor)
+	// wp bows SOUTH (lanes 0/1 around the pillar); bow_north bows NORTH (mirror
+	// lanes 2/3 over the void). Only one is ever non-zero on a given lane.
+	mid[1] = (takeoff[1] + landing[1]) * 0.5f - wp + bow_north;
 	mid[2] = (takeoff[2] + landing[2]) * 0.5f;
 
 	dir[0] = landing[0] - takeoff[0];
@@ -326,6 +356,37 @@ static void GJ_Geometry(int lane, vec3_t takeoff, vec3_t landing, float *fail_z)
 	VectorCopy(gj_lanes[lane].takeoff, takeoff);
 	VectorCopy(gj_lanes[lane].landing, landing);
 	*fail_z = gj_lanes[lane].fail_z;
+
+	// E10c MIRROR-CARVE: relocate the mirror lanes 2/3 from the wide straight
+	// y=-200 span (290u solid-to-solid) to the human's DIAGONAL lip-to-lip chord
+	// (ParadokS, mvd 217186 t~533: takeoff (448,-214) -> land (677,-268) = 235u).
+	// The shorter solid-to-solid chord drops the ballistic launch floor
+	// (v_req * launch_mul 1.2) from ~479 to ~389 ups -- BELOW the ~410-417 the bot
+	// actually builds in a 4on4 -- so the mirror jump CONVERTS in-match instead of
+	// declining (APP_DECLINE_SLOW). Both lips are solid (the human takes off/lands
+	// there both ways), so seeded still lands ~100% both directions. Gated by
+	// k_kbot_gj_mirrorcarve (default 0 -> lanes 2/3 keep the shipped 290u straight
+	// geometry byte-for-byte). Ring<->Quad lanes 0/1 are NEVER touched here.
+	if (cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3))
+	{
+		// Both directions share the RING lip (448,-214) and use their OWN quad
+		// lip. QUAD-SIDE ASYMMETRY (traced): the quad plate can be LANDED at the
+		// deep-south spot (677,-268) but launching WEST from there is blocked by a
+		// solid rim wall at x~656; the clean WEST-launch lip sits ~53u further
+		// NORTH at (677,-215). So ra2ya lands south, ya2ra takes off north -- each
+		// picks the lip that works for its travel direction (both ~230u chord,
+		// launch floor ~379-389 < the ~415 the bot builds -> converts in-match).
+		if (lane == 2)   // ra2ya: ring -> quad (land the deep-south quad spot)
+		{
+			VectorSet(takeoff, 448, -214, 56);
+			VectorSet(landing, 677, -268, 56);
+		}
+		else             // ya2ra: quad -> ring (launch the clean north quad lip)
+		{
+			VectorSet(takeoff, 677, -215, 56);
+			VectorSet(landing, 448, -214, 56);
+		}
+	}
 
 	trap_cvar_string("k_kbot_gj_to", buf, sizeof(buf));
 	if (buf[0] && sscanf(buf, "%f %f %f", &x, &y, &z) == 3)
@@ -577,6 +638,28 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	// Frame-perfect hop latch (E1): press only on a grounded, released frame.
 	press = onground && !gj_jump_latch[slot];
 	gj_jump_latch[slot] = press;
+
+	// E10c LAUNCH-AIM (mirror lanes only, gated). On the committed launch frame,
+	// aim the horizontal launch velocity along the lane's bowed launch heading
+	// (magnitude preserved). WHY: in-match the bot arrives heading along the
+	// corridor axis u (straight at the far lip); to clear the SE block at x~496 it
+	// would have to air-turn ~40 deg, which scrubs ~250 ups and drops it into the
+	// void (measured: in-match FAIL_GAP at x~600, z~-42). The seeded trial lands
+	// ~100% ONLY because GJ_Seat injects this pre-bowed launch velocity. Aiming
+	// the ALREADY-COMMITTED jump's launch here delivers the same pre-bowed launch
+	// in a real match, at full speed. Strictly scoped to a committed, enemy-free
+	// gap-jump on lanes 2/3 (the combat-yield in KBot_GapjumpFrame/GJ_ApproachFrame
+	// bails on enemy_visible BEFORE any launch), so it never touches combat
+	// movement. k_kbot_gj_aimlaunch (default on) can disable it for A/B isolation.
+	if (press && cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3) &&
+		cvar("k_kbot_gj_aimlaunch") >= 0 && speed > 1)
+	{
+		vec3_t la = { 0, launch_bearing, 0 };
+
+		trap_makevectors(la);
+		self->s.v.velocity[0] = g_globalvars.v_forward[0] * speed;
+		self->s.v.velocity[1] = g_globalvars.v_forward[1] * speed;
+	}
 
 	// E8.2 diagnostic: at the hop frame, log the actual launch VELOCITY heading
 	// vs the intended launch_bearing -- the in-match mismatch (bot arrives with
@@ -868,10 +951,11 @@ static int GJ_PickLaneWithin(gedict_t *self, float back, float pmax, float zband
 	for (i = 0; i < GJ_NUM_LANES; i++)
 	{
 		vec3_t take, land, u, perp, rel;
-		float lanelen, along, lat, galong;
+		float lanelen, along, lat, galong, fz;
 
-		VectorCopy(gj_lanes[i].takeoff, take);
-		VectorCopy(gj_lanes[i].landing, land);
+		// Use GJ_Geometry (not raw table) so the E10c mirror-carve relocation of
+		// lanes 2/3 is honoured by the active-path intent/route lane picker too.
+		GJ_Geometry(i, take, land, &fz);
 		u[0] = land[0] - take[0];
 		u[1] = land[1] - take[1];
 		u[2] = 0;
@@ -1115,6 +1199,22 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		float mul = cvar("k_kbot_gj_launch_mul");
 
 		if (mul <= 0) { mul = 1.2f; }
+		// E10c: the mirror lanes fly a NORTH-bowed arc (clearing the x~496 SE
+		// block), whose carve costs more speed than the straight Ring<->Quad hop,
+		// so a launch AT vreq*1.2 still lands short in the void (measured in-match:
+		// lands need peak ~425+, floor-1.2 lets ~412 launches commit -> pit). Raise
+		// the mirror-lane floor so only launches fast enough to actually clear the
+		// bowed path commit; slower approaches DECLINE (safe) instead of diving.
+		// Lane-scoped (Ring<->Quad 0/1 keep 1.2). Tunable via k_kbot_gj_mcarve_mul.
+		if (cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3))
+		{
+			float mm = cvar("k_kbot_gj_mcarve_mul");
+
+			// 1.20 = the A/B-validated converting value (mirror lanes launch +
+			// land in-match). Raising it cuts pit-falls but collapses launch
+			// frequency (the ~415-built vs ~425-needed wall) -- see findings.
+			mul = (mm > 0) ? mm : 1.20f;
+		}
 		floor = vreq * mul;
 	}
 	fast = vh >= floor;
