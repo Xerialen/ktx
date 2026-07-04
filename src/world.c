@@ -1080,7 +1080,7 @@ void FirstFrame(void)
 	// k_kbot_gj_lane -1 = passive trigger (real feature); 0..3 = trial driver
 	// (isolated E6 landing-% harness). Remaining cvars tune the jump without a
 	// rebuild; k_kbot_gj_head default < -360 means "use computed bearing".
-	RegisterCvarEx("k_kbot_gapjump", "0");
+	RegisterCvarEx("k_kbot_gapjump", "1");    // E10c: default ON (kbot-only)
 	RegisterCvarEx("k_kbot_gj_lane", "-1");
 	RegisterCvarEx("k_kbot_gj_probe", "0");
 	RegisterCvarEx("k_kbot_gj_to", "");
@@ -1127,7 +1127,7 @@ void FirstFrame(void)
 	// on the takeoff side (no enemy near) DELIBERATELY drives to the takeoff lip,
 	// aligns to the launch bow and builds to v_req, then launches -- instead of
 	// waiting for nav to incidentally satisfy the passive gates.
-	RegisterCvarEx("k_kbot_gj_active", "0");
+	RegisterCvarEx("k_kbot_gj_active", "1");  // E10c: default ON (kbot-only)
 	// Intent region: engage when the bot is within intent_back units BEHIND the
 	// lip along the lane and within intent_perp units of the lane line, and the
 	// goal is on the far side. Height band keeps us on the takeoff ledge.
@@ -1168,10 +1168,18 @@ void FirstFrame(void)
 	// flight + speed build); route_back/route_lat bound the takeoff-side
 	// region where the route is considered (the whole plate, vs the tight
 	// intent box).
-	RegisterCvarEx("k_kbot_gj_route", "0");
+	RegisterCvarEx("k_kbot_gj_route", "1");   // E10c: default ON (kbot-only)
 	RegisterCvarEx("k_kbot_gj_edge_time", "1.3");
 	RegisterCvarEx("k_kbot_gj_route_back", "512");
 	RegisterCvarEx("k_kbot_gj_route_lat", "352");
+	// E10c mirror-carve (RA<->YA southern parallel lanes 2/3). Default ON.
+	// Relocates lanes 2/3 to the diagonal lip-to-lip chord + north launch-
+	// aim so the parallel jump COMMITS in-match (mul 1.20 / bow 40 are the
+	// A/B-validated values; aimlaunch is on unless set < 0). Lanes 0/1
+	// (Ring<->Quad) are untouched by these.
+	RegisterCvarEx("k_kbot_gj_mirrorcarve", "1");
+	RegisterCvarEx("k_kbot_gj_mcarve_mul", "1.20");
+	RegisterCvarEx("k_kbot_gj_mcarve_bow", "40");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
