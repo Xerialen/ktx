@@ -1110,6 +1110,16 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_gj_build", "0");
 	RegisterCvarEx("k_kbot_gj_buildtime", "1.5");
 	RegisterCvarEx("k_kbot_gj_build_angle", "42");
+	// E8.2 pillar-gap air waypoint: bow the arc south (open corridor) by this many
+	// units at mid-span before steering to the landing (0 = straight at landing).
+	RegisterCvarEx("k_kbot_gj_wp", "0");
+	// E8.2 alignment gate: only commit the jump when the bot's velocity heading is
+	// within this many degrees of the required launch (bow) heading (0 = disabled).
+	RegisterCvarEx("k_kbot_gj_align_tol", "30");
+	// E8.2 position gate: commit only at the near lip -- along-lane progress <=
+	// maxprog (not past the lip) and cross-lane offset <= ymax (on the lane line).
+	RegisterCvarEx("k_kbot_gj_maxprog", "40");
+	RegisterCvarEx("k_kbot_gj_ymax", "48");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{

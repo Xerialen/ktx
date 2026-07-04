@@ -221,6 +221,54 @@ static float GJ_LaneHeadOff(int lane)
 	return gj_lanes[lane].head_off + cvar("k_kbot_gj_head_off");
 }
 
+// E8.2 PILLAR-GAP AIR WAYPOINT. In-match the bot arrives with its NAV heading,
+// so the fixed launch offset alone mis-bows and it misses the far-lip horn. The
+// robust fix is to air-carve through an intermediate waypoint SOUTH of the
+// central pillar (the human apex ~ (565,77) on the y=146 lane) BEFORE steering
+// to the landing -- this bends the arc around the pillar and self-corrects in
+// the air regardless of the launch heading. The waypoint is the lane midpoint
+// bowed toward the open corridor (lower y) by k_kbot_gj_wp (0 = disabled, aim
+// straight at the landing). Returns the point the carve should currently steer
+// at: the waypoint until the bot passes the lane midpoint, then the landing.
+static void GJ_CarveTarget(int lane, vec3_t takeoff, vec3_t landing, vec3_t org,
+						   vec3_t target)
+{
+	float wp = cvar("k_kbot_gj_wp");
+	vec3_t mid, dir;
+	float lanelen, prog, wpprog;
+
+	(void)lane;
+	if (wp == 0)
+	{
+		VectorCopy(landing, target); // waypoint disabled
+		return;
+	}
+	mid[0] = (takeoff[0] + landing[0]) * 0.5f;
+	mid[1] = (takeoff[1] + landing[1]) * 0.5f - wp; // bow south (open corridor)
+	mid[2] = (takeoff[2] + landing[2]) * 0.5f;
+
+	dir[0] = landing[0] - takeoff[0];
+	dir[1] = landing[1] - takeoff[1];
+	dir[2] = 0;
+	lanelen = VectorLength(dir);
+	if (lanelen < 1)
+	{
+		VectorCopy(landing, target);
+		return;
+	}
+	VectorNormalize(dir);
+	prog = (org[0] - takeoff[0]) * dir[0] + (org[1] - takeoff[1]) * dir[1];
+	wpprog = (mid[0] - takeoff[0]) * dir[0] + (mid[1] - takeoff[1]) * dir[1];
+	if (prog < wpprog)
+	{
+		VectorCopy(mid, target);
+	}
+	else
+	{
+		VectorCopy(landing, target);
+	}
+}
+
 // Trial state machine
 #define GJ_IDLE  0
 #define GJ_CROSS 1
@@ -425,7 +473,15 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 		gj_peak[slot] = speed;
 	}
 
-	bearing = GJ_Bearing(org, landing);
+	// Air-carve target: the pillar-gap waypoint (bow south) until mid-span, then
+	// the landing. Self-corrects the arc around the pillar regardless of the
+	// launch heading (E8.2). k_kbot_gj_wp 0 disables it (aim straight at landing).
+	{
+		vec3_t ctarget;
+
+		GJ_CarveTarget(lane, takeoff, landing, org, ctarget);
+		bearing = GJ_Bearing(org, ctarget);
+	}
 	deadband = cvar("k_kbot_gj_steer");
 	if (deadband <= 0)
 	{
@@ -493,6 +549,24 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	// Frame-perfect hop latch (E1): press only on a grounded, released frame.
 	press = onground && !gj_jump_latch[slot];
 	gj_jump_latch[slot] = press;
+
+	// E8.2 diagnostic: at the hop frame, log the actual launch VELOCITY heading
+	// vs the intended launch_bearing -- the in-match mismatch (bot arrives with
+	// its nav heading) is exactly this gap. gated on k_kbot_gj_gatelog.
+	if (press && cvar("k_kbot_gj_gatelog"))
+	{
+		float lvyaw = (speed > 1) ? atan2(self->s.v.velocity[1],
+										   self->s.v.velocity[0]) * 180.0f / M_PI
+								  : launch_bearing;
+		float lerr = launch_bearing - lvyaw;
+
+		while (lerr > 180) { lerr -= 360; }
+		while (lerr < -180) { lerr += 360; }
+		G_cprint("[gjlaunch] lane=%s vyaw=%.0f want=%.0f err=%.0f speed=%.0f "
+				 "pos=%.0f,%.0f\n",
+				 gj_lanes[lane].name, lvyaw, launch_bearing, lerr, speed,
+				 org[0], org[1]);
+	}
 
 	if (!onground)
 	{
@@ -917,6 +991,46 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 				return false; // goal is not across the gap
 			}
 
+			// ---- E8.2 POSITION GATE ----
+			// The passive trigger fires wherever nav wanders within the zone
+			// (measured launches came from y=114..190, x=784..795 -- well off
+			// the (455,146) lip). A launch from the wrong spot misses the
+			// far-lip horn however well it is aimed. Require the bot at the near
+			// lip: along-lane progress <= k_kbot_gj_maxprog (not past the lip)
+			// and cross-lane offset <= k_kbot_gj_ymax (on the lane line).
+			{
+				vec3_t dir, rel;
+				float lanelen, prog, perp;
+				float maxprog = cvar("k_kbot_gj_maxprog");
+				float ymax = cvar("k_kbot_gj_ymax");
+
+				dir[0] = land[0] - take[0];
+				dir[1] = land[1] - take[1];
+				dir[2] = 0;
+				lanelen = VectorLength(dir);
+				if (lanelen > 1 && gj_state[slot] != GJ_CROSS)
+				{
+					VectorNormalize(dir);
+					rel[0] = self->s.v.origin[0] - take[0];
+					rel[1] = self->s.v.origin[1] - take[1];
+					rel[2] = 0;
+					prog = rel[0] * dir[0] + rel[1] * dir[1];
+					perp = fabs(rel[0] * (-dir[1]) + rel[1] * dir[0]);
+					if ((maxprog > 0 && prog > maxprog) ||
+						(ymax > 0 && perp > ymax))
+					{
+						if (cvar("k_kbot_gj_gatelog"))
+						{
+							G_cprint("[gapjump] lane=%s result=DECLINE_POS "
+									 "prog=%.0f perp=%.0f\n",
+									 gj_lanes[pick].name, prog, perp);
+						}
+						gj_state[slot] = GJ_IDLE;
+						return false;
+					}
+				}
+			}
+
 			// ---- E8 REQUIRED-SPEED GATE (the real in-match fix) ----
 			// The dm3 gap is a level ~430u self-jump; the fixed +270 arc lands
 			// short unless horizontal speed >= v_req (~600 launch here). E7 lost
@@ -959,6 +1073,54 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 					}
 					gj_state[slot] = GJ_IDLE;
 					return false; // too slow -> decline, vanilla nav continues
+				}
+			}
+
+			// ---- E8.2 ALIGNMENT GATE (the launch-heading fix) ----
+			// In-match the bot arrives with its NAV heading, not the bow-around-
+			// the-pillar launch heading (measured launch-err mean ~43 deg, up to
+			// 96). The seeded trial lands ~100% only because it launches at err~0.
+			// The ledge is far too small to turn a fast wrong-heading approach
+			// onto the bow within the runway, so the safe, honest win is to GATE:
+			// only commit when the velocity heading is already within
+			// k_kbot_gj_align_tol of the required launch heading; otherwise
+			// decline (vanilla nav walks on -- no doomed pit dive). Fewer jumps,
+			// but the committed ones actually land.
+			{
+				float align_tol = cvar("k_kbot_gj_align_tol");
+
+				if (align_tol > 0 && gj_state[slot] != GJ_CROSS)
+				{
+					float lb = GJ_Bearing(take, land) + GJ_LaneHeadOff(pick);
+					float vyaw, aerr;
+					vec3_t hv2;
+
+					hv2[0] = self->s.v.velocity[0];
+					hv2[1] = self->s.v.velocity[1];
+					hv2[2] = 0;
+					if (cvar("k_kbot_gj_head") > -360)
+					{
+						lb = cvar("k_kbot_gj_head");
+					}
+					vyaw = (VectorLength(hv2) > 1)
+							   ? atan2(hv2[1], hv2[0]) * 180.0f / M_PI
+							   : lb;
+					aerr = lb - vyaw;
+					while (aerr > 180) { aerr -= 360; }
+					while (aerr < -180) { aerr += 360; }
+					if (aerr < 0) { aerr = -aerr; }
+
+					if (aerr > align_tol)
+					{
+						if (cvar("k_kbot_gj_gatelog"))
+						{
+							G_cprint("[gapjump] lane=%s result=DECLINE_YAW aerr=%.0f "
+									 "tol=%.0f vyaw=%.0f want=%.0f\n",
+									 gj_lanes[pick].name, aerr, align_tol, vyaw, lb);
+						}
+						gj_state[slot] = GJ_IDLE;
+						return false; // arrival heading too far off -> decline
+					}
 				}
 			}
 
