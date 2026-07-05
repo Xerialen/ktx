@@ -765,6 +765,7 @@ typedef struct fb_entvars_s {
 	int cmd_msec_last;
 
 	int kbot;									// KomodoBrain state (0 = stock frogbot, see KBOT_STATE_* in kbot.h)
+	int kbot_role;								// KAPTEN allocation (0 none, see KBR_* in kbot_models.c), refreshed on a 2 s tick
 } fb_entvars_t;
 #endif
 

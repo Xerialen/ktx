@@ -21,7 +21,18 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.24.0-model"
+#define KBOT_VERSION "kbot-0.25.0-arena"
+
+// ---- tournament decision models (kbot_models.c, 2026-07-06) ----
+// Three cvar-gated models over the frogbot value function, data-filled from
+// the Book/]sr[ dm3 win corpus (komodobots2 report 2026-07-06):
+//   k_kbot_model 1=TDM 2=KAPTEN 3=UTBYTE (0 off, byte-neutral);
+//   k_kbot_model_red / k_kbot_model_blue override per team for face-offs.
+int KBot_StackClass(gedict_t *p);       // 0 spawn / 1 mid / 2 armed / 3 control
+int KBot_TeamRLLG(gedict_t *self);      // RL/LG count in team hands (owner param)
+int KBot_ActiveModel(gedict_t *self);
+float KBot_ModelScaleGoal(gedict_t *self, gedict_t *goal, float desire);
+float KBot_ModelScaleHunt(gedict_t *self, gedict_t *en, float desire);
 
 // ---- KDLOG decision-log emitter (kbot_dlog.c) ----
 // Structured tactical-decision telemetry (G_cprint "KDLOG ..." lines into

@@ -1082,6 +1082,12 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_finish_hp", "40");
 	RegisterCvarEx("k_kbot_dive_gate", "0");
 
+	// Tournament decision models (kbot_models.c): 0 off (byte-neutral),
+	// 1 TDM, 2 KAPTEN, 3 UTBYTE. Per-team overrides for model face-offs.
+	RegisterCvarEx("k_kbot_model", "0");
+	RegisterCvarEx("k_kbot_model_red", "0");
+	RegisterCvarEx("k_kbot_model_blue", "0");
+
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).
 	// k_kbot_gj_lane -1 = passive trigger (real feature); 0..3 = trial driver

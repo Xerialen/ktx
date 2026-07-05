@@ -107,6 +107,14 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 		}
 	}
 
+	// Tournament models (kbot_models.c): class/role/economy desire policy on
+	// world goals. Returns 0 for gated candidates (class-conditioned dive).
+	// No-op unless k_kbot_model[_red/_blue] selects a model for this bot.
+	if (self->fb.kbot && (goal_desire > 0) && !self->fb.fixed_goal)
+	{
+		goal_desire = KBot_ModelScaleGoal(self, goal_entity, goal_desire);
+	}
+
 	goal_entity->fb.saved_goal_desire = goal_desire;
 	if (goal_desire > 0)
 	{
@@ -484,6 +492,15 @@ void UpdateGoal(gedict_t *self)
 		if (self->fb.kbot && (self->fb.goal_enemy_desire > 0) && KBot_AvoidFights(self))
 		{
 			self->fb.goal_enemy_desire = 0;
+		}
+		// UTBYTE (kbot_models.c): engagement economics scale the HUNT desire
+		// only -- TA passes through, POKA damps, VAGRA zeroes, FINISH boosts.
+		// s.v.enemy is never touched here: repel, dodge and evade keep their
+		// vanilla inputs (the b2 death-spiral lesson, hard rule).
+		if (self->fb.kbot && (self->fb.goal_enemy_desire > 0))
+		{
+			self->fb.goal_enemy_desire = KBot_ModelScaleHunt(self, enemy_,
+															self->fb.goal_enemy_desire);
 		}
 		if (self->fb.goal_enemy_desire > 0)
 		{
