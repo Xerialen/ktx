@@ -155,9 +155,14 @@ qbool KBot_RouteFocusIgnore(gedict_t *self, gedict_t *enemy)
 	{
 		return false;
 	}
-	if (!KBot_AvoidFights(self))
+	// SG-only, literally (owner doctrine): any real weapon means the bot
+	// fights as vanilla. The stack-based weak test (KBot_AvoidFights) proved
+	// far too broad here -- an RL-carrier at stack 90 refusing to fight gets
+	// farmed (wave-1 A/B 2026-07-05: mean -54.75 over 4 matches, 0 wins).
+	if ((int)self->s.v.items & (IT_ROCKET_LAUNCHER | IT_LIGHTNING | IT_GRENADE_LAUNCHER
+			| IT_SUPER_NAILGUN | IT_NAILGUN | IT_SUPER_SHOTGUN))
 	{
-		return false; // armed + stacked bots fight as vanilla
+		return false;
 	}
 	goal = &g_edicts[(int)self->s.v.goalentity];
 	if ((goal == world) || (goal->ct == ctPlayer))
