@@ -1215,6 +1215,14 @@ void FirstFrame(void)
 	// Owner rule (2026-07-05): only attempt the RL jump while no enemy has
 	// line-of-sight to the bot (setup is combat-defenseless).
 	RegisterCvarEx("k_kbot_gj_rl_unseen", "1");
+	// E13 (dm3-jumps): the chain-hop generalized to the mirror lanes 2/3 --
+	// straight-line E1 hop into the launch box (fixes the LINE that option-2's
+	// forced circle-build broke, and tops speed into the LAND band 420-491).
+	RegisterCvarEx("k_kbot_gj_mchain", "1");
+	RegisterCvarEx("k_kbot_gj_mchain_min", "320");
+	RegisterCvarEx("k_kbot_gj_mchain_tgt", "450");
+	RegisterCvarEx("k_kbot_gj_mchain_exit", "380");
+	RegisterCvarEx("k_kbot_gj_mchain_back", "240");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
