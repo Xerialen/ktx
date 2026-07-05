@@ -88,6 +88,7 @@ static void NewlyPickedEnemyLogic(void)
 			if (BotsPickBestEnemy(self))
 			{
 				self->fb.goal_refresh_time = 0;
+				KDLog_MarkTrigger(self, "enemy_event"); // KDLOG
 			}
 		}
 	}
@@ -407,6 +408,7 @@ static void PeriodicAllClientLogic(void)
 		else
 		{
 			self->fb.goal_refresh_time = 0;
+			KDLog_MarkTrigger(self, "relocate"); // KDLOG
 			self->fb.state |= AWARE_SURROUNDINGS;
 			self->fb.old_linked_marker = (self->isBot ? NULL : self->fb.old_linked_marker);
 		}
@@ -456,6 +458,8 @@ void BotEvadeLogic(gedict_t *self)
 			}
 		}
 	}
+
+	KDLog_Evade(self); // KDLOG: emits only on flips
 }
 
 // Logic that gets called for every player

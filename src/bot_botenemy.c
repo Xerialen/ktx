@@ -8,6 +8,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 // Removes the look object for the given player
 void ClearLookObject(gedict_t *player)
@@ -51,6 +52,7 @@ void BotDamageInflictedEvent(gedict_t *attacker, gedict_t *targ)
 					if (targ->s.v.goalentity == targ->s.v.enemy)
 					{
 						targ->fb.goal_refresh_time = 0;
+						KDLog_MarkTrigger(targ, "enemy_event"); // KDLOG
 					}
 
 					targ->fb.enemy_time = g_globalvars.time + 1;
@@ -179,6 +181,11 @@ qbool BotsPickBestEnemy(gedict_t *self)
 	self->fb.enemy_time = g_globalvars.time + 1;
 	self->s.v.enemy = (enemy_ == NULL ? 0 : NUM_FOR_EDICT(enemy_));
 	self->fb.enemy_dist = predict_dist;
+
+	if (self->s.v.enemy != old_enemy)
+	{
+		KDLog_Enemy(self); // KDLOG: target changed
+	}
 
 	return (self->s.v.enemy != old_enemy);
 }

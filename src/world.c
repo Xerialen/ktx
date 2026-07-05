@@ -1075,6 +1075,9 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
 
+	// KDLOG decision log (kbot_dlog.c): 0 off, 1 komodobots, 2 all bots.
+	RegisterCvarEx("k_kbot_dlog", "0");
+
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).
 	// k_kbot_gj_lane -1 = passive trigger (real feature); 0..3 = trial driver

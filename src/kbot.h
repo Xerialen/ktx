@@ -21,7 +21,20 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.22.0-chainhop"
+#define KBOT_VERSION "kbot-0.23.0-dlog"
+
+// ---- KDLOG decision-log emitter (kbot_dlog.c) ----
+// Structured tactical-decision telemetry (G_cprint "KDLOG ..." lines into
+// server.log), gated by cvar k_kbot_dlog (0 off / 1 kbots / 2 all bots) and
+// match-in-progress. Strictly read-only. Consumed by mvd_analyzer
+// -decision-log. Design: komodobots2 docs/specs/2026-07-05-decision-log-design.md.
+void KDLog_MarkTrigger(gedict_t *plr, const char *trig); // why the next goal refresh fires
+void KDLog_GoalReset(gedict_t *self);                    // arm collector (UpdateGoal start)
+void KDLog_GoalCandidate(gedict_t *self, gedict_t *goal, float desire, float goal_time);
+void KDLog_GoalChosen(gedict_t *self);                   // emit goal record (UpdateGoal end)
+void KDLog_Enemy(gedict_t *self);                        // emit on enemy-target change
+void KDLog_Evade(gedict_t *self);                        // emit on bot_evade flip
+void KDLog_Play(gedict_t *self, const char *lane, const char *phase, const char *detail);
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)

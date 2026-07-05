@@ -923,6 +923,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, slot, self->netname, gj_trial[slot], org[0], org[1], org[2],
 				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		KDLog_Play(self, gj_lanes[lane].name, "land", NULL); // KDLOG
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -937,6 +938,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
 				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		KDLog_Play(self, gj_lanes[lane].name, "fail", "water"); // KDLOG
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -947,6 +949,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
 				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		KDLog_Play(self, gj_lanes[lane].name, "fail", "gap"); // KDLOG
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -957,6 +960,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
 				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		KDLog_Play(self, gj_lanes[lane].name, "fail", "timeout"); // KDLOG
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -1039,7 +1043,8 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 			G_cprint("[gapjump] lane=%s result=BUILD_ABORT vh=%.0f vreq=%.0f og=%d\n",
 					 gj_lanes[lane].name, vh, vreq, onground ? 1 : 0);
 		}
-		gj_state[slot] = GJ_IDLE;
+		KDLog_Play(self, gj_lanes[lane].name, "abort", "build"); // KDLOG
+			gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 
@@ -1565,7 +1570,8 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 "vh=%.0f floor=%.0f\n",
 					 gj_lanes[lane].name, along_u, lat_n, vh, floor);
 		}
-		gj_state[slot] = GJ_IDLE;
+		KDLog_Play(self, gj_lanes[lane].name, "abort", "app_timeout"); // KDLOG
+			gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 	// Enemy showed up mid-setup -> yield. EXCEPTION: mid-air in the chain hop
@@ -1590,7 +1596,8 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 			G_cprint("[gapjump] lane=%s result=APP_YIELD_SEEN along=%.0f vh=%.0f\n",
 					 gj_lanes[lane].name, along_u, vh);
 		}
-		gj_state[slot] = GJ_IDLE;
+		KDLog_Play(self, gj_lanes[lane].name, "yield", "seen"); // KDLOG
+			gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 
@@ -1731,6 +1738,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 gj_lanes[lane].name, along_u, lat_n, vh, vreq, floor, vyaw,
 					 u_yaw, now - gj_app_t0[slot]);
 		}
+		KDLog_Play(self, gj_lanes[lane].name, "launch", NULL); // KDLOG
 		gj_t0[slot] = now;
 		gj_peak[slot] = 0;
 		gj_flip[slot] = 1;
@@ -1759,6 +1767,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 						 "lat=%.0f vh=%.0f aerr=%.0f\n",
 						 gj_lanes[lane].name, along_u, lat_n, vh, aerr);
 			}
+			KDLog_Play(self, gj_lanes[lane].name, "decline", "past_orbit"); // KDLOG
 			gj_state[slot] = GJ_IDLE;
 			return false;
 		}
@@ -1780,7 +1789,8 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 "vh=%.0f aerr=%.0f\n",
 					 gj_lanes[lane].name, along_u, lat_n, vh, aerr);
 		}
-		gj_state[slot] = GJ_IDLE;
+		KDLog_Play(self, gj_lanes[lane].name, "decline", "past"); // KDLOG
+			gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 
@@ -1797,7 +1807,8 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 "vh=%.0f floor=%.0f\n",
 					 gj_lanes[lane].name, along_u, lat_n, vh, floor);
 		}
-		gj_state[slot] = GJ_IDLE;
+		KDLog_Play(self, gj_lanes[lane].name, "decline", "slow"); // KDLOG
+			gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 
@@ -1878,6 +1889,10 @@ gj_app_drive:
 								 "lhop=%.0f pa=%.0f pl=%.0f along=%.0f\n",
 								 gj_lanes[lane].name, vh, vpred, lhop, pa, pl,
 								 along_u);
+					}
+					if (!gj_chain_on[slot])
+					{
+						KDLog_Play(self, gj_lanes[lane].name, "chainhop", NULL); // KDLOG
 					}
 					gj_chain_on[slot] = true;
 					gj_chain_flip[slot] = 0;
@@ -2274,6 +2289,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 				G_cprint("[gapjump] lane=%s result=APP_ENGAGE\n",
 						 gj_lanes[pick].name);
 			}
+			KDLog_Play(self, gj_lanes[pick].name, "engage", NULL); // KDLOG
 			return GJ_ApproachFrame(self, slot, pick, jumping, firing, impulse,
 									direction);
 		}

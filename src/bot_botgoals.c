@@ -49,6 +49,7 @@ void UpdateGoalEntity(gedict_t *item, gedict_t *taker)
 		if (plr->s.v.goalentity == item_entity)
 		{
 			plr->fb.goal_refresh_time = min(plr->fb.goal_refresh_time, g_globalvars.time + delay);
+			KDLog_MarkTrigger(plr, "item_taken"); // KDLOG
 			ResetGoalEntity(plr);
 		}
 	}
@@ -187,6 +188,8 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 				return;
 			}
 		}
+
+		KDLog_GoalCandidate(self, goal_entity, goal_desire, goal_time); // KDLOG: viable candidate
 
 		// If the bot can think far enough ahead...
 		if (goal_time < self->fb.skill.lookahead_time)
@@ -425,6 +428,8 @@ void UpdateGoal(gedict_t *self)
 	self->fb.best_goal = NULL;
 	self->fb.goal_enemy_repel = self->fb.goal_enemy_desire = 0;
 
+	KDLog_GoalReset(self); // KDLOG: arm the candidate collector for this pass
+
 	BotEvadeLogic(self);
 
 	if (enemy_->fb.touch_marker)
@@ -456,6 +461,8 @@ void UpdateGoal(gedict_t *self)
 											self->fb.canRocketJump);
 			enemy_->fb.saved_respawn_time = 0;
 			enemy_->fb.saved_goal_time = traveltime;
+
+			KDLog_GoalCandidate(self, enemy_, self->fb.goal_enemy_desire, traveltime); // KDLOG
 
 			if (traveltime < self->fb.skill.lookahead_time)
 			{
@@ -562,6 +569,8 @@ void UpdateGoal(gedict_t *self)
 	{
 		self->s.v.goalentity = NUM_FOR_EDICT(world);
 	}
+
+	KDLog_GoalChosen(self); // KDLOG: emit the goal record for this pass
 }
 
 #endif // BOT_SUPPORT

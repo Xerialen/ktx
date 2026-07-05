@@ -12,6 +12,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 #define PERIODIC_MM2_STATUS 4
 
@@ -147,6 +148,7 @@ void BotClientEntersEvent(gedict_t *self, gedict_t *spawn_pos)
 	self->fb.firing = false;
 	self->fb.desired_weapon_impulse = 2;
 	self->fb.goal_refresh_time = 0;
+	KDLog_MarkTrigger(self, "spawn"); // KDLOG
 	self->fb.allowedMakeNoise = true;
 
 	FrogbotSetHealthArmour(self);
