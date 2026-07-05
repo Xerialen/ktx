@@ -1077,6 +1077,10 @@ void FirstFrame(void)
 
 	// KDLOG decision log (kbot_dlog.c): 0 off, 1 komodobots, 2 all bots.
 	RegisterCvarEx("k_kbot_dlog", "0");
+	RegisterCvarEx("k_kbot_commit", "0");
+	RegisterCvarEx("k_kbot_route_focus", "0");
+	RegisterCvarEx("k_kbot_finish_hp", "40");
+	RegisterCvarEx("k_kbot_dive_gate", "0");
 
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).

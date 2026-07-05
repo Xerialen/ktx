@@ -618,7 +618,10 @@ void SetFireButton(gedict_t *self, vec3_t rel_pos, float rel_dist)
 			{
 				if (!SameTeam(traced, self))
 				{
-					if (!((int)self->s.v.flags & FL_WATERJUMP))
+					// KBot model v1: route focus -- don't adopt a blocking
+					// player as the new target while on an item route.
+					if (!((int)self->s.v.flags & FL_WATERJUMP)
+							&& !KBot_RouteFocusIgnore(self, traced))
 					{
 						self->s.v.enemy = NUM_FOR_EDICT(traced);
 						LookEnemy(self, traced);

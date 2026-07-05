@@ -49,14 +49,19 @@ void BotDamageInflictedEvent(gedict_t *attacker, gedict_t *targ)
 
 				if (!SameTeam(attacker, targ))
 				{
-					if (targ->s.v.goalentity == targ->s.v.enemy)
+					// KBot model v1: route focus -- a weak kbot on an item
+					// route does not retarget (or churn its goal) on damage.
+					if (!KBot_RouteFocusIgnore(targ, attacker))
 					{
-						targ->fb.goal_refresh_time = 0;
-						KDLog_MarkTrigger(targ, "enemy_event"); // KDLOG
-					}
+						if (targ->s.v.goalentity == targ->s.v.enemy)
+						{
+							targ->fb.goal_refresh_time = 0;
+							KDLog_MarkTrigger(targ, "enemy_event"); // KDLOG
+						}
 
-					targ->fb.enemy_time = g_globalvars.time + 1;
-					targ->s.v.enemy = NUM_FOR_EDICT(attacker);
+						targ->fb.enemy_time = g_globalvars.time + 1;
+						targ->s.v.enemy = NUM_FOR_EDICT(attacker);
+					}
 				}
 				else
 				{
@@ -176,6 +181,13 @@ qbool BotsPickBestEnemy(gedict_t *self)
 				BestEnemy_apply(test_enemy, &best_score, &enemy_, &predict_dist);
 			}
 		}
+	}
+
+	// KBot model v1: route focus -- ignore the pick entirely while a weak
+	// kbot is routing to a world item (doctrine exceptions inside).
+	if ((enemy_ != NULL) && KBot_RouteFocusIgnore(self, enemy_))
+	{
+		enemy_ = NULL;
 	}
 
 	self->fb.enemy_time = g_globalvars.time + 1;

@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.23.0-dlog"
+#define KBOT_VERSION "kbot-0.24.0-model"
 
 // ---- KDLOG decision-log emitter (kbot_dlog.c) ----
 // Structured tactical-decision telemetry (G_cprint "KDLOG ..." lines into
@@ -57,6 +57,7 @@ qbool KBot_Frame(gedict_t *self);
 // weapon-stripped maps, which is the post-death discipline: collect first,
 // re-engage once armed. Decision-level consumers only; never movement.
 qbool KBot_AvoidFights(gedict_t *self);
+qbool KBot_RouteFocusIgnore(gedict_t *self, gedict_t *enemy);
 
 // ---- E6: gap-crossing strafe-jump play ----
 // Final-authority movement override for a triggered gap crossing on dm3

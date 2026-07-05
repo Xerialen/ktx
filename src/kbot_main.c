@@ -134,6 +134,46 @@ qbool KBot_AvoidFights(gedict_t *self)
 	return false;
 }
 
+// ---- decision model v1: route focus (owner doctrine 2026-07-05) ----
+//
+// A weak kbot (KBot_AvoidFights) routing to a world item ignores enemies
+// entirely: no retarget, no chase, no combat-driven goal refresh. The
+// decision-log baseline showed 91% of weak-bot damage events fire while the
+// goal is a world item -- combat micro blind to the route is how the bot
+// "jumps down shooting from quad" and loses its position. Two doctrine
+// exceptions re-enable engagement:
+//   (a) finish-off: the enemy carries a real weapon (RL/LG) AND is low
+//       health (<= k_kbot_finish_hp) -- a couple of shotgun shells convert.
+//   (b) jump-denial (enemy mid gap-jump) -- NOT implemented in v1; needs the
+//       gj-lane flight zones, documented in the model spec.
+// Gated per-call by k_kbot_route_focus; baseline bots can't take the branch.
+qbool KBot_RouteFocusIgnore(gedict_t *self, gedict_t *enemy)
+{
+	gedict_t *goal;
+
+	if (!self->isBot || !self->fb.kbot || !cvar("k_kbot_route_focus"))
+	{
+		return false;
+	}
+	if (!KBot_AvoidFights(self))
+	{
+		return false; // armed + stacked bots fight as vanilla
+	}
+	goal = &g_edicts[(int)self->s.v.goalentity];
+	if ((goal == world) || (goal->ct == ctPlayer))
+	{
+		return false; // no route to protect
+	}
+	if (enemy && (enemy->ct == ctPlayer)
+			&& ((int)enemy->s.v.items & (IT_ROCKET_LAUNCHER | IT_LIGHTNING))
+			&& (enemy->s.v.health <= max(1, (int)cvar("k_kbot_finish_hp"))))
+	{
+		return false; // exception (a): finish-off
+	}
+
+	return true;
+}
+
 // ============================================================================
 //  E6: gap-crossing strafe-jump play (kbot-0.17.0-gapjump)
 // ============================================================================

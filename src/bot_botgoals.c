@@ -90,9 +90,43 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 		goal_desire = (self->fb.fixed_goal == goal_entity ? 1000 : 0);
 	}
 
+	// KBot model v1: incumbent-goal hysteresis. The goal the bot is already
+	// routing to keeps a multiplicative desire bonus (k_kbot_commit > 1), so a
+	// marginally better alternative no longer flips the route every refresh
+	// (baseline: 54% switch rate, armor conversion 24%). Desire-level boost
+	// propagates coherently through both scoring stages (EvalGoal/EvalGoal2
+	// read saved_goal_desire).
+	if (self->fb.kbot && (goal_desire > 0) && !self->fb.fixed_goal
+			&& (NUM_FOR_EDICT(goal_entity) == (int)self->s.v.goalentity))
+	{
+		float commit = cvar("k_kbot_commit");
+
+		if (commit > 1)
+		{
+			goal_desire *= commit;
+		}
+	}
+
 	goal_entity->fb.saved_goal_desire = goal_desire;
 	if (goal_desire > 0)
 	{
+		// KBot model v1: dive gate. A stacked bot (h+a >= k_kbot_dive_gate)
+		// never takes an underwater goal -- the decision-log baseline had 18%
+		// of item intents in WATER vs Milton's one water pickup in 5 minutes.
+		// Underwater = engine pointcontents at the item origin, map-agnostic.
+		if (self->fb.kbot)
+		{
+			int gate = (int)cvar("k_kbot_dive_gate");
+
+			if ((gate > 0) && ((self->s.v.health + self->s.v.armorvalue) >= gate)
+					&& (trap_pointcontents(PASSVEC3(goal_entity->s.v.origin)) == CONTENT_WATER))
+			{
+				goal_entity->fb.saved_goal_desire = 0;
+
+				return;
+			}
+		}
+
 		if (POVDMM4DontWalkThroughDoor(goal_entity))
 		{
 			return;
