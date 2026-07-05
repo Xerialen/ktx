@@ -1862,11 +1862,14 @@ gj_app_drive:
 				// lands ~6u short of pred -- the press+1 actuation frame), so
 				// a mid-biased prediction keeps the realized coupling inside
 				// the gate with margin on both sides.
-				// pl in [-24,+5]: east-open, west-capped -- mirrors the launch
-				// gate's asymmetric band (west launches scrub-fail in flight;
-				// see the north_max comment at the gate).
+				// pl in [-24,+12], vs the launch gate's west cap +5: realized
+				// touchdowns drift ~8u EAST of the prediction (b4: pl +16 ->
+				// lat +8, +23 -> +12, +7 -> -4), so a +12 prediction lands
+				// ~+4 and passes the gate; capping the PREDICTION at +5
+				// choked trigger frequency 3x (b5: 2 hops vs b4: 6) without
+				// adding safety -- the gate sees the REAL lat either way.
 				if ((pa >= -ctol) && (pa <= launch_win) &&
-					(pl >= -24.0f) && (pl <= 5.0f) &&
+					(pl >= -24.0f) && (pl <= 12.0f) &&
 					(zpred >= -72.0f) && (zpred <= -45.0f))
 				{
 					if (!gj_chain_on[slot] && cvar("k_kbot_gj_gatelog"))
