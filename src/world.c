@@ -1205,6 +1205,16 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_gj_wp_lead", "48");
 	RegisterCvarEx("k_kbot_gj_airseat", "1");
 	RegisterCvarEx("k_kbot_gj_rl_bangle", "60");
+	// E12b chain-hop (lane 4): one E1-carve hop tops the ground build (~450 cap)
+	// up into the slot speed window (~459-506). chain_min = grounded speed under
+	// which the hop's predicted landing speed cannot reach the floor; chain_tol =
+	// how far SHORT of the nominal launch org a predicted touchdown may fall.
+	RegisterCvarEx("k_kbot_gj_chain", "1");
+	RegisterCvarEx("k_kbot_gj_chain_min", "410");
+	RegisterCvarEx("k_kbot_gj_chain_tol", "20");
+	// Owner rule (2026-07-05): only attempt the RL jump while no enemy has
+	// line-of-sight to the bot (setup is combat-defenseless).
+	RegisterCvarEx("k_kbot_gj_rl_unseen", "1");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{

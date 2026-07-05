@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.21.0-rl-descent"
+#define KBOT_VERSION "kbot-0.22.0-chainhop"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
