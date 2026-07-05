@@ -1223,6 +1223,9 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_gj_mchain_tgt", "450");
 	RegisterCvarEx("k_kbot_gj_mchain_exit", "380");
 	RegisterCvarEx("k_kbot_gj_mchain_back", "240");
+	// SNG mega jumps, lanes 5/6 (ticket #24, branch dm3-jumps): yard -> the
+	// 120-step across the void band, and plateau -> mega perch straight north.
+	RegisterCvarEx("k_kbot_gj_sng", "1");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{

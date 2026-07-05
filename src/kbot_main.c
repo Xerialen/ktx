@@ -252,7 +252,7 @@ typedef struct
 // swim; waterlevel>=2 logs FAIL_WATER (E11c discharge guard). In-match the
 // approach gate needs BOTH a floor and a CEILING (k_kbot_gj_rl_mul/_max) --
 // too slow clips the sill, too fast clips the upper lip. Gated by k_kbot_gj_rl.
-#define GJ_NUM_LANES 5
+#define GJ_NUM_LANES 7
 static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 	// 0: ring -> quad, northern lips, bow south (-30) around the pillar.
 	{ "ring2quad", { 455, 146, 56 }, { 705, 146, 56 }, -40, -30, { 0, 0, 0 } },
@@ -270,6 +270,27 @@ static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 	//    feet down ON the sill (org -64) inside the slot. wp sits ON the line
 	//    (x1520 -> y156); retune live via k_kbot_gj_rlwp without a rebuild.
 	{ "bridge2rl", { 1454, 0, -24 }, { 1608, 368, -64 }, -150, 0, { 1520, 156, 0 } },
+	// 5/6: SNG MEGA JUMPS (ticket #24, branch dm3-jumps). Cal-traced grids
+	//    2026-07-05 (artifacts/records/e13-mirror-chain + ticket comments);
+	//    all four elite mega takes (Milton/Ihminen/mirage/reppie, fs vs tVS
+	//    2006 CTV) converge on these two crossings. ORIGIN-space: yard floor
+	//    96 = org 120; 120-step org 144; shelf 152 = org 176; plateau/perch
+	//    floor 160 = org 184; the voids below are DRY floor -40 = org -16
+	//    (no water), so fail_z -10 logs FAIL_GAP before touchdown.
+	// 5: yard -> the 120-step across the void band y~355..455 (floor -40).
+	//    Step (x -490..-450, y 260..280) self-chains onto the 152-shelf ->
+	//    160-plateau (plain floor walk). Straight, no pillar.
+	{ "sng2step", { -500, 490, 120 }, { -470, 275, 144 }, -10, 0, { 0, 0, 0 } },
+	// 6: top plateau -> mega perch, straight NORTH line at x=-810 across the
+	//    open void column (y 130..250 floor -40). ORIGIN-space: the solid
+	//    block face sits at brush x~-785, and the CLIP HULL expands it by the
+	//    player half-extents (E12 lesson) -> org-x must stay <= ~-801; the
+	//    perch floor edge (~-815) + bbox overlap allows org-x >= ~-831.
+	//    Measured: x -792 clipped the block (FAIL_GAP into the void at
+	//    y~208); x -810 lands hdist 6-30 at v0 320-360. Level 184->184,
+	//    ~185u. Milton bows west only because he arrives running east-to-
+	//    west along the shelf; the straight -810 line is open.
+	{ "sng2mega", { -810, 285, 184 }, { -810, 100, 184 }, -10, 0, { 0, 0, 0 } },
 };
 
 // Effective launch-heading offset for a lane: table default + cvar (for sweeps).
@@ -905,7 +926,8 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	// movement. k_kbot_gj_aimlaunch (default on) can disable it for A/B isolation.
 	if (press && speed > 1 && cvar("k_kbot_gj_aimlaunch") >= 0 &&
 		((cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3)) ||
-		 (lane == 4 && cvar("k_kbot_gj_rl"))))
+		 (lane == 4 && cvar("k_kbot_gj_rl")) ||
+		 ((lane == 5 || lane == 6) && cvar("k_kbot_gj_sng"))))
 	{
 		vec3_t la;
 		la[0] = 0;
@@ -1232,6 +1254,10 @@ static int GJ_PickLaneWithin(gedict_t *self, float back, float pmax, float zband
 		{
 			continue; // E12 RL lane disabled -> invisible to intent/route
 		}
+		if ((i == 5 || i == 6) && !cvar("k_kbot_gj_sng"))
+		{
+			continue; // SNG lanes disabled -> invisible to intent/route
+		}
 		// Use GJ_Geometry (not raw table) so the E10c mirror-carve relocation of
 		// lanes 2/3 is honoured by the active-path intent/route lane picker too.
 		GJ_Geometry(i, take, land, &fz);
@@ -1353,6 +1379,10 @@ float KBot_GJ_RouteShim(gedict_t *self, gedict_t *goal_entity, float goal_time)
 		if ((i == 4) && !cvar("k_kbot_gj_rl"))
 		{
 			continue; // E12 RL lane disabled -> not priced as a route edge
+		}
+		if ((i == 5 || i == 6) && !cvar("k_kbot_gj_sng"))
+		{
+			continue; // SNG lanes disabled -> not priced as route edges
 		}
 		GJ_Geometry(i, take, land, &fail_z);
 		u[0] = land[0] - take[0];
