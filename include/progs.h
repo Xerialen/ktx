@@ -763,6 +763,8 @@ typedef struct fb_entvars_s {
 
 	float cmd_msec_lost;
 	int cmd_msec_last;
+
+	int kbot;									// KomodoBrain state (0 = stock frogbot, see KBOT_STATE_* in kbot.h)
 } fb_entvars_t;
 #endif
 

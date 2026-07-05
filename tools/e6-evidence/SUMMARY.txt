@@ -1,0 +1,7 @@
+E6 gap-jump landing rates (v0=680 steer=1.5 runup=0 landrad=120)
+ring2quad : 51/52 LAND = 98.1%  fails={'FAIL_GAP': 1}
+quad2ring : 52/52 LAND = 100.0%  fails={}
+ra2ya     : 51/52 LAND = 98.1%  fails={'FAIL_GAP': 1}
+ya2ra     : 52/52 LAND = 100.0%  fails={}
+
+logs: rq_server.log (lanes 0,1), ry2_server.log (lanes 2,3)

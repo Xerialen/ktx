@@ -11,6 +11,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 //static float best_score;
 #define BACKPACK_CLASSNAME "backpack"
@@ -117,6 +118,17 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 		traveltime = SubZoneArrivalTime(zone_time, middle_marker, to_marker,
 										self->fb.canRocketJump);
 		goal_time = traveltime;
+
+		// E10 (kbot-only): price the ring<->quad gap-jump as a route edge. The
+		// shared subzone tables know only the walk-around; komodobots that can
+		// make the jump see the true (shorter) travel time for cross-gap goals.
+		// Baseline frogbots (fb.kbot == 0) and k_kbot_gj_route 0 are untouched.
+		if (self->isBot && self->fb.kbot && cvar("k_kbot_gj_route"))
+		{
+			extern float KBot_GJ_RouteShim(gedict_t *s, gedict_t *goal, float t);
+
+			goal_time = KBot_GJ_RouteShim(self, goal_entity, goal_time);
+		}
 
 		if (self->fb.goal_enemy_repel)
 		{
@@ -342,6 +354,65 @@ void UpdateGoal(gedict_t *self)
 
 	self->fb.goal_refresh_time = g_globalvars.time + 2 + g_random();
 
+	// Lab instrument: pin the navigation goal to a live marker number (1-based,
+	// same numbering as "botcmd goto"). Measurement-clean alternative to
+	// "botcmd debug botpath", which G_Errors under matchless configs and
+	// teleports/freezes the bot with debug side effects. >0 pins, -1 clears,
+	// 0 leaves fixed_goal alone (so the debug command still works).
+	if (self->isBot)
+	{
+		extern gedict_t *markers[];
+		// LD-F1 (#95): per-slot pin k_fb_moveprobe_fixed_goal_s<N> overrides the
+		// global pin for this bot; helpers live in bot_movement.c.
+		extern int BotMoveProbeCvarIntForBot(gedict_t *self, const char *param, int *value,
+											 int *from_slot);
+		extern int BotMoveProbeCvarStringForBot(gedict_t *self, const char *param, char *out,
+												int out_size);
+		extern void BotMoveProbeReportPerSlotError(gedict_t *self, const char *param,
+												   const char *value, const char *reason);
+		extern int fb_moveprobe_perslot_goal_error[MAX_CLIENTS];
+		int pin = 0;
+		int pin_from_slot = 0;
+		int slot = NUM_FOR_EDICT(self) - 1;
+
+		if (BotMoveProbeCvarIntForBot(self, "fixed_goal", &pin, &pin_from_slot) < 0)
+		{
+			// Malformed per-slot pin: loud-fail (#95). The error row was
+			// printed by the resolver; BotApplyMoveProbe holds the bot while
+			// this flag is set. Leave the current goal untouched.
+			if ((slot >= 0) && (slot < MAX_CLIENTS))
+			{
+				fb_moveprobe_perslot_goal_error[slot] = 1;
+			}
+		}
+		else
+		{
+			if ((slot >= 0) && (slot < MAX_CLIENTS))
+			{
+				fb_moveprobe_perslot_goal_error[slot] = 0;
+			}
+			if ((pin >= 1) && (pin <= NUMBER_MARKERS) && markers[pin - 1])
+			{
+				self->fb.fixed_goal = markers[pin - 1];
+			}
+			else if (pin == -1)
+			{
+				self->fb.fixed_goal = NULL;
+			}
+			else if ((pin != 0) && pin_from_slot && (slot >= 0) && (slot < MAX_CLIENTS))
+			{
+				// A per-slot pin naming a marker absent on this map would
+				// silently chase the wrong goal: loud-fail instead. (The
+				// global pin keeps its legacy silent-ignore behavior.)
+				char pin_raw[64];
+
+				BotMoveProbeCvarStringForBot(self, "fixed_goal", pin_raw, sizeof(pin_raw));
+				BotMoveProbeReportPerSlotError(self, "fixed_goal", pin_raw, "no_such_marker");
+				fb_moveprobe_perslot_goal_error[slot] = 1;
+			}
+		}
+	}
+
 	if (self->fb.fixed_goal)
 	{
 		self->s.v.goalentity = NUM_FOR_EDICT(self->fb.fixed_goal);
@@ -361,6 +432,20 @@ void UpdateGoal(gedict_t *self)
 		self->fb.virtual_enemy = enemy_;
 		self->fb.goal_enemy_desire =
 				enemy_ && enemy_->fb.desire ? enemy_->fb.desire(self, enemy_) : 0;
+		// KBOT (WP3.3): fight discipline. A weak kbot (disarmed or low stack;
+		// fresh spawns included) never HUNTS: clearing positive enemy-goal
+		// desire here removes the enemy as a goal candidate for this refresh
+		// (also gates EnemyGoalLogic, which tests the same field), so the
+		// vanilla item economy below picks a collect goal instead. Everything
+		// else is untouched: vanilla's repel path (the else-if below, taken
+		// when desire <= 0 and the enemy hunts us) still biases goal choice
+		// AWAY from the threat with its native scale, and combat micro (aim,
+		// dodge, look_object) runs at full vanilla skill in any fight that
+		// finds the bot. Baseline bots (fb.kbot == 0) cannot take this branch.
+		if (self->fb.kbot && (self->fb.goal_enemy_desire > 0) && KBot_AvoidFights(self))
+		{
+			self->fb.goal_enemy_desire = 0;
+		}
 		if (self->fb.goal_enemy_desire > 0)
 		{
 			gedict_t *enemy = &g_edicts[self->s.v.enemy];
@@ -398,7 +483,17 @@ void UpdateGoal(gedict_t *self)
 
 	for (i = 0; i < NUMBER_GOALS; ++i)
 	{
-		EvalGoal(self, self->fb.touch_marker->fb.goals[i].next_marker->fb.virtual_goal);
+		// NULL-guard (M3 crash class): route-calc backfills every real
+		// marker's empty goal slots with dropper, so next_marker is never
+		// NULL for markers -- but touch_marker can end up on an entity that
+		// never went through the backfill (fb.goals[] all NULL). Skipping is
+		// exactly what EvalGoal does for a NULL goal entity anyway.
+		gedict_t *goal_next = self->fb.touch_marker ? self->fb.touch_marker->fb.goals[i].next_marker : NULL;
+
+		if (goal_next)
+		{
+			EvalGoal(self, goal_next->fb.virtual_goal);
+		}
 	}
 
 	// Dropped backpacks

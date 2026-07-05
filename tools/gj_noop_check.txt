@@ -1,0 +1,6 @@
+1 set k_kbot_gapjump 0
+0 set k_kbot_gj_lane 0
+0 set k_kbot_gj_cal 0
+0 set k_kbot_gj_probe 0
+0 SEAT
+22 set k_kbot_gj_lane -1

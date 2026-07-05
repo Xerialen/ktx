@@ -13,6 +13,19 @@
 float SubZoneArrivalTime(float zone_time, gedict_t *middle_marker, gedict_t *from_marker,
 							qbool rl_routes)
 {
+	// A NULL marker means the precomputed route table has no entry for this
+	// hop (e.g. ZoneMarker() copied a NULL zone->marker/marker_rj, or its
+	// !Z_ early-return left the middle_marker global stale from an earlier
+	// query). Treat the hop as unreachable -- the ZoneMarker() NULL-input
+	// convention (dropper + 1000000) -- instead of dereferencing NULL.
+	// First hit live in WP2.2 bench (kbot-vs-frog, dm3): BotsPickBestEnemy ->
+	// BestEnemy_apply reached this with middle_marker == NULL and SIGSEGV'd
+	// mvdsv; SubZoneNextPathMarker() below already NULL-guards the same way.
+	if ((middle_marker == NULL) || (from_marker == NULL))
+	{
+		return (zone_time + 1000000);
+	}
+
 	if (rl_routes)
 	{
 		return (zone_time + middle_marker->fb.subzones[from_marker->fb.S_].rj_time);

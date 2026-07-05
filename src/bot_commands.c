@@ -7,6 +7,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 // Handles all "botcmd x" commands from the user
 
@@ -272,7 +273,8 @@ static void BuildTeamList(void)
 	AddTeamToList(&foundTeams, "green", 3, 3);
 }
 
-void FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messages)
+// Returns the entity number of the created bot, or 0 on failure.
+int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messages)
 {
 	char skill_level_str[3];
 	int i;
@@ -339,13 +341,18 @@ void FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messa
 					G_sprint(self, 2, "Error adding bot\n");
 				}
 
-				return;
+				return 0;
 			}
 
 			memset(&bots[i], 0, sizeof(bot_t));
 			bots[i].entity = entity;
 			memset(&bots[i].command, 0, sizeof(bots[i].command));
 			g_edicts[entity].fb.last_cmd_sent = g_globalvars.time;
+			// A reused entity slot may have hosted a komodobot earlier; a
+			// plain addbot must never inherit the kbot brain flag nor the
+			// kbot userinfo identity stamp (ktxstats/MVD evidence).
+			g_edicts[entity].fb.kbot = KBOT_STATE_OFF;
+			trap_SetBotUserInfo(entity, "kbot", "", 0);
 			g_edicts[entity].fb.skill.skill_level = skill_level;
 			g_edicts[entity].fb.botnumber = i;
 			trap_SetBotUserInfo(entity, "team", teamName, 0);
@@ -354,7 +361,7 @@ void FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messa
 			trap_SetBotUserInfo(entity, "k_nick", bots[i].name, 0);
 			trap_SetBotUserInfo(entity, "*skill", skill_level_str, SETUSERINFO_STAR);
 
-			return;
+			return entity;
 		}
 	}
 
@@ -362,9 +369,13 @@ void FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messa
 	{
 		G_sprint(self, 2, "Bot limit reached\n");
 	}
+
+	return 0;
 }
 
-static void FrogbotsAddbot_f(void)
+// Shared "botcmd addbot/addkbot [skill] [team]" argument parsing.
+// Returns the entity number of the created bot, or 0 on failure.
+static int FrogbotsAddbotParsed(void)
 {
 	int skill_level = FrogbotSkillLevel();
 	char specificteam[10] =
@@ -374,7 +385,7 @@ static void FrogbotsAddbot_f(void)
 	{
 		G_sprint(self, 2, "Bots are disabled by the server.\n");
 
-		return;
+		return 0;
 	}
 
 	if (trap_CmdArgc() >= 3)
@@ -394,7 +405,22 @@ static void FrogbotsAddbot_f(void)
 		trap_CmdArgv(3, specificteam, sizeof(specificteam));
 	}
 
-	FrogbotsAddbot(skill_level, specificteam, true);
+	return FrogbotsAddbot(skill_level, specificteam, true);
+}
+
+static void FrogbotsAddbot_f(void)
+{
+	FrogbotsAddbotParsed();
+}
+
+static void FrogbotsAddKbot_f(void)
+{
+	int entity = FrogbotsAddbotParsed();
+
+	if (entity)
+	{
+		KBot_MarkBot(&g_edicts[entity]);
+	}
 }
 
 static void FrogbotsRemoveBot(bot_t *lastbot)
@@ -2321,6 +2347,7 @@ static frogbot_cmd_t std_commands[] =
 	{
 		{ "skill", FrogbotsSetSkill, "Set skill level for next bot added" },
 		{ "addbot", FrogbotsAddbot_f, "Adds a bot. Skill & team optional" },
+		{ "addkbot", FrogbotsAddKbot_f, "Adds a komodobot. Skill & team optional" },
 		{ "fill", FrogbotsFillServer, "Fills the server (max 8 bots at a time)" },
 		{ "removebot", FrogbotsRemovebot_f, "Removes a single bot" },
 		{ "removeall", FrogbotsRemoveAll, "Removes all bots from server" },

@@ -169,6 +169,7 @@
     <ClInclude Include="..\..\include\g_local.h" />
     <ClInclude Include="..\..\include\g_public.h" />
     <ClInclude Include="..\..\include\g_syscalls.h" />
+    <ClInclude Include="..\..\src\kbot.h" />
     <ClInclude Include="..\..\include\mathlib.h" />
     <ClInclude Include="..\..\include\player.h" />
     <ClInclude Include="..\..\include\progdefs.h" />
@@ -226,6 +227,7 @@
     <ClCompile Include="..\..\src\g_utils.c" />
     <ClCompile Include="..\..\src\hoonymode.c" />
     <ClCompile Include="..\..\src\items.c" />
+    <ClCompile Include="..\..\src\kbot_main.c" />
     <ClCompile Include="..\..\src\logs.c" />
     <ClCompile Include="..\..\src\maps.c" />
     <ClCompile Include="..\..\src\maps_map_amphi2.c" />

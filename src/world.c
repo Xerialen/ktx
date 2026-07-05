@@ -1067,6 +1067,155 @@ void FirstFrame(void)
 	RegisterCvarEx(FB_CVAR_ITEM_PICKUP_BONUS, "0");
 	RegisterCvarEx(FB_CVAR_EASY_SKILL_MODE, "1");
 
+	// KBOT (WP3.5): discipline tunables + identity-stamp suffix, sweepable
+	// from the server cfg without rebuilds (e.g. "set k_kbot_weak_stack 100").
+	// Defaults reproduce kbot-0.5.0-discipline exactly.
+	RegisterCvarEx("k_kbot_weak_stack", "70");
+	RegisterCvarEx("k_kbot_weak_rockets", "3");
+	RegisterCvarEx("k_kbot_weak_cells", "15");
+	RegisterCvarEx("k_kbot_version_suffix", "");
+
+	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
+	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).
+	// k_kbot_gj_lane -1 = passive trigger (real feature); 0..3 = trial driver
+	// (isolated E6 landing-% harness). Remaining cvars tune the jump without a
+	// rebuild; k_kbot_gj_head default < -360 means "use computed bearing".
+	RegisterCvarEx("k_kbot_gapjump", "1");    // E10c: default ON (kbot-only)
+	RegisterCvarEx("k_kbot_gj_lane", "-1");
+	RegisterCvarEx("k_kbot_gj_probe", "0");
+	RegisterCvarEx("k_kbot_gj_to", "");
+	RegisterCvarEx("k_kbot_gj_land", "");
+	RegisterCvarEx("k_kbot_gj_head", "-1000");
+	RegisterCvarEx("k_kbot_gj_v0", "450");
+	RegisterCvarEx("k_kbot_gj_steer", "5");
+	RegisterCvarEx("k_kbot_gj_runup", "0");
+	RegisterCvarEx("k_kbot_gj_landrad", "64");
+	RegisterCvarEx("k_kbot_gj_failz", "0");
+	RegisterCvarEx("k_kbot_gj_timeout", "4");
+	RegisterCvarEx("k_kbot_gj_cool", "0.6");
+	RegisterCvarEx("k_kbot_gj_zone", "96");
+	RegisterCvarEx("k_kbot_gj_cal", "0");
+	RegisterCvarEx("k_kbot_gj_traj", "0");
+	RegisterCvarEx("k_kbot_gj_caldir", "0");
+	// E8 ballistic launch model: per-lane heading offset (human -11 deg lever;
+	// default 0), air-accel discount for v_req, direct v_req override, and the
+	// required-speed GATE (decline a crossing unless approach speed >= v_req*gate
+	// so the bot stops falling into the pit -- E7's -9.92 came from that).
+	RegisterCvarEx("k_kbot_gj_head_off", "0");
+	RegisterCvarEx("k_kbot_gj_airgain", "0.93");
+	RegisterCvarEx("k_kbot_gj_vreq", "0");
+	RegisterCvarEx("k_kbot_gj_gate", "0.98");
+	RegisterCvarEx("k_kbot_gj_gatelog", "0");
+	// E8 experimental circle-jump run-up (default off): build to v_req before launch.
+	RegisterCvarEx("k_kbot_gj_build", "0");
+	RegisterCvarEx("k_kbot_gj_buildtime", "1.5");
+	RegisterCvarEx("k_kbot_gj_build_angle", "42");
+	// E8.2 pillar-gap air waypoint: bow the arc south (open corridor) by this many
+	// units at mid-span before steering to the landing (0 = straight at landing).
+	RegisterCvarEx("k_kbot_gj_wp", "0");
+	// E8.2 alignment gate: only commit the jump when the bot's velocity heading is
+	// within this many degrees of the required launch (bow) heading (0 = disabled).
+	RegisterCvarEx("k_kbot_gj_align_tol", "30");
+	// E8.2 position gate: commit only at the near lip -- along-lane progress <=
+	// maxprog (not past the lip) and cross-lane offset <= ymax (on the lane line).
+	RegisterCvarEx("k_kbot_gj_maxprog", "40");
+	RegisterCvarEx("k_kbot_gj_ymax", "48");
+
+	// E9 ACTIVE jump-intent (the nav-integration layer). Default 0 = pure E8.2
+	// passive (byte-identical to the passive .so). When k_kbot_gj_active != 0 and
+	// k_kbot_gapjump != 0, a kbot whose nav GOAL is across a gap-lane and which is
+	// on the takeoff side (no enemy near) DELIBERATELY drives to the takeoff lip,
+	// aligns to the launch bow and builds to v_req, then launches -- instead of
+	// waiting for nav to incidentally satisfy the passive gates.
+	RegisterCvarEx("k_kbot_gj_active", "1");  // E10c: default ON (kbot-only)
+	// Intent region: engage when the bot is within intent_back units BEHIND the
+	// lip along the lane and within intent_perp units of the lane line, and the
+	// goal is on the far side. Height band keeps us on the takeoff ledge.
+	RegisterCvarEx("k_kbot_gj_intent_back", "384");
+	RegisterCvarEx("k_kbot_gj_intent_perp", "176");
+	RegisterCvarEx("k_kbot_gj_intent_zband", "56");
+	// Approach: abort to vanilla nav after apptime seconds; the drive steers at a
+	// lookahead point on the launch ray; launch when within launch_win (along) and
+	// launch_perp (lateral) of the lip AND fast enough. app_build 1 lets the drive
+	// circle-accel toward the lip when under v_req (short lane: v_req~344).
+	RegisterCvarEx("k_kbot_gj_apptime", "3.5");
+	RegisterCvarEx("k_kbot_gj_lookahead", "112");
+	RegisterCvarEx("k_kbot_gj_launch_win", "48");
+	RegisterCvarEx("k_kbot_gj_launch_perp", "28");
+	RegisterCvarEx("k_kbot_gj_app_build", "1");
+	// Launch speed floor = v_req * launch_mul (v_req~344; seeded 100% used ~450).
+	// Launching at bare v_req lands short (air-carve scrubs speed); require margin.
+	// 1.2 (~413) is the landing floor: launches at 413-445 land ~75%, launches at
+	// ~389 (mul 1.13) fall short. The asymmetric north gate handles the pillar-clip
+	// that was the OTHER cause of short-fall pit dives.
+	RegisterCvarEx("k_kbot_gj_launch_mul", "1.2");
+	// E9 re-engage cooldown after a decline (s) -- short, just breaks per-frame
+	// flicker so the bot gets a running restart without pinning at the lip.
+	RegisterCvarEx("k_kbot_gj_app_cool", "0.3");
+	// Active launch alignment tolerance (deg) vs the corridor axis -- the bot is
+	// driven along the corridor, so its arrival heading is ~u; allow this spread.
+	RegisterCvarEx("k_kbot_gj_app_align", "45");
+	// Pillar clearance: the corridor line is the NORTHERN edge; launching north of
+	// it clips the central pillar and falls. Reject launches with lat > north_max,
+	// and bias the drive south_bias units into the open corridor (south).
+	RegisterCvarEx("k_kbot_gj_north_max", "12");
+	RegisterCvarEx("k_kbot_gj_south_bias", "24");
+
+	// E10 route shim: expose the gap-jump as a kbot-only travel-time edge in
+	// goal selection (EvalGoal -> KBot_GJ_RouteShim) plus STAGE steering from
+	// anywhere on the takeoff plate into the E9 intent box. Default 0 = pure
+	// E9 behavior. edge_time = priced cost of the hop itself (measured 0.65 s
+	// flight + speed build); route_back/route_lat bound the takeoff-side
+	// region where the route is considered (the whole plate, vs the tight
+	// intent box).
+	RegisterCvarEx("k_kbot_gj_route", "1");   // E10c: default ON (kbot-only)
+	RegisterCvarEx("k_kbot_gj_edge_time", "1.3");
+	RegisterCvarEx("k_kbot_gj_route_back", "512");
+	RegisterCvarEx("k_kbot_gj_route_lat", "352");
+	// E10c mirror-carve (RA<->YA southern parallel lanes 2/3). Default ON.
+	// Relocates lanes 2/3 to the diagonal lip-to-lip chord + north launch-
+	// aim so the parallel jump COMMITS in-match (mul 1.20 / bow 40 are the
+	// A/B-validated values; aimlaunch is on unless set < 0). Lanes 0/1
+	// (Ring<->Quad) are untouched by these.
+	RegisterCvarEx("k_kbot_gj_mirrorcarve", "1");
+	RegisterCvarEx("k_kbot_gj_mcarve_mul", "1.20");
+	RegisterCvarEx("k_kbot_gj_mcarve_bow", "40");
+	// OPTION-2 approach-carve (E11): keep building past the launch floor up to
+	// appcarve_target*floor (~425) in the approach runway so the mirror jump
+	// arrives hot enough to survive the north-bow air-carve scrub (closes the
+	// ~415-built vs ~425-needed wall without raising the launch floor). Default
+	// OFF pending A/B validation; lanes 0/1 unaffected. appcarve_angle 0 => use
+	// the shared build_angle (42 deg).
+	RegisterCvarEx("k_kbot_gj_appcarve", "0");
+	RegisterCvarEx("k_kbot_gj_appcarve_target", "1.06");
+	RegisterCvarEx("k_kbot_gj_appcarve_angle", "0");
+
+	// E12 (issue #11): bridge->RL descent through the pent-yard firing slot
+	// (lane 4). rl 1 = lane exists (kbot-only; rides the default-ON gapjump
+	// stack like the mirror lanes). The slot is a 16u origin-z needle at the
+	// wall => the approach commit needs a speed WINDOW (floor rl_mul, ceiling
+	// rl_max, times the lane vreq) and a tight along-lip commit window
+	// (rl_win). rlwp "x y z" overrides the lane waypoint live; wp_lead = how
+	// early (units before the waypoint) the air-carve switches to the landing.
+	RegisterCvarEx("k_kbot_gj_rl", "1");
+	RegisterCvarEx("k_kbot_gj_rl_mul", "0.99");
+	RegisterCvarEx("k_kbot_gj_rl_max", "1.09");
+	RegisterCvarEx("k_kbot_gj_rl_win", "24");
+	RegisterCvarEx("k_kbot_gj_rlwp", "");
+	RegisterCvarEx("k_kbot_gj_wp_lead", "48");
+	RegisterCvarEx("k_kbot_gj_airseat", "1");
+	RegisterCvarEx("k_kbot_gj_rl_bangle", "60");
+	// E12b chain-hop (lane 4): one E1-carve hop tops the ground build (~450 cap)
+	// up into the slot speed window (~459-506). chain_min = grounded speed under
+	// which the hop's predicted landing speed cannot reach the floor; chain_tol =
+	// how far SHORT of the nominal launch org a predicted touchdown may fall.
+	RegisterCvarEx("k_kbot_gj_chain", "1");
+	RegisterCvarEx("k_kbot_gj_chain_min", "410");
+	RegisterCvarEx("k_kbot_gj_chain_tol", "20");
+	// Owner rule (2026-07-05): only attempt the RL jump while no enemy has
+	// line-of-sight to the bot (setup is combat-defenseless).
+	RegisterCvarEx("k_kbot_gj_rl_unseen", "1");
+
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
 		RegisterCvarEx(va("k_fb_name_%d", i), "");
