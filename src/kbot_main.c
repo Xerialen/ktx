@@ -2219,15 +2219,6 @@ gj_app_drive:
 		{
 			float cback = (lane == 4) ? cvar("k_kbot_gj_chain_back")
 									  : cvar("k_kbot_gj_mchain_back");
-			// E14/s4 lane 5: own runway depth -- the yard is open north of
-			// the take (take y 490; the deep point at ~y 750 stays inside
-			// the yard bowl), and 260u at ~340 ups is a <1s straight dash.
-			if (lane == 5)
-			{
-				float sb = cvar("k_kbot_gj_schain_back");
-
-				cback = (sb > 0) ? sb : 260;
-			}
 			float cexit = GJ_ChainExitV(lane);
 			// Bias the orbit 40u toward the open (negative-lat) side: a
 			// centered orbit's loops grazed the WEST deck edge x1264
@@ -2235,6 +2226,22 @@ gj_app_drive:
 			// deck-specific; the mirror runways are unmeasured -> no bias.
 			float obias = (lane == 4) ? 40 : 0;
 
+			// E14/s5 lane 5: the yard is NOT open due north of the take --
+			// s4 measured a wall on the axis at along -200 (all 7 engages
+			// timed out grinding at (-527,688) vh 0 pushing the on-axis
+			// deep point). But the NE corridor IS open: the only organic
+			// 434-launch (s3 goldenboy) came in from along -338 lat -64
+			// (x -440..-483, y ~820). Hold the orbit IN that corridor:
+			// cback 240 + an EASTWARD bias (negative obias shifts along
+			// +perp = +x) puts the deep point at ~(-444,740).
+			if (lane == 5)
+			{
+				float sb = cvar("k_kbot_gj_schain_back");
+				float sbias = cvar("k_kbot_gj_schain_bias");
+
+				cback = (sb > 0) ? sb : 240;
+				obias = (sbias != 0) ? sbias : -90;
+			}
 			if (cback <= 0) { cback = (lane == 4) ? 340 : 240; }
 			if ((vh < cexit) && (along_u > -(cback - 64)))
 			{
@@ -2285,10 +2292,16 @@ gj_app_drive:
 					VectorSet(tgt, -848, 283, org[2]);
 				}
 			}
-			else if (org[0] > -838)
+			else if (org[0] > -830)
 			{
 				// on the strip (floor 160, y 260..300): straight west to the
-				// ledge junction
+				// ledge junction. s5: hand over to the north leg already at
+				// x -830 (was -838) -- a strip walker arrives westbound at
+				// speed, and flipping the carrot only 10u before the west
+				// wall turned the 90-degree corner into a wall-brake (s4:
+				// the routed bot reached the lip centered at 385 total but
+				// with ~0 ALONG speed, declined, then jammed in the wall
+				// corner at vh 0 for the full 12s timeout).
 				VectorSet(tgt, -848, 283, org[2]);
 			}
 			else if (!gj_sng_deep[slot] && (va < 200))

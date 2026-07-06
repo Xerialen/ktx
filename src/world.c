@@ -1234,7 +1234,11 @@ void FirstFrame(void)
 	// speed, then dashes straight in). Orbit only, no airborne chain-hop.
 	RegisterCvarEx("k_kbot_gj_schain", "1");
 	RegisterCvarEx("k_kbot_gj_schain_exit", "390");
-	RegisterCvarEx("k_kbot_gj_schain_back", "260");
+	// s5: 260 -> 240 + eastward bias -90 (perp units; negative = +x): s4
+	// measured the on-axis deep point walled at along -200; the NE-corridor
+	// hold reproduces the only organic 434-launch ansats (s3 goldenboy).
+	RegisterCvarEx("k_kbot_gj_schain_back", "240");
+	RegisterCvarEx("k_kbot_gj_schain_bias", "-90");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
