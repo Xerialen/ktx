@@ -2261,7 +2261,19 @@ gj_app_drive:
 		// (goldenboy did it organically at 434 vs floor 354).
 		if ((lane == 5) && cvar("k_kbot_gj_schain"))
 		{
-			if ((along_u <= -240) && (lat_n >= -60) && (lat_n <= 30))
+			// s9 z-guard: the gates and this latch are 2D, and the nav route
+			// toward the offered mega runs WEST DOWN THE YARD SLOPE into the
+			// pit (floor z -16) whose 2D footprint overlaps the whole lane
+			// box. s8 loop: pit bot walks leg 1 north, LATCHES ON THE SLOPE
+			// (e.g. (-559,742) = along -258 lat -24 at z ~50-90), the lip
+			// carrot flips it back south to the 2D lip point INSIDE the pit,
+			// DECLINE_SLOW at "lat -45" -- 19/19 s8 declines were this loop.
+			// Yard floor is z 120 (take[2]); requiring z >= take-30 makes the
+			// slope/pit unlatchable, so a pit bot stays !deep, holds leg 1
+			// north up the slope, and latches for real at the crest (z ~119,
+			// lat ~-54) -- becoming a normal over-the-hill walker.
+			if ((along_u <= -240) && (lat_n >= -60) && (lat_n <= 30) &&
+				(org[2] >= take[2] - 30.0f))
 			{
 				gj_sng_deep[slot] = true;
 			}
