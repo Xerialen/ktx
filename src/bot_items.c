@@ -11,6 +11,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 // Goal functions
 void item_megahealth_rot(void);
@@ -981,6 +982,7 @@ qbool NoItemTouch(gedict_t *self, gedict_t *other)
 			if (other->s.v.goalentity == NUM_FOR_EDICT(self))
 			{
 				other->fb.goal_refresh_time = 0;
+				KDLog_MarkTrigger(other, "goal_reached"); // KDLOG
 			}
 
 			return false;
@@ -1015,6 +1017,7 @@ static qbool fb_backpack_touch(gedict_t *item, gedict_t *player)
 	if (player->s.v.goalentity == NUM_FOR_EDICT(item))
 	{
 		player->fb.goal_refresh_time = 0;
+		KDLog_MarkTrigger(player, "goal_reached"); // KDLOG
 	}
 
 	return false;

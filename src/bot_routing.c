@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 qbool DM6DoorClosed(fb_path_eval_t *eval);
 qbool BotDoorIsClosed(gedict_t *door);
@@ -111,6 +112,17 @@ static float EvalPath(fb_path_eval_t *eval, qbool allowRocketJumps, qbool trace_
 			}
 		}
 	}
+
+	// HARVEST B1 (kbot-only, k_kbot_harvest_route): carried value makes water
+	// transit expensive -- re-routes around the pool, never re-targets (R2).
+	if (eval->test_marker->fb.T & T_WATER)
+	{
+		path_score -= KBot_HarvestWaterPenalty(self);
+	}
+
+	// HARVEST B2 (kbot-only, k_kbot_harvest_threat): death memory x known
+	// enemy weight x carried value. Weak enemies add nothing -- press on.
+	path_score -= KBot_HarvestThreatPenalty(self, eval->test_marker);
 
 	if (self->fb.avoiding)
 	{
