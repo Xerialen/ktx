@@ -33,8 +33,13 @@
 // Owner-rostered seat names (k_kbot_name1..4) skip the name prefix.
 void KBot_MarkBot(gedict_t *bot);
 
-// True when `name` matches a k_kbot_name1..4 roster seat cvar.
+// True when `name` matches an effective roster seat name (k_kbot_name1..4
+// cvar or the built-in hib/dag/Angua/Rock defaults).
 qbool KBot_IsRosterSeatName(const char *name);
+
+// Effective roster name for seat n (1..4): cvar when set, owner default
+// otherwise. Fills buf and returns it; NULL for n out of range.
+const char* KbotRosterName(int n, char *buf, int bufsize);
 
 // Per-frame brain entry point, called from BotsThinkTime() for flagged bots.
 // Returns true if the brain fully handled this frame's think (BotsThinkTime

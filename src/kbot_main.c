@@ -47,8 +47,8 @@ static int KBot_ArmedCells(void)
 	return (v <= 0) ? 15 : v;
 }
 
-// True when `name` is one of the owner-rostered seat names (k_kbot_name1..4,
-// see KbotSeatName in bot_commands.c).
+// True when `name` is one of the effective roster seat names (k_kbot_name1..4
+// cvar or the built-in defaults; see KbotRosterName in bot_commands.c).
 qbool KBot_IsRosterSeatName(const char *name)
 {
 	char buf[32];
@@ -56,9 +56,7 @@ qbool KBot_IsRosterSeatName(const char *name)
 
 	for (n = 1; n <= 4; n++)
 	{
-		trap_cvar_string(va("k_kbot_name%d", n), buf, sizeof(buf));
-
-		if (!strnull(buf) && streq(buf, name))
+		if (streq(KbotRosterName(n, buf, sizeof(buf)), name))
 		{
 			return true;
 		}

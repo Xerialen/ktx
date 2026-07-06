@@ -274,9 +274,33 @@ static void BuildTeamList(void)
 	AddTeamToList(&foundTeams, "green", 3, 3);
 }
 
-// Roster seat names for komodobots: k_kbot_name1..4 (single words, set via
-// the lab harness --set lines). The first listed name no connected player
-// already wears wins; exhausted/unset falls back to the stock pool.
+// Owner default roster (always on): an unset k_kbot_nameN falls back here
+// instead of the stock pool, so a bare addkbot fields hib/dag/Angua/Rock.
+static const char *kbot_roster_defaults[4] = { "hib", "dag", "Angua", "Rock" };
+
+// Effective roster name for seat n (1..4): the k_kbot_nameN cvar when set,
+// the owner default otherwise. Fills buf and returns it (NULL only for a
+// seat number out of range).
+const char* KbotRosterName(int n, char *buf, int bufsize)
+{
+	if ((n < 1) || (n > 4))
+	{
+		return NULL;
+	}
+
+	trap_cvar_string(va("k_kbot_name%d", n), buf, bufsize);
+
+	if (strnull(buf))
+	{
+		strlcpy(buf, kbot_roster_defaults[n - 1], bufsize);
+	}
+
+	return buf;
+}
+
+// Roster seat names for komodobots: k_kbot_name1..4 override the defaults
+// above. The first listed name no connected player already wears wins;
+// exhausted (5th+ kbot) falls back to the stock pool.
 static const char* KbotSeatName(void)
 {
 	static char name[32];
@@ -287,12 +311,7 @@ static const char* KbotSeatName(void)
 		gedict_t *p;
 		qbool used = false;
 
-		trap_cvar_string(va("k_kbot_name%d", n), name, sizeof(name));
-
-		if (strnull(name))
-		{
-			continue;
-		}
+		KbotRosterName(n, name, sizeof(name));
 
 		for (p = world; (p = find_plr(p));)
 		{
@@ -327,20 +346,18 @@ static const char* KbotSeatName(void)
 }
 
 // Roster colors for komodobots: k_kbot_color (0..13) sets both top and
-// bottom; unset keeps the stock assignment.
+// bottom; unset defaults to 3 (owner call, matches team komo).
 static void KbotSeatColors(int *topColor, int *bottomColor)
 {
 	char buf[8];
+	int c;
 
 	trap_cvar_string("k_kbot_color", buf, sizeof(buf));
 
-	if (!strnull(buf))
-	{
-		int c = (int)bound(0, atoi(buf), 13);
+	c = strnull(buf) ? 3 : (int)bound(0, atoi(buf), 13);
 
-		*topColor = c;
-		*bottomColor = c;
-	}
+	*topColor = c;
+	*bottomColor = c;
 }
 
 // Returns the entity number of the created bot, or 0 on failure.
@@ -412,6 +429,23 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 				}
 
 				KbotSeatColors(&topColor, &bottomColor);
+
+				// Default team for komodobots when addkbot got no explicit
+				// team: k_kbot_team when set, otherwise "komo" (owner call).
+				// An explicit addkbot team argument still wins.
+				if (!specificteam[0])
+				{
+					static char teambuf[16];
+
+					trap_cvar_string("k_kbot_team", teambuf, sizeof(teambuf));
+
+					if (strnull(teambuf))
+					{
+						strlcpy(teambuf, "komo", sizeof(teambuf));
+					}
+
+					teamName = teambuf;
+				}
 			}
 
 			entity = trap_AddBot(bots[i].name, bottomColor, topColor, "base");
