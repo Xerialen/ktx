@@ -112,6 +112,13 @@ static float EvalPath(fb_path_eval_t *eval, qbool allowRocketJumps, qbool trace_
 		}
 	}
 
+	// HARVEST B1 (kbot-only, k_kbot_harvest_route): carried value makes water
+	// transit expensive -- re-routes around the pool, never re-targets (R2).
+	if (eval->test_marker->fb.T & T_WATER)
+	{
+		path_score -= KBot_HarvestWaterPenalty(self);
+	}
+
 	if (self->fb.avoiding)
 	{
 		path_score -= PATH_AVOID_PENALTY;

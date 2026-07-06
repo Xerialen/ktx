@@ -1088,6 +1088,11 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_model_red", "0");
 	RegisterCvarEx("k_kbot_model_blue", "0");
 
+	// HARVEST possession layer (kbot_harvest.c), one lever per mechanism,
+	// byte-neutral defaults. harvest_route = B1 water-route base penalty in
+	// path-score units (spec start 2.5), scaled by carried value V.
+	RegisterCvarEx("k_kbot_harvest_route", "0");
+
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).
 	// k_kbot_gj_lane -1 = passive trigger (real feature); 0..3 = trial driver

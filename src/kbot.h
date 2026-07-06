@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.25.1-arena"
+#define KBOT_VERSION "kbot-0.26.0-harvest"
 
 // ---- tournament decision models (kbot_models.c, 2026-07-06) ----
 // Three cvar-gated models over the frogbot value function, data-filled from
@@ -33,6 +33,13 @@ int KBot_TeamRLLG(gedict_t *self);      // RL/LG count in team hands (owner para
 int KBot_ActiveModel(gedict_t *self);
 float KBot_ModelScaleGoal(gedict_t *self, gedict_t *goal, float desire);
 float KBot_ModelScaleHunt(gedict_t *self, gedict_t *en, float desire);
+
+// ---- HARVEST possession layer (kbot_harvest.c, 2026-07-06) ----
+// Retention on top of UTBYTE: cost shaping only (R2 -- never desire), one
+// cvar per mechanism, byte-neutral defaults. Spec: komodobots2
+// docs/specs/2026-07-06-harvest-model-design.md.
+float KBot_CarriedValue(gedict_t *p);        // 0..1, stack x firepower
+float KBot_HarvestWaterPenalty(gedict_t *p); // B1: EvalPath water-marker cost
 
 // ---- KDLOG decision-log emitter (kbot_dlog.c) ----
 // Structured tactical-decision telemetry (G_cprint "KDLOG ..." lines into
