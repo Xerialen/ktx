@@ -3582,4 +3582,59 @@ void HMode_BotCmd(void)
 				j, g_edicts[j].netname);
 }
 
+// Lab probe (k_hm_debug only): "botcmd hmsay <slot> <text...>" makes the
+// bot in <slot> emit an arbitrary teamsay through the REAL mm2 path --
+// TeamplayMM2 prefixing/tinting, ClientSay distribution, and
+// HMode_ParseTeamsay on every same-team receiver. This is how the probe
+// test injects known reports at known times and asserts the belief +
+// behavior chain from the debug telemetry.
+void HMode_BotCmdSay(void)
+{
+	char arg[64], text[128];
+	int slot, i, argc = trap_CmdArgc();
+
+	if (!cvar("k_hm_debug"))
+	{
+		G_sprint(self, 2, "hmsay is a lab probe: set k_hm_debug 1 first\n");
+
+		return;
+	}
+
+	if (argc < 4)
+	{
+		G_sprint(self, 2, "Usage: /botcmd hmsay <slot> <text...>\n");
+
+		return;
+	}
+
+	trap_CmdArgv(2, arg, sizeof(arg));
+	slot = atoi(arg);
+
+	if ((slot < 1) || (slot > MAX_CLIENTS) || !g_edicts[slot].isBot)
+	{
+		G_sprint(self, 2, "slot %s is not a bot\n", arg);
+
+		return;
+	}
+
+	text[0] = '\0';
+
+	for (i = 3; i < argc; i++)
+	{
+		trap_CmdArgv(i, arg, sizeof(arg));
+
+		if (text[0])
+		{
+			strlcat(text, " ", sizeof(text));
+		}
+
+		strlcat(text, arg, sizeof(text));
+	}
+
+	if (text[0])
+	{
+		TeamplayMM2Raw(&g_edicts[slot], text);
+	}
+}
+
 #endif // BOT_SUPPORT

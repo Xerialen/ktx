@@ -1215,6 +1215,7 @@ void TeamplayEventItemTaken(gedict_t *client, gedict_t *item);
 void TeamplayDeathEvent(gedict_t *client);
 void TeamplayMessage(void);
 qbool TeamplayMessageByName(gedict_t *client, const char *message);
+void TeamplayMM2Raw(gedict_t *client, char *text); // mm2humanmode lab probe injection
 void TeamplayGameTick(void);
 void LocationInitialise(void);
 qbool LocationCoordsByName(const char *name, vec3_t out); // mm2humanmode reverse loc lookup

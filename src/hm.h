@@ -22,7 +22,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define HMODE_VERSION "hm-0.7.0-comm-consumers"
+#define HMODE_VERSION "hm-0.7.1-hmsay-probe"
 
 // Knowledge sources, in rising order of directness. Kept on every snapshot
 // so the trust/merge policy (told vs seen) stays explicit.
@@ -85,6 +85,10 @@ qbool HMode_CapItemInfo(void);	// k_hm_iteminfo
 // "botcmd hm ..." handler: no args = show status; "<slot|all> <on|off|inherit>"
 // sets the per-bot override.
 void HMode_BotCmd(void);
+
+// "botcmd hmsay <slot> <text...>": lab probe injection through the real mm2
+// path (k_hm_debug gated). Used by the comm->brain probe test.
+void HMode_BotCmdSay(void);
 
 // Once per map (SecondFrame): item edicts are recreated on map load, so the
 // item registry and all per-bot humanmode state reset here.

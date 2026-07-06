@@ -565,6 +565,14 @@ static void TeamplayMM2(gedict_t *client, char *text)
 	g_globalvars.self = EDICT_TO_PROG(oldself);
 }
 
+// mm2humanmode lab probe (botcmd hmsay): inject an arbitrary teamsay AS
+// `client` through the real mm2 path -- same prefixing/tinting, same
+// ClientSay distribution, same HMode_ParseTeamsay on every receiver.
+void TeamplayMM2Raw(gedict_t *client, char *text)
+{
+	TeamplayMM2(client, text);
+}
+
 static char* TeamplayNeedText(unsigned long needFlags)
 {
 	static char buffer[128];
