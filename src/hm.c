@@ -1081,8 +1081,10 @@ typedef enum
 	HMP_ECOUNT,		// enemy count: "2>", "|3>"
 	HMP_TIME,		// "m:ss" (never emitted by elites; parsed anyway)
 	HMP_NUM,		// bare 1-3 digit number (usually a place name on dm3!)
-	HMP_LOC,		// location token (empirical dm3 lexicon)
-	HMP_MARK		// "##"/"####" enemy-marker glyph run
+	HMP_LOC			// location token (empirical dm3 lexicon)
+	// NOTE: "##" enemy-marker runs stay literal WORD tokens, exactly like
+	// the spec's normalize() leaves them; the classifier looks for the
+	// double-hash substring itself (a single '#' is NOT an enemy marker).
 } hmp_toktype_t;
 
 typedef struct
@@ -1122,16 +1124,10 @@ static qbool HMP_IsLocRoot(const char *s, int len)
 	return false;
 }
 
-// token is a loc if it is a root, a concatenation of two roots ("ratunnel"),
-// or dot/dash/slash-separated parts that are all roots ("ra.tunnel").
-static qbool HMP_IsLocToken(const char *s)
+// a loc "part": a root or an exact concatenation of two roots ("ratunnel")
+static qbool HMP_IsLocPart(const char *s, int len)
 {
-	int len = strlen(s), i;
-
-	if (!len)
-	{
-		return false;
-	}
+	int i;
 
 	if (HMP_IsLocRoot(s, len))
 	{
@@ -1146,7 +1142,26 @@ static qbool HMP_IsLocToken(const char *s)
 		}
 	}
 
-	// separator-split parts, all roots
+	return false;
+}
+
+// token is a loc if it is a part (root/two-root concat) or dot/dash/slash-
+// separated parts that are all parts ("ra.tunnel", "ratunnel-mega").
+static qbool HMP_IsLocToken(const char *s)
+{
+	int len = strlen(s), i;
+
+	if (!len)
+	{
+		return false;
+	}
+
+	if (HMP_IsLocPart(s, len))
+	{
+		return true;
+	}
+
+	// separator-split parts, all parts
 	{
 		int start = 0, parts = 0;
 
@@ -1157,7 +1172,7 @@ static qbool HMP_IsLocToken(const char *s)
 			{
 				if (i > start)
 				{
-					if (!HMP_IsLocRoot(s + start, i - start))
+					if (!HMP_IsLocPart(s + start, i - start))
 					{
 						return false;
 					}
@@ -1259,7 +1274,8 @@ static qbool HMP_ParseHp(const char *s, hmp_tok_t *tok)
 	return true;
 }
 
-// "rl:5" / "lg=40" / single-letter forms "r:12" -> weapon word + ammo
+// "rl:5" / "lg=40" / single-letter forms "r:12", optional chained groups
+// "r:12c:100" -- anchored like the spec's re_wpnammo (trailing junk = word)
 static qbool HMP_ParseWpn(const char *s, hmp_tok_t *tok)
 {
 	static const char *wpns[] =
@@ -1275,6 +1291,7 @@ static qbool HMP_ParseWpn(const char *s, hmp_tok_t *tok)
 		if (!strncmp(s, wpns[i], wl) && ((s[wl] == ':') || (s[wl] == '=')))
 		{
 			const char *d = s + wl + 1;
+			const char *p;
 			int dl = 0;
 
 			while (d[dl] && (d[dl] >= '0') && (d[dl] <= '9'))
@@ -1282,27 +1299,84 @@ static qbool HMP_ParseWpn(const char *s, hmp_tok_t *tok)
 				dl++;
 			}
 
-			if (dl >= 1 && dl <= 3)
+			if ((dl < 1) || (dl > 3))
 			{
-				strlcpy(tok->text, wpns[i], HMP_TOK_LEN);
-				tok->num = HMP_ParseInt(d, dl);
-
-				return true;
+				continue;
 			}
+
+			// "([a-z]:?\d+)*$" tail groups, then end of token
+			p = d + dl;
+
+			while (*p)
+			{
+				int gd = 0;
+
+				if ((*p < 'a') || (*p > 'z'))
+				{
+					break;
+				}
+
+				p++;
+
+				if (*p == ':')
+				{
+					p++;
+				}
+
+				while (*p && (*p >= '0') && (*p <= '9'))
+				{
+					p++;
+					gd++;
+				}
+
+				if (!gd)
+				{
+					break;
+				}
+			}
+
+			if (*p)
+			{
+				continue;
+			}
+
+			strlcpy(tok->text, wpns[i], HMP_TOK_LEN);
+			tok->num = HMP_ParseInt(d, dl);
+
+			return true;
 		}
 	}
 
 	return false;
 }
 
-// nick check: token vs sender's k_nick tag and cleaned netname prefix
+// "m:ss" clock token (spec re_time: 1-2 digits, colon, exactly 2 digits)
+static qbool HMP_ParseTime(const char *s)
+{
+	const char *colon = strchr(s, ':');
+	int alen;
+
+	if (!colon)
+	{
+		return false;
+	}
+
+	alen = colon - s;
+
+	return (alen >= 1) && (alen <= 2) && HMP_AllDigits(s, alen)
+			&& (strlen(colon + 1) == 2) && HMP_AllDigits(colon + 1, 2);
+}
+
+// nick check, spec nick_matches(): both sides cleaned to [a-z0-9], true when
+// the cleaned player starts with the token OR the token starts with the
+// player's 2-3 char stem. Runtime extra: the k_nick userinfo tag also counts.
 static qbool HMP_NickMatches(const char *tok, gedict_t *sender)
 {
-	char clean[32];
+	char p[32], t[32];
 	const char *nick;
-	int i, n = 0;
+	int i, np = 0, nt = 0, k;
 
-	for (i = 0; sender->netname[i] && (n < (int)sizeof(clean) - 1); i++)
+	for (i = 0; sender->netname[i] && (np < (int)sizeof(p) - 1); i++)
 	{
 		unsigned char c = (unsigned char)sender->netname[i];
 
@@ -1318,20 +1392,37 @@ static qbool HMP_NickMatches(const char *tok, gedict_t *sender)
 
 		if (((c >= 'a') && (c <= 'z')) || ((c >= '0') && (c <= '9')))
 		{
-			clean[n++] = (char)c;
+			p[np++] = (char)c;
 		}
 	}
 
-	clean[n] = '\0';
+	p[np] = '\0';
 
-	if (n && !strncmp(clean, tok, max(2, min(3, n))) && !strncmp(clean, tok, strlen(tok)))
+	for (i = 0; tok[i] && (nt < (int)sizeof(t) - 1); i++)
 	{
-		return true;
+		char c = tok[i];	// tokenizer already folded + lowercased
+
+		if (((c >= 'a') && (c <= 'z')) || ((c >= '0') && (c <= '9')))
+		{
+			t[nt++] = c;
+		}
 	}
 
-	if (n && !strncmp(tok, clean, min((int)strlen(tok), n)) && ((int)strlen(tok) <= n))
+	t[nt] = '\0';
+
+	if (np && nt)
 	{
-		return true;
+		if ((nt <= np) && !strncmp(p, t, nt))
+		{
+			return true;	// p.startswith(t)
+		}
+
+		k = (np < 3) ? np : 3;	// len(p[:max(2, min(3, len(p)))])
+
+		if ((nt >= k) && !strncmp(t, p, k))
+		{
+			return true;	// t.startswith(p[:k])
+		}
 	}
 
 	nick = ezinfokey(sender, "k_nick");
@@ -1379,9 +1470,16 @@ static int HMP_Tokenize(const char *text, gedict_t *sender, hmp_tok_t *toks)
 		if ((c == '\r') || (c == '\n') || (c == 16) || (c == 17) || (c == '{')
 				|| (c == '}') || (c == '[') || (c == ']'))
 		{
-			// markup wrappers become separators, except a run of 0x0b/'#'
-			// point glyphs which we keep (handled below via '#')
+			// markup wrappers become separators
 			clean[n++] = ' ';
+			continue;
+		}
+
+		if (c == 0x0b)
+		{
+			// the point glyph renders as '#'; a run of them is the
+			// double-hash enemy marker the classifier looks for
+			clean[n++] = '#';
 			continue;
 		}
 
@@ -1430,49 +1528,63 @@ static int HMP_Tokenize(const char *text, gedict_t *sender, hmp_tok_t *toks)
 
 			tok = &toks[ntok];
 			memset(tok, 0, sizeof(*tok));
-			strlcpy(tok->text, raw, HMP_TOK_LEN);
 
-			// classify
-			if ((raw[0] == '#') || ((raw[0] == 0x0b)))
+			// spec normalize(): core = tok.rstrip(":").strip("|"); the nick
+			// check sees the raw colon, {e}> matches the raw token, all
+			// other slot types match the core.
 			{
-				tok->type = HMP_MARK;
-			}
-			else if (HMP_ParseHp(raw, tok))
-			{
-				tok->type = HMP_HP;
-			}
-			else if (HMP_ParseWpn(raw, tok))
-			{
-				tok->type = HMP_WPN;
-			}
-			else if ((rl >= 2) && (raw[rl - 1] == '>')
-					&& HMP_AllDigits(raw + ((raw[0] == '|') ? 1 : 0),
-										rl - 1 - ((raw[0] == '|') ? 1 : 0)))
-			{
-				tok->type = HMP_ECOUNT;
-				tok->num = HMP_ParseInt(raw + ((raw[0] == '|') ? 1 : 0),
-										rl - 1 - ((raw[0] == '|') ? 1 : 0));
-			}
-			else
-			{
-				// strip trailing ':' for nick/word forms
 				char core[HMP_TOK_LEN];
-				int cl = rl;
-				qbool had_colon = false;
+				int cl = rl, lead = 0;
+				qbool had_colon = (rl > 0) && (raw[rl - 1] == ':');
 
 				strlcpy(core, raw, HMP_TOK_LEN);
 
-				if ((cl > 1) && (core[cl - 1] == ':'))
+				while ((cl > 0) && (core[cl - 1] == ':'))
 				{
-					core[cl - 1] = '\0';
-					cl--;
-					had_colon = true;
+					core[--cl] = '\0';
 				}
+
+				while ((cl > 0) && (core[cl - 1] == '|'))
+				{
+					core[--cl] = '\0';
+				}
+
+				while (core[lead] == '|')
+				{
+					lead++;
+				}
+
+				if (lead)
+				{
+					memmove(core, core + lead, cl - lead + 1);
+					cl -= lead;
+				}
+
+				strlcpy(tok->text, cl ? core : raw, HMP_TOK_LEN);
 
 				if ((ntok == 0) && (had_colon || HMP_NickMatches(core, sender)))
 				{
 					tok->type = HMP_NICK;
-					strlcpy(tok->text, core, HMP_TOK_LEN);
+				}
+				else if (HMP_ParseHp(core, tok))
+				{
+					tok->type = HMP_HP;
+				}
+				else if (HMP_ParseWpn(core, tok))
+				{
+					tok->type = HMP_WPN;
+				}
+				else if (((rl == 2) && HMP_AllDigits(raw, 1) && (raw[1] == '>'))
+						|| ((rl == 3) && (raw[0] == '|') && HMP_AllDigits(raw + 1, 1)
+							&& (raw[2] == '>')))
+				{
+					// spec {e}>: fullmatch "\|?\d\>" on the RAW token
+					tok->type = HMP_ECOUNT;
+					tok->num = raw[(raw[0] == '|') ? 1 : 0] - '0';
+				}
+				else if (HMP_ParseTime(core))
+				{
+					tok->type = HMP_TIME;
 				}
 				else if (HMP_AllDigits(core, cl))
 				{
@@ -1482,12 +1594,10 @@ static int HMP_Tokenize(const char *text, gedict_t *sender, hmp_tok_t *toks)
 				else if (HMP_IsLocToken(core))
 				{
 					tok->type = HMP_LOC;
-					strlcpy(tok->text, core, HMP_TOK_LEN);
 				}
 				else
 				{
 					tok->type = HMP_WORD;
-					strlcpy(tok->text, core, HMP_TOK_LEN);
 				}
 			}
 
@@ -1498,14 +1608,93 @@ static int HMP_Tokenize(const char *text, gedict_t *sender, hmp_tok_t *toks)
 	return ntok;
 }
 
-// keyword helpers over the token array
+// ---- spec-faithful matching helpers ----
+// The classify rules are regexes over the spec's normalized template string
+// ("took ra" -> "took {loc}"). Rather than joining a string, each token
+// exposes its template text via HMP_Tpl() and the helpers below reproduce
+// the \b / adjacency semantics of the regexes over those texts. Crucially,
+// pure quad/pent/penta/ring/eyes tokens are loc-roots and normalize to
+// "{loc}", so the literal powerup alternations only fire inside punctuated
+// tokens ("quad!", "pent,rl") -- the spec quirk behind parity bucket 1.
+
+static const char* HMP_Tpl(const hmp_tok_t *tok)
+{
+	switch (tok->type)
+	{
+		case HMP_NICK:   return "{nick}";
+		case HMP_HP:     return "{hp}";
+		case HMP_WPN:    return "{wpn}";
+		case HMP_ECOUNT: return "{e}>";
+		case HMP_TIME:   return "{t}";
+		case HMP_NUM:    return "{n}";
+		case HMP_LOC:    return "{loc}";
+		default:         return tok->text;
+	}
+}
+
+static qbool HMP_IsWordChar(char c)
+{
+	return ((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z'))
+			|| ((c >= '0') && (c <= '9')) || (c == '_');
+}
+
+static qbool HMP_StartsWith(const char *hay, const char *w)
+{
+	return !strncmp(hay, w, strlen(w));
+}
+
+static qbool HMP_EndsWith(const char *hay, const char *w)
+{
+	int hl = strlen(hay), wl = strlen(w);
+
+	return (hl >= wl) && !strcmp(hay + hl - wl, w);
+}
+
+// "w..." with a \b after w (end of token or non-word char)
+static qbool HMP_StartsWord(const char *hay, const char *w)
+{
+	int wl = strlen(w);
+
+	return !strncmp(hay, w, wl) && !HMP_IsWordChar(hay[wl]);
+}
+
+// "...w" with a \b before w (start of token or non-word char)
+static qbool HMP_EndsWord(const char *hay, const char *w)
+{
+	int hl = strlen(hay), wl = strlen(w);
+
+	return (hl >= wl) && !strcmp(hay + hl - wl, w)
+			&& ((hl == wl) || !HMP_IsWordChar(hay[hl - wl - 1]));
+}
+
+// \bw\b anywhere inside the token text
+static qbool HMP_StrWord(const char *hay, const char *w)
+{
+	int wl = strlen(w);
+	const char *p;
+
+	for (p = hay; *p; p++)
+	{
+		if (!strncmp(p, w, wl)
+				&& ((p == hay) || !HMP_IsWordChar(p[-1]))
+				&& !HMP_IsWordChar(p[wl]))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// keyword helpers over the token templates (\bw\b over the joined template:
+// a word cannot span tokens, so scanning per-token is equivalent)
 static qbool HMP_HasWord(hmp_tok_t *toks, int n, const char *w)
 {
 	int i;
 
 	for (i = 0; i < n; i++)
 	{
-		if ((toks[i].type == HMP_WORD) && streq(toks[i].text, w))
+		if (HMP_StrWord(HMP_Tpl(&toks[i]), w))
 		{
 			return true;
 		}
@@ -1529,6 +1718,21 @@ static qbool HMP_HasAny(hmp_tok_t *toks, int n, const char **words)
 	return false;
 }
 
+static qbool HMP_StartsWordAny(const char *hay, const char **words)
+{
+	int i;
+
+	for (i = 0; words[i]; i++)
+	{
+		if (HMP_StartsWord(hay, words[i]))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static int HMP_FirstType(hmp_tok_t *toks, int n, int type)
 {
 	int i;
@@ -1544,28 +1748,12 @@ static int HMP_FirstType(hmp_tok_t *toks, int n, int type)
 	return -1;
 }
 
-// powerup word (also matched when typed as a LOC token -- quad/pent/ring
-// are in the loc lexicon)
-static qbool HMP_IsPowerupText(const char *t)
+// \b(quad|pent|penta|ring|eyes)\b inside one token's template text
+static qbool HMP_TplHasPw(const char *tpl)
 {
-	return streq(t, "quad") || streq(t, "pent") || streq(t, "penta")
-			|| streq(t, "ring") || streq(t, "eyes");
-}
-
-static qbool HMP_HasPowerup(hmp_tok_t *toks, int n)
-{
-	int i;
-
-	for (i = 0; i < n; i++)
-	{
-		if (((toks[i].type == HMP_WORD) || (toks[i].type == HMP_LOC))
-				&& HMP_IsPowerupText(toks[i].text))
-		{
-			return true;
-		}
-	}
-
-	return false;
+	return HMP_StrWord(tpl, "quad") || HMP_StrWord(tpl, "pent")
+			|| HMP_StrWord(tpl, "penta") || HMP_StrWord(tpl, "ring")
+			|| HMP_StrWord(tpl, "eyes");
 }
 
 // Categories (superset of #256 §2, from the study)
@@ -1594,10 +1782,10 @@ typedef enum
 	HMP_CAT_DEATH
 } hmp_cat_t;
 
-// Ordered classification, mirroring analyze2_parser.py::RULES.
+// Ordered classification: a 1:1 port of analyze2_parser.py::RULES (first
+// match wins). Each block header quotes the spec regex it implements.
 static int HMP_Classify(hmp_tok_t *toks, int n)
 {
-	static const char *w_enemy[] = { "enemy", "enemies", "nmy", "nme", NULL };
 	static const char *w_dropped[] = { "dropped", "droped", "drop", NULL };
 	static const char *w_took[] = { "took", "taken", "got", "taking", "peguei", NULL };
 	static const char *w_help[] = { "help", "hlp", NULL };
@@ -1609,171 +1797,384 @@ static int HMP_Classify(hmp_tok_t *toks, int n)
 			"wait", "rush", "kill", "focus", "replace", "pega", "fix",
 			"attack", "bierz", NULL };
 	static const char *w_coming[] = { "coming", "comming", "incoming", "omw", NULL };
-	static const char *w_wait[] = { "waiting", "awaiting", "awaits", "camping",
-			"holding", NULL };
+	static const char *w_wait[] = { "waiting", "await", "awaits", "awaiting",
+			"camping", "holding", NULL };
 	static const char *w_safe[] = { "safe", "clear", "secure", NULL };
 	static const char *w_slip[] = { "slipped", "missed", NULL };
 	static const char *w_death[] = { "died", "dead", "rip", NULL };
-	qbool marked = (HMP_FirstType(toks, n, HMP_MARK) >= 0);
-	int i;
+	int i, j;
 
 	if (!n)
 	{
 		return HMP_CAT_UNPARSED;
 	}
 
-	// 1-2. ## enemy-marker framing inverts the subject (17+ clans)
-	if ((marked || HMP_HasAny(toks, n, w_enemy)) && HMP_HasPowerup(toks, n))
+	// 1. enemy_powerup:
+	//    "## .*\b(quad|pent|penta|ring|eyes)\b|enemy (quad|pent|ring)|e (quad|pent)\b"
+	for (i = 0; i + 1 < n; i++)
 	{
-		return HMP_CAT_ENEMY_POWERUP;
+		const char *a = HMP_Tpl(&toks[i]);
+		const char *b = HMP_Tpl(&toks[i + 1]);
+
+		if (HMP_EndsWith(a, "##"))
+		{
+			for (j = i + 1; j < n; j++)
+			{
+				if (HMP_TplHasPw(HMP_Tpl(&toks[j])))
+				{
+					return HMP_CAT_ENEMY_POWERUP;
+				}
+			}
+		}
+
+		if (HMP_EndsWith(a, "enemy")
+				&& (HMP_StartsWith(b, "quad") || HMP_StartsWith(b, "pent")
+					|| HMP_StartsWith(b, "ring")))
+		{
+			return HMP_CAT_ENEMY_POWERUP;
+		}
+
+		if (HMP_EndsWith(a, "e")
+				&& (HMP_StartsWord(b, "quad") || HMP_StartsWord(b, "pent")))
+		{
+			return HMP_CAT_ENEMY_POWERUP;
+		}
 	}
 
-	if (marked || HMP_HasAny(toks, n, w_enemy))
+	// 2. enemy_seen:
+	//    "##|enem(y|ies)|\bnmy\b|\bnme\b|\beyes\b at|\be\b at {loc}|{e}> only$"
+	for (i = 0; i < n; i++)
 	{
-		return HMP_CAT_ENEMY_SEEN;
+		const char *a = HMP_Tpl(&toks[i]);
+
+		if (strstr(a, "##") || strstr(a, "enemy") || strstr(a, "enemies")
+				|| HMP_StrWord(a, "nmy") || HMP_StrWord(a, "nme"))
+		{
+			return HMP_CAT_ENEMY_SEEN;
+		}
+
+		if ((i + 1 < n) && HMP_EndsWord(a, "eyes")
+				&& HMP_StartsWith(HMP_Tpl(&toks[i + 1]), "at"))
+		{
+			return HMP_CAT_ENEMY_SEEN;
+		}
+
+		if ((i + 2 < n) && HMP_EndsWord(a, "e")
+				&& streq(HMP_Tpl(&toks[i + 1]), "at")
+				&& HMP_StartsWith(HMP_Tpl(&toks[i + 2]), "{loc}"))
+		{
+			return HMP_CAT_ENEMY_SEEN;
+		}
+
+		if ((i + 2 == n) && streq(a, "{e}>")
+				&& streq(HMP_Tpl(&toks[i + 1]), "only"))
+		{
+			return HMP_CAT_ENEMY_SEEN;
+		}
 	}
 
+	// 3. lost: "\blost\b"
 	if (HMP_HasWord(toks, n, "lost"))
 	{
 		return HMP_CAT_LOST;
 	}
 
+	// 4. dropped: "\bdropp?ed\b|\bdrop\b"
 	if (HMP_HasAny(toks, n, w_dropped))
 	{
 		return HMP_CAT_DROPPED;
 	}
 
+	// 5. took: "\btook\b|\btaken\b|\bgot\b|\bhave\b {loc}|\btaking\b|\bpeguei\b"
 	if (HMP_HasAny(toks, n, w_took))
 	{
 		return HMP_CAT_TOOK;
 	}
 
+	for (i = 0; i + 1 < n; i++)
+	{
+		if (HMP_EndsWord(HMP_Tpl(&toks[i]), "have")
+				&& HMP_StartsWith(HMP_Tpl(&toks[i + 1]), "{loc}"))
+		{
+			return HMP_CAT_TOOK;
+		}
+	}
+
+	// 6. help: "\bhelp\b|\bhlp\b"
 	if (HMP_HasAny(toks, n, w_help))
 	{
 		return HMP_CAT_HELP;
 	}
 
-	if (HMP_HasWord(toks, n, "pack")
-			|| (HMP_HasAny(toks, n, w_ammo) && HMP_HasWord(toks, n, "at")))
+	// 7. pack_available: "pack (at|left|here|<|@)|{loc} pack\b|pack {loc}|
+	//    left at|\bpack\b at|\b(rox|cells|rockets|ammo|pens) (at|<|@) "
+	for (i = 0; i + 1 < n; i++)
 	{
-		return HMP_CAT_PACK;
+		const char *a = HMP_Tpl(&toks[i]);
+		const char *b = HMP_Tpl(&toks[i + 1]);
+
+		if (HMP_EndsWith(a, "pack")
+				&& (HMP_StartsWith(b, "at") || HMP_StartsWith(b, "left")
+					|| HMP_StartsWith(b, "here") || HMP_StartsWith(b, "<")
+					|| HMP_StartsWith(b, "@") || HMP_StartsWith(b, "{loc}")))
+		{
+			return HMP_CAT_PACK;
+		}
+
+		if (HMP_EndsWith(a, "{loc}") && HMP_StartsWord(b, "pack"))
+		{
+			return HMP_CAT_PACK;
+		}
+
+		if (HMP_EndsWith(a, "left") && HMP_StartsWith(b, "at"))
+		{
+			return HMP_CAT_PACK;
+		}
+
+		// ammo-word alternative: trailing space in the regex means the
+		// at/</@ token cannot be the last one
+		if ((i + 2 < n)
+				&& (streq(b, "at") || streq(b, "<") || streq(b, "@")))
+		{
+			for (j = 0; w_ammo[j]; j++)
+			{
+				if (HMP_EndsWord(a, w_ammo[j]))
+				{
+					return HMP_CAT_PACK;
+				}
+			}
+		}
 	}
 
-	// item_at: {loc} at {loc|n}
-	for (i = 0; i + 2 < n; i++)
+	// 8. item_at: "{loc} (at|<|@|no) ({loc}|{n}|raup)|\bmega at\b|
+	//    \bspawn(ed)? at\b|<<+ {loc}"
+	for (i = 0; i + 1 < n; i++)
 	{
-		if ((toks[i].type == HMP_LOC)
-				&& ((toks[i + 1].type == HMP_WORD)
-					&& (streq(toks[i + 1].text, "at") || streq(toks[i + 1].text, "no")
-						|| streq(toks[i + 1].text, "<") || streq(toks[i + 1].text, "@")))
-				&& ((toks[i + 2].type == HMP_LOC) || (toks[i + 2].type == HMP_NUM)))
+		const char *a = HMP_Tpl(&toks[i]);
+		const char *b = HMP_Tpl(&toks[i + 1]);
+		const char *c = (i + 2 < n) ? HMP_Tpl(&toks[i + 2]) : NULL;
+
+		if (c && HMP_EndsWith(a, "{loc}")
+				&& (streq(b, "at") || streq(b, "<") || streq(b, "@") || streq(b, "no"))
+				&& (HMP_StartsWith(c, "{loc}") || HMP_StartsWith(c, "{n}")
+					|| HMP_StartsWith(c, "raup")))
+		{
+			return HMP_CAT_ITEM_AT;
+		}
+
+		if (HMP_EndsWord(a, "mega") && HMP_StartsWord(b, "at"))
+		{
+			return HMP_CAT_ITEM_AT;
+		}
+
+		if ((HMP_EndsWord(a, "spawn") || HMP_EndsWord(a, "spawned"))
+				&& HMP_StartsWord(b, "at"))
+		{
+			return HMP_CAT_ITEM_AT;
+		}
+
+		if (HMP_EndsWith(a, "<<") && HMP_StartsWith(b, "{loc}"))
 		{
 			return HMP_CAT_ITEM_AT;
 		}
 	}
 
+	// 9. need: "\bneed\b|\bgimm?e\b|\bwant\b"
 	if (HMP_HasAny(toks, n, w_need))
 	{
 		return HMP_CAT_NEED;
 	}
 
-	// team {powerup}
+	// 10. team_powerup: "\bteam (quad|pent|ring|{loc})"
 	for (i = 0; i + 1 < n; i++)
 	{
-		if ((toks[i].type == HMP_WORD) && streq(toks[i].text, "team")
-				&& (HMP_IsPowerupText(toks[i + 1].text) || (toks[i + 1].type == HMP_LOC)))
+		const char *b = HMP_Tpl(&toks[i + 1]);
+
+		if (HMP_EndsWord(HMP_Tpl(&toks[i]), "team")
+				&& (HMP_StartsWith(b, "quad") || HMP_StartsWith(b, "pent")
+					|| HMP_StartsWith(b, "ring") || HMP_StartsWith(b, "{loc}")))
 		{
 			return HMP_CAT_TEAM_POWERUP;
 		}
 	}
 
-	// powerup status: {pw} up/over/soon/... or {pw} {t}/on {n}
-	for (i = 0; i < n; i++)
+	// 11. powerup_status: "(quad|pent) {t}|(quad|pent|ring|{loc}) (is )?
+	//     (up|spawning|spawned|over|soon|dead|out|now)\b|(quad|pent|ring|{loc})
+	//     (on|in) {n}|\bover {loc}|\bsoon {loc}|quad soon|pent soon"
+	//     (the "^{nick} (quad|...) " alternative can never fire: a pure
+	//     powerup token normalizes to {loc}, a punctuated one breaks the
+	//     required trailing space -- dead spec branch, omitted)
+	for (i = 0; i + 1 < n; i++)
 	{
-		if (HMP_IsPowerupText(toks[i].text))
+		const char *a = HMP_Tpl(&toks[i]);
+		const char *b = HMP_Tpl(&toks[i + 1]);
+		qbool qp = HMP_EndsWith(a, "quad") || HMP_EndsWith(a, "pent");
+		qbool pwloc = qp || HMP_EndsWith(a, "ring") || HMP_EndsWith(a, "{loc}");
+
+		if (qp && (HMP_StartsWith(b, "{t}") || HMP_StartsWith(b, "soon")))
 		{
-			int j;
+			return HMP_CAT_POWERUP_STATUS;
+		}
 
-			for (j = 0; j < n; j++)
+		if (pwloc)
+		{
+			if (HMP_StartsWordAny(b, w_status_pw))
 			{
-				if ((toks[j].type == HMP_WORD) && HMP_HasAny(&toks[j], 1, w_status_pw))
-				{
-					return HMP_CAT_POWERUP_STATUS;
-				}
-
-				if (toks[j].type == HMP_TIME)
-				{
-					return HMP_CAT_POWERUP_STATUS;
-				}
+				return HMP_CAT_POWERUP_STATUS;
 			}
+
+			if ((i + 2 < n) && streq(b, "is")
+					&& HMP_StartsWordAny(HMP_Tpl(&toks[i + 2]), w_status_pw))
+			{
+				return HMP_CAT_POWERUP_STATUS;
+			}
+
+			if ((i + 2 < n) && (streq(b, "on") || streq(b, "in"))
+					&& HMP_StartsWith(HMP_Tpl(&toks[i + 2]), "{n}"))
+			{
+				return HMP_CAT_POWERUP_STATUS;
+			}
+		}
+
+		if ((HMP_EndsWord(a, "over") || HMP_EndsWord(a, "soon"))
+				&& HMP_StartsWith(b, "{loc}"))
+		{
+			return HMP_CAT_POWERUP_STATUS;
 		}
 	}
 
+	// 12. request_action: "\bget\b|\btake\b|\bgo\b|...|\bwait\b(?!ing)"
+	//     (the (?!ing) guard falls out of \b matching: "waiting" has no
+	//     boundary after "wait")
 	if (HMP_HasAny(toks, n, w_req))
 	{
 		return HMP_CAT_REQUEST;
 	}
 
+	// 13. coming: "\bcoming\b|\bcomming\b|\bincoming\b|\bon (my|the) way\b|\bomw\b"
 	if (HMP_HasAny(toks, n, w_coming))
 	{
 		return HMP_CAT_COMING;
 	}
 
+	for (i = 0; i + 2 < n; i++)
+	{
+		const char *b = HMP_Tpl(&toks[i + 1]);
+
+		if (HMP_EndsWord(HMP_Tpl(&toks[i]), "on")
+				&& (streq(b, "my") || streq(b, "the"))
+				&& HMP_StartsWord(HMP_Tpl(&toks[i + 2]), "way"))
+		{
+			return HMP_CAT_COMING;
+		}
+	}
+
+	// 14. waiting: "\bwaiting\b|\bawait(s|ing)?\b|\bcamping\b|\bholding\b"
 	if (HMP_HasAny(toks, n, w_wait))
 	{
 		return HMP_CAT_WAITING;
 	}
 
-	if (HMP_HasAny(toks, n, w_safe)
-			|| (HMP_HasWord(toks, n, "ok") && (HMP_FirstType(toks, n, HMP_LOC) >= 0)))
+	// 15. safe: "\bsafe\b|\bclear\b|\bok\b {loc}|\bsecure\b"
+	if (HMP_HasAny(toks, n, w_safe))
 	{
 		return HMP_CAT_SAFE;
 	}
 
+	for (i = 0; i + 1 < n; i++)
+	{
+		if (HMP_EndsWord(HMP_Tpl(&toks[i]), "ok")
+				&& HMP_StartsWith(HMP_Tpl(&toks[i + 1]), "{loc}"))
+		{
+			return HMP_CAT_SAFE;
+		}
+	}
+
+	// 16. status_report: "{hp}"
 	if (HMP_FirstType(toks, n, HMP_HP) >= 0)
 	{
 		return HMP_CAT_STATUS;
 	}
 
-	// bare "<word> at {loc}" after all keyword rules = enemy nick sighting
+	// 17. enemy_at_nick: "\b[\w*'.-]+ at {loc}" -- the run must END right
+	//     before " at", so the preceding token's last char must be in the
+	//     class (typed slots end in '}'/'>' and can never fire)
 	for (i = 0; i + 2 < n; i++)
 	{
-		if ((toks[i].type == HMP_WORD) && (toks[i + 1].type == HMP_WORD)
-				&& streq(toks[i + 1].text, "at") && (toks[i + 2].type == HMP_LOC))
+		const char *a = HMP_Tpl(&toks[i]);
+		int al = strlen(a);
+		char lc = al ? a[al - 1] : '\0';
+
+		if ((HMP_IsWordChar(lc) || (lc == '*') || (lc == '\'') || (lc == '.')
+					|| (lc == '-'))
+				&& streq(HMP_Tpl(&toks[i + 1]), "at")
+				&& HMP_StartsWith(HMP_Tpl(&toks[i + 2]), "{loc}"))
 		{
 			return HMP_CAT_ENEMY_AT_NICK;
 		}
 	}
 
-	// location ping: nick? loc+ ecount?
+	// 18. location_ping (anchored): "^{nick} {loc}( {loc})*( {e}>)?$|
+	//     ^{nick} @ {loc}$|^{loc}( {loc})*$"
+	if ((n >= 2) && (toks[0].type == HMP_NICK))
 	{
-		qbool any_loc = false;
-		qbool only_structural = true;
-
-		for (i = 0; i < n; i++)
+		if (toks[1].type == HMP_LOC)
 		{
-			if (toks[i].type == HMP_LOC)
+			qbool ok = true;
+
+			for (i = 1; i < n; i++)
 			{
-				any_loc = true;
+				if (toks[i].type == HMP_LOC)
+				{
+					continue;
+				}
+
+				if ((i == n - 1) && (toks[i].type == HMP_ECOUNT))
+				{
+					continue;	// optional single trailing {e}>
+				}
+
+				ok = false;
+				break;
 			}
-			else if ((toks[i].type != HMP_NICK) && (toks[i].type != HMP_ECOUNT)
-					&& !((toks[i].type == HMP_WORD) && streq(toks[i].text, "@")))
+
+			if (ok)
 			{
-				only_structural = false;
+				return HMP_CAT_LOCATION_PING;
 			}
 		}
 
-		if (any_loc && only_structural)
+		if ((n == 3) && streq(HMP_Tpl(&toks[1]), "@") && (toks[2].type == HMP_LOC))
 		{
 			return HMP_CAT_LOCATION_PING;
 		}
 	}
 
+	{
+		qbool all_loc = true;
+
+		for (i = 0; i < n; i++)
+		{
+			if (toks[i].type != HMP_LOC)
+			{
+				all_loc = false;
+				break;
+			}
+		}
+
+		if (all_loc)
+		{
+			return HMP_CAT_LOCATION_PING;
+		}
+	}
+
+	// 19. slipped: "\bslipped\b|\bquad missed\b|\bmissed\b"
 	if (HMP_HasAny(toks, n, w_slip))
 	{
 		return HMP_CAT_SLIPPED;
 	}
 
+	// 20. death_report: "\bdied\b|\bdead\b|\brip\b"
 	if (HMP_HasAny(toks, n, w_death))
 	{
 		return HMP_CAT_DEATH;
