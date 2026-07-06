@@ -274,8 +274,63 @@ static void BuildTeamList(void)
 	AddTeamToList(&foundTeams, "green", 3, 3);
 }
 
+// Roster seat names for komodobots: k_kbot_name1..4 (single words, set via
+// the lab harness --set lines). The first listed name no connected player
+// already wears wins; exhausted/unset falls back to the stock pool.
+static const char* KbotSeatName(void)
+{
+	static char name[32];
+	int n;
+
+	for (n = 1; n <= 4; n++)
+	{
+		gedict_t *p;
+		qbool used = false;
+
+		trap_cvar_string(va("k_kbot_name%d", n), name, sizeof(name));
+
+		if (strnull(name))
+		{
+			continue;
+		}
+
+		for (p = world; (p = find_plr(p));)
+		{
+			if (streq(p->netname, name))
+			{
+				used = true;
+				break;
+			}
+		}
+
+		if (!used)
+		{
+			return name;
+		}
+	}
+
+	return NULL;
+}
+
+// Roster colors for komodobots: k_kbot_color (0..13) sets both top and
+// bottom; unset keeps the stock assignment.
+static void KbotSeatColors(int *topColor, int *bottomColor)
+{
+	char buf[8];
+
+	trap_cvar_string("k_kbot_color", buf, sizeof(buf));
+
+	if (!strnull(buf))
+	{
+		int c = (int)bound(0, atoi(buf), 13);
+
+		*topColor = c;
+		*bottomColor = c;
+	}
+}
+
 // Returns the entity number of the created bot, or 0 on failure.
-int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messages)
+int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messages, qbool kbot)
 {
 	char skill_level_str[3];
 	int i;
@@ -333,6 +388,18 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 				bottomColor = tot_mode_enabled() ? 12 : i_rnd(0, 13);
 			}
 
+			if (kbot)
+			{
+				const char *seat = KbotSeatName();
+
+				if (seat)
+				{
+					strlcpy(bots[i].name, seat, sizeof(bots[i].name));
+				}
+
+				KbotSeatColors(&topColor, &bottomColor);
+			}
+
 			entity = trap_AddBot(bots[i].name, bottomColor, topColor, "base");
 
 			if (entity == 0)
@@ -376,7 +443,7 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 
 // Shared "botcmd addbot/addkbot [skill] [team]" argument parsing.
 // Returns the entity number of the created bot, or 0 on failure.
-static int FrogbotsAddbotParsed(void)
+static int FrogbotsAddbotParsed(qbool kbot)
 {
 	int skill_level = FrogbotSkillLevel();
 	char specificteam[10] =
@@ -406,17 +473,17 @@ static int FrogbotsAddbotParsed(void)
 		trap_CmdArgv(3, specificteam, sizeof(specificteam));
 	}
 
-	return FrogbotsAddbot(skill_level, specificteam, true);
+	return FrogbotsAddbot(skill_level, specificteam, true, kbot);
 }
 
 static void FrogbotsAddbot_f(void)
 {
-	FrogbotsAddbotParsed();
+	FrogbotsAddbotParsed(false);
 }
 
 static void FrogbotsAddKbot_f(void)
 {
-	int entity = FrogbotsAddbotParsed();
+	int entity = FrogbotsAddbotParsed(true);
 
 	if (entity)
 	{
@@ -1937,7 +2004,7 @@ static void FrogbotsFillServer(void)
 
 	for (i = 0; i < min(max_clients - plr_count, 8); ++i)
 	{
-		FrogbotsAddbot(skill_level, "", true);
+		FrogbotsAddbot(skill_level, "", true, false);
 	}
 
 	cvar_fset(FB_CVAR_SKILL, skill_level);
@@ -2821,7 +2888,7 @@ void BotStartFrame(void)
 		{
 			if (min_required_clients && (client_count < min(min_required_clients, max_clients)))
 			{
-				FrogbotsAddbot(FrogbotSkillLevel(), "", false);
+				FrogbotsAddbot(FrogbotSkillLevel(), "", false, false);
 
 				last_auto_client = g_globalvars.time;
 			}

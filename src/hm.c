@@ -48,6 +48,7 @@ typedef struct hm_bot_s
 {
 	qbool active_logged;			// one-time activation done (tag + log)
 	char tag[4];					// 3-letter lowercase self-prefix
+	char tag_color[4];				// &cRGB tint for the tag ("" = plain)
 	float next_tm_scan;				// visibility-scan throttle (engine trap)
 	hm_tm_t tm[MAX_CLIENTS + 1];	// beliefs about teammates, by entity num
 	hm_item_belief_t items[HMODE_MAX_ITEMS];	// beliefs about major items
@@ -76,6 +77,78 @@ static hm_bot_t* HMode_Slot(gedict_t *bot)
 	return &hm_bots[entity];
 }
 
+// Optional team scope for the global toggle: when k_hm_teams is set (space/
+// comma-separated team names), only bots on a listed team inherit k_hm.
+// Per-bot HMODE_ON overrides bypass this (explicit wins over scope).
+static qbool HMode_TeamAllowed(gedict_t *bot)
+{
+	char list[128];
+	char team[MAX_TEAM_NAME];
+	const char *t;
+	char *s;
+	int i;
+
+	trap_cvar_string("k_hm_teams", list, sizeof(list));
+
+	if (strnull(list))
+	{
+		return true; // unset = every team
+	}
+
+	t = getteam(bot);
+
+	for (i = 0; t[i] && (i < (int)sizeof(team) - 1); i++)
+	{
+		char c = t[i];
+
+		if ((c >= 'A') && (c <= 'Z'))
+		{
+			c = (char)(c - 'A' + 'a');
+		}
+
+		team[i] = c;
+	}
+
+	team[i] = '\0';
+
+	for (s = list; *s;)
+	{
+		char word[MAX_TEAM_NAME];
+		int n = 0;
+
+		while (*s && ((*s == ' ') || (*s == ',')))
+		{
+			s++;
+		}
+
+		while (*s && (*s != ' ') && (*s != ','))
+		{
+			char c = *s;
+
+			if ((c >= 'A') && (c <= 'Z'))
+			{
+				c = (char)(c - 'A' + 'a');
+			}
+
+			if (n < (int)sizeof(word) - 1)
+			{
+				word[n++] = c;
+			}
+
+			s++;
+		}
+
+		word[n] = '\0';
+
+		if (n && streq(word, team))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 qbool HMode_Active(gedict_t *bot)
 {
 	if (!bot || !bot->isBot)
@@ -93,7 +166,7 @@ qbool HMode_Active(gedict_t *bot)
 		return false;
 	}
 
-	return cvar("k_hm") != 0;
+	return (cvar("k_hm") != 0) && HMode_TeamAllowed(bot);
 }
 
 // Capability cvars default ON when unset, so "k_hm 1" alone gives the full
@@ -211,6 +284,88 @@ static void HMode_UniqueTag(gedict_t *bot, char *tag)
 	}
 }
 
+// Tag tint rotation: same-team hm bots alternate red/blue/orange/purple in
+// activation (= seating) order so their teamsay aliases stand apart at a
+// glance. Per-position override cvars k_hm_tag_color1..4 take a 3-hex ezQuake
+// &cRGB value; anything else falls back to the default for that position.
+static const char *hm_tag_color_defaults[4] = { "f00", "00f", "f80", "a0f" };
+
+static qbool HMode_IsHexColorChar(char c)
+{
+	return ((c >= '0') && (c <= '9')) || ((c >= 'a') && (c <= 'f'))
+			|| ((c >= 'A') && (c <= 'F'));
+}
+
+static qbool HMode_IsHexColor3(const char *s)
+{
+	return HMode_IsHexColorChar(s[0]) && HMode_IsHexColorChar(s[1])
+			&& HMode_IsHexColorChar(s[2]) && (s[3] == '\0');
+}
+
+static void HMode_AssignTagColor(gedict_t *self, hm_bot_t *slot)
+{
+	char buf[8];
+	int idx = 0;
+	int j;
+
+	// rotation position = same-team hm bots activated before this one
+	for (j = 1; j <= MAX_CLIENTS; j++)
+	{
+		gedict_t *other = &g_edicts[j];
+		hm_bot_t *oslot;
+
+		if (!other->isBot || (other == self) || (other->ct != ctPlayer)
+				|| (other->k_teamnum != self->k_teamnum))
+		{
+			continue;
+		}
+
+		oslot = HMode_Slot(other);
+
+		if (oslot && oslot->active_logged)
+		{
+			idx++;
+		}
+	}
+
+	idx = idx % 4;
+
+	trap_cvar_string(va("k_hm_tag_color%d", idx + 1), buf, sizeof(buf));
+
+	if (HMode_IsHexColor3(buf))
+	{
+		strlcpy(slot->tag_color, buf, sizeof(slot->tag_color));
+	}
+	else
+	{
+		strlcpy(slot->tag_color, hm_tag_color_defaults[idx], sizeof(slot->tag_color));
+	}
+}
+
+// Master gate for the tag tint (default on): k_hm_tag_colorize 0 gives plain
+// tags. Checked at emit time so a mid-match flip takes effect immediately.
+qbool HMode_DecorateTag(gedict_t *client, const char *name, char *out, int outsize)
+{
+	hm_bot_t *slot;
+
+	if (!client || !client->isBot || !HMode_Active(client)
+			|| !HMode_CapCvar("k_hm_tag_colorize"))
+	{
+		return false;
+	}
+
+	slot = HMode_Slot(client);
+
+	if (!slot || !slot->active_logged || strnull(slot->tag_color))
+	{
+		return false;
+	}
+
+	snprintf(out, outsize, "&c%s%s&r", slot->tag_color, name);
+
+	return true;
+}
+
 // One-time humanmode activation for a bot: derive + stamp the k_nick tag
 // (TeamplayMM2 prefixes k_nick to every teamsay, which is exactly the Book
 // convention) and log to the server console for run evidence.
@@ -225,11 +380,13 @@ static void HMode_Activate(gedict_t *self)
 
 	HMode_DeriveTag(self, slot->tag, sizeof(slot->tag));
 	HMode_UniqueTag(self, slot->tag);
+	HMode_AssignTagColor(self, slot);
 	trap_SetBotUserInfo(NUM_FOR_EDICT(self), "k_nick", slot->tag, 0);
 	slot->active_logged = true;
 
-	G_cprint("[hm] slot=%d name=%s tag=%s version=%s emit=%d parse=%d tminfo=%d iteminfo=%d\n",
-				NUM_FOR_EDICT(self), self->netname, slot->tag, HMODE_VERSION,
+	G_cprint("[hm] slot=%d name=%s tag=%s color=%s version=%s emit=%d parse=%d tminfo=%d iteminfo=%d\n",
+				NUM_FOR_EDICT(self), self->netname, slot->tag,
+				strnull(slot->tag_color) ? "-" : slot->tag_color, HMODE_VERSION,
 				(int)HMode_CapEmit(), (int)HMode_CapParse(), (int)HMode_CapTmInfo(),
 				(int)HMode_CapItemInfo());
 }
@@ -1198,6 +1355,25 @@ static int HMP_Tokenize(const char *text, gedict_t *sender, hmp_tok_t *toks)
 		if (c >= 128)
 		{
 			c = c - 128;
+		}
+
+		// ezQuake color markup from tinted tags (HMode_DecorateTag): "&cRGB"
+		// and "&r" vanish as separators so "&cf00hib&r" tokenizes as "hib".
+		if ((c == '&') && ((p[1] == 'c') || (p[1] == 'C'))
+				&& p[2] && p[3] && p[4]
+				&& HMode_IsHexColorChar(p[2]) && HMode_IsHexColorChar(p[3])
+				&& HMode_IsHexColorChar(p[4]))
+		{
+			clean[n++] = ' ';
+			p += 4;
+			continue;
+		}
+
+		if ((c == '&') && ((p[1] == 'r') || (p[1] == 'R')))
+		{
+			clean[n++] = ' ';
+			p += 1;
+			continue;
 		}
 
 		if ((c == '\r') || (c == '\n') || (c == 16) || (c == 17) || (c == '{')

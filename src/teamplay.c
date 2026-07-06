@@ -6,6 +6,9 @@
 // - If client supports it, send raw stats to client and allow it to construct format of message
 
 #include "g_local.h"
+#ifdef BOT_SUPPORT
+#include "hm.h"
+#endif
 
 // Time before we forget item (ezquake allows this to be specified)
 #define TOOK_TIMEOUT     5
@@ -518,6 +521,9 @@ static void TeamplayMM2(gedict_t *client, char *text)
 {
 	extern qbool ClientSay(qbool isTeamSay);
 	char buffer[128];
+#ifdef BOT_SUPPORT
+	char tinted[32];
+#endif
 	gedict_t *oldself = self;
 	char *name = NULL;
 
@@ -538,6 +544,14 @@ static void TeamplayMM2(gedict_t *client, char *text)
 
 	if (!strnull(name))
 	{
+#ifdef BOT_SUPPORT
+		// mm2humanmode: tint the alias so same-team tags stand apart
+		if (HMode_DecorateTag(client, name, tinted, sizeof(tinted)))
+		{
+			name = tinted;
+		}
+#endif
+
 		strlcat(buffer, "\r", sizeof(buffer));
 		strlcat(buffer, name, sizeof(buffer));
 		strlcat(buffer, " ", sizeof(buffer));

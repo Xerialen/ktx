@@ -22,7 +22,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define HMODE_VERSION "hm-0.5.0-parse"
+#define HMODE_VERSION "hm-0.6.0-teamtint"
 
 // Knowledge sources, in rising order of directness. Kept on every snapshot
 // so the trust/merge policy (told vs seen) stays explicit.
@@ -63,8 +63,17 @@ const hm_tm_t* HMode_TeammateInfo(gedict_t *bot, gedict_t *mate);
 #define HMODE_OFF     2	// humanmode forced off for this bot
 
 // True when humanmode governs this bot right now (per-bot override first,
-// then the global k_hm cvar). False for non-bots and world.
+// then the global k_hm cvar scoped by the optional k_hm_teams team filter).
+// False for non-bots and world.
 qbool HMode_Active(gedict_t *bot);
+
+// Colored teamsay alias: wrap `name` in the bot's ezQuake &cRGB tint so
+// same-team tags stand out from each other (rotation red/blue/orange/purple,
+// per-position override via k_hm_tag_color1..4, master gate
+// k_hm_tag_colorize). Returns false (out untouched) when colors don't apply;
+// callers then use the plain name. Called by TeamplayMM2 at prefix time so
+// the k_nick userinfo itself stays clean for its other consumers (mm3 etc.).
+qbool HMode_DecorateTag(gedict_t *client, const char *name, char *out, int outsize);
 
 // Capability gates: effective only when HMode_Active(). Each reads its cvar
 // with default ON so a bare "k_hm 1" enables the full model.
