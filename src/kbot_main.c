@@ -124,6 +124,10 @@ qbool KBot_Frame(gedict_t *self)
 					g_globalvars.time);
 	}
 
+	// Milton route policy: proximity visit tracking (conditioning state for
+	// the EvalGoal bias). No-op at cvar 0.
+	KBot_RoutePolicyTrack(self);
+
 	return false; // not handled: fall through to stock frogbot think
 }
 

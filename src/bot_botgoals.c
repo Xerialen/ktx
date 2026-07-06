@@ -95,6 +95,10 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 		// pack reports, orders, need/help calls) biases this goal's desire.
 		// Identity for stock bots -- k_hm 0 stays bit-identical.
 		goal_desire = HMode_GoalDesireBias(self, goal_entity, goal_desire);
+		// Milton route policy (kbot-only, k_kbot_routepolicy): scales desire
+		// for route resources by the reference transition table. Identity for
+		// stock bots and cvar 0.
+		goal_desire = KBot_RoutePolicyDesireBias(self, goal_entity, goal_desire);
 	}
 
 	goal_entity->fb.saved_goal_desire = goal_desire;

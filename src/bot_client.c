@@ -13,6 +13,7 @@
 
 #include "g_local.h"
 #include "hm.h"
+#include "kbot.h"
 
 #define PERIODIC_MM2_STATUS 4
 
@@ -146,6 +147,10 @@ void BotClientEntersEvent(gedict_t *self, gedict_t *spawn_pos)
 	self->fb.min_move_time = g_globalvars.time + self->fb.skill.spawn_move_delay;
 	self->fb.last_rndaim_time = 0;
 	self->fb.wiggle_run_dir = 0;
+
+	// Milton route policy: reset the visit chain; tier 2 samples the
+	// spawn-conditioned opening. No-op for stock bots and cvar 0.
+	KBot_RoutePolicySpawnEvent(self, spawn_pos);
 
 	SetMarker(self, spawn_pos);
 

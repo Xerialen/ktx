@@ -1333,6 +1333,7 @@ void SecondFrame(void)
 #ifdef BOT_SUPPORT
 	HMode_MapInit(); // mm2humanmode: item edicts are new each map
 	KBot_ThreatAimMapInit(); // threat cells re-key to the fresh item edicts
+	KBot_RoutePolicyMapInit(); // route nodes re-bind to the fresh item edicts
 #endif
 }
 

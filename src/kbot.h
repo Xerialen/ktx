@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.22.0-chainhop"
+#define KBOT_VERSION "kbot-0.23.0-routepolicy"
 
 // States for fb.kbot
 #define KBOT_STATE_OFF     0	// stock frogbot (default; fb is memset to 0)
@@ -83,6 +83,27 @@ void KBot_ThreatAimMapInit(void);
 // fb.desired_angle; otherwise does nothing. Also emits the [ta-contact]
 // first-sight KPI line on the enemy_visible rising edge (k_hm_debug).
 void KBot_ThreatAimFrame(gedict_t *self);
+
+// ---- kbot_routepolicy: Milton-derived route policy (dm3 only) ----
+// Master cvar k_kbot_routepolicy: 0 off (bit-identical), 1 transition bias in
+// EvalGoal, 2 +spawn openings. Decision-level goal-desire bias only; movement,
+// routing and the gap-jump play are untouched. Table is generated
+// (komodobots experiments/route_policy/gen_routepolicy_table.py); dm3 only.
+
+// Once per map, next to KBot_ThreatAimMapInit(): reset per-bot state, bind
+// node ids to their live item edicts (fail-safe inert if any is missing).
+void KBot_RoutePolicyMapInit(void);
+
+// From BotClientEntersEvent: reset the visit chain; tier 2 samples the
+// spawn-conditioned opening resource.
+void KBot_RoutePolicySpawnEvent(gedict_t *self, gedict_t *spawn_pos);
+
+// Per-frame from KBot_Frame: proximity visit tracking + [kb-route] telemetry.
+void KBot_RoutePolicyTrack(gedict_t *self);
+
+// EvalGoal consumer (after HMode_GoalDesireBias): scales a kbot's desire for
+// a route resource by P(next | last visited); identity when off/not a node.
+float KBot_RoutePolicyDesireBias(gedict_t *self, gedict_t *goal_entity, float desire);
 
 #endif // BOT_SUPPORT
 
