@@ -509,4 +509,326 @@ float KBot_HarvestAnchorShim(gedict_t *self, gedict_t *goal, float goal_time)
 	return goal_time * ((self == khv_anchor) ? f : (1.0f + (f - 1.0f) * 0.5f));
 }
 
+// ---------------------------------------------------------------------------
+// B4: quad convergence + guard stance (k_kbot_harvest_quad, k_kbot_harvest_guard)
+// ---------------------------------------------------------------------------
+// Guard study (spec section 7, 285 Book quad windows): Book sends 2-3, never
+// the whole team (>=2 present in 49% of windows); the taker arrives ~200 qu
+// out, the guards stand 300-580 qu out AT THE OPENINGS (RL entrance east is
+// the enemies' dominant approach), crosshair held on the opening line (56%
+// sideways). Convergence: T-10 s the two nearest armed+ kbots see the quad
+// goal as closer (objective rotation through the B3 exemption); guard: the
+// non-takers already in the zone at guard distance hold and watch an entry.
+
+static gedict_t *khv_quad = NULL;
+static float khv_quad_checked = 0;
+
+static gedict_t* KHV_QuadItem(void)
+{
+	if ((khv_quad == NULL) && (g_globalvars.time > khv_quad_checked))
+	{
+		khv_quad = ez_find(world, "item_artifact_super_damage");
+		khv_quad_checked = g_globalvars.time + 5;
+	}
+
+	return khv_quad;
+}
+
+// live on the floor, or respawning within lead seconds
+static qbool KHV_QuadWindowSoon(float lead)
+{
+	gedict_t *q = KHV_QuadItem();
+
+	return q && ((q->s.v.solid == SOLID_TRIGGER)
+			|| ((q->fb.goal_respawn_time > g_globalvars.time)
+					&& (q->fb.goal_respawn_time < g_globalvars.time + lead)));
+}
+
+// 2 s cadence: rank armed+ kbots by distance to the quad; [0] is the TAKER,
+// [1] the second converger. Everyone else stays on the zone loop.
+static float khv_quad_next = 0;
+static gedict_t *khv_quad_near[2] = { NULL, NULL };
+
+static void KHV_QuadTick(void)
+{
+	gedict_t *p, *q = KHV_QuadItem();
+	float d0 = 999999, d1 = 999999;
+
+	if (g_globalvars.time < khv_quad_next)
+	{
+		return;
+	}
+	if (khv_quad_next > g_globalvars.time + 3)
+	{
+		khv_quad_next = 0;
+	}
+	khv_quad_next = g_globalvars.time + 2.0f;
+	khv_quad_near[0] = khv_quad_near[1] = NULL;
+	if (!q)
+	{
+		return;
+	}
+	for (p = world; (p = find_plr(p));)
+	{
+		vec3_t d;
+		float dist;
+
+		if (!p->isBot || !p->fb.kbot || ISDEAD(p) || (KBot_StackClass(p) < KBM_ARMED))
+		{
+			continue;
+		}
+		VectorSubtract(p->s.v.origin, q->s.v.origin, d);
+		dist = vlen(d);
+		if (dist < d0)
+		{
+			d1 = d0;
+			khv_quad_near[1] = khv_quad_near[0];
+			d0 = dist;
+			khv_quad_near[0] = p;
+		}
+		else if (dist < d1)
+		{
+			d1 = dist;
+			khv_quad_near[1] = p;
+		}
+	}
+}
+
+static float khv_quad_f = 0;
+static float khv_quad_f_next = -1;
+static float khv_guard_f = 0;
+static float khv_guard_f_next = -1;
+static float khv_hold_f = 0;
+static float khv_hold_f_next = -1;
+
+static float KHV_CvarCached(const char *name, float *val, float *next)
+{
+	if (g_globalvars.time > *next)
+	{
+		*val = cvar(name);
+		*next = g_globalvars.time + 1;
+	}
+
+	return *val;
+}
+
+// B4 convergence seam (same call site as the B3 shim): the two nearest
+// armed+ kbots see the quad goal deflated while the window opens.
+float KBot_HarvestQuadShim(gedict_t *self, gedict_t *goal, float goal_time)
+{
+	if (!KHV_CvarCached("k_kbot_harvest_quad", &khv_quad_f, &khv_quad_f_next)
+			|| !self->isBot || !self->fb.kbot)
+	{
+		return goal_time;
+	}
+	if ((goal != KHV_QuadItem()) || !KHV_QuadWindowSoon(10))
+	{
+		return goal_time;
+	}
+	KHV_QuadTick();
+	if ((self == khv_quad_near[0]) || (self == khv_quad_near[1]))
+	{
+		return goal_time * 0.6f;
+	}
+
+	return goal_time;
+}
+
+// ---------------------------------------------------------------------------
+// B4 guard + B5 posting: the hold primitive (movement + locked look)
+// ---------------------------------------------------------------------------
+// Posting study (spec section 7b, 105 Book episodes): a stacked RL player
+// stands still 3-6 s with the crosshair LOCKED on an entry line (54% <40
+// degrees sweep), enemy within 800 qu in 56%, dies in 1%, converts 30% to a
+// kill -- the victim walks into a pre-placed aim. Never for spawn/mid bots,
+// never outside the own zone, never during the own quad window (converge
+// instead). Combat stays vanilla: any visible enemy or damage aborts the
+// hold instantly (R1).
+
+// zone entry points (world units, from the dm3 loc nodes): where enemies
+// come FROM when they enter the zone -- the guard's look line.
+static const float khv_zone_entry[5][3] = {
+	{ 0, 0, 0 },			// KHZ_NONE
+	{ 496, -461, 56 },		// RA: RA.entry (the low approach)
+	{ 1300, 81, -24 },		// QUAD: east / RL entrance (dominant approach)
+	{ 710, 672, -264 },		// PENT: lifts side
+	{ 1168, -617, -24 },	// YA: YA.entry
+};
+
+typedef struct
+{
+	float until;	// holding while time < until
+	float cool;		// no re-trigger while time < cool
+	float yaw;
+} khv_hold_state_t;
+
+static khv_hold_state_t khv_hold[MAX_EDICTS];
+
+static float KHV_YawTo(gedict_t *self, const float *point)
+{
+	vec3_t d;
+
+	d[0] = point[0] - self->s.v.origin[0];
+	d[1] = point[1] - self->s.v.origin[1];
+	d[2] = 0;
+
+	return vectoyaw(d);
+}
+
+// Movement-frame seam (bot_movement.c, before the gapjump final authority so
+// a triggered crossing still overrides). Returns true when the hold owns
+// this frame's movement: zeroed direction, locked yaw.
+qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction)
+{
+	float guard_on = KHV_CvarCached("k_kbot_harvest_guard", &khv_guard_f, &khv_guard_f_next);
+	float hold_on = KHV_CvarCached("k_kbot_harvest_hold", &khv_hold_f, &khv_hold_f_next);
+	khv_hold_state_t *h;
+	int idx, zone;
+	qbool enemy_seen;
+
+	if ((!guard_on && !hold_on) || !self->isBot || !self->fb.kbot
+			|| (match_in_progress != 2))
+	{
+		return false;
+	}
+	idx = NUM_FOR_EDICT(self);
+	if ((idx <= 0) || (idx >= MAX_EDICTS))
+	{
+		return false;
+	}
+	h = &khv_hold[idx];
+	if (h->cool > g_globalvars.time + 30)
+	{
+		h->until = h->cool = 0;	// clock rewound (map restart)
+	}
+
+	enemy_seen = self->fb.look_object && (self->fb.look_object->ct == ctPlayer)
+			&& !SameTeam(self->fb.look_object, self);
+
+	// active hold: abort on contact/damage/death/water, else own the frame
+	if (g_globalvars.time < h->until)
+	{
+		if (ISDEAD(self) || enemy_seen || (self->s.v.waterlevel > 1)
+				|| (self->fb.last_hurt > g_globalvars.time - 0.3f))
+		{
+			h->until = 0;
+
+			return false;
+		}
+		VectorClear(direction);
+		*jumping = false;
+		self->fb.desired_angle[0] = 0;
+		self->fb.desired_angle[1] = h->yaw;
+
+		return true;
+	}
+
+	// trigger evaluation
+	if ((g_globalvars.time < h->cool) || ISDEAD(self) || enemy_seen
+			|| !((int)self->s.v.flags & FL_ONGROUND) || (self->s.v.waterlevel > 1)
+			|| (self->fb.last_hurt > g_globalvars.time - 1.0f))
+	{
+		return false;
+	}
+	zone = KHV_ZoneOfPoint(self->s.v.origin);
+
+	// B4 guard: window live/opening, armed+, in the quad zone, not the taker,
+	// at guard distance -> hold a short watch on the east entry (rolling
+	// 2.5 s holds so the take still releases everyone).
+	if (guard_on && KHV_QuadWindowSoon(10))
+	{
+		gedict_t *q = KHV_QuadItem();
+
+		KHV_QuadTick();
+		if (q && (zone == KHZ_QUAD) && (KBot_StackClass(self) >= KBM_ARMED)
+				&& (self != khv_quad_near[0]))
+		{
+			vec3_t d;
+			float dist;
+
+			VectorSubtract(self->s.v.origin, q->s.v.origin, d);
+			dist = vlen(d);
+			if ((dist > 280) && (dist < 620))
+			{
+				h->until = g_globalvars.time + 2.5f;
+				h->cool = h->until + 0.5f;
+				h->yaw = KHV_YawTo(self, khv_zone_entry[KHZ_QUAD]);
+				KDLog_Play(self, "harvest", "guard", "quadwindow");
+				VectorClear(direction);
+				*jumping = false;
+				self->fb.desired_angle[0] = 0;
+				self->fb.desired_angle[1] = h->yaw;
+
+				return true;
+			}
+		}
+
+		return false;	// own window, not guarding: converge, never post
+	}
+
+	// B5 posting: control class with RL+rockets, inside the bound zone,
+	// never during a quad window (converge instead)
+	if (hold_on && !KHV_QuadWindowSoon(10) && (KBot_StackClass(self) == KBM_CONTROL)
+			&& ((int)self->s.v.items & IT_ROCKET_LAUNCHER)
+			&& (self->s.v.ammo_rockets > 0)
+			&& zone && (khv_bound[idx] == zone))
+	{
+		gedict_t *goal = &g_edicts[(int)self->s.v.goalentity];
+		qbool timing_watch = false;
+		qbool ambush = false;
+		float yaw = 0;
+		int i;
+
+		// (a) timing watch: standing at an item whose respawn is 2-15 s out
+		// (the vanilla wait already stops the bot -- we lock the look on the
+		// ENTRY line instead of the item)
+		if (goal && (goal->ct != ctPlayer) && goal->fb.goal_respawn_time
+				&& (goal->fb.goal_respawn_time > g_globalvars.time + 2)
+				&& (goal->fb.goal_respawn_time < g_globalvars.time + 15))
+		{
+			vec3_t d;
+
+			VectorSubtract(self->s.v.origin, goal->s.v.origin, d);
+			if (vlen(d) < 150)
+			{
+				timing_watch = true;
+				yaw = KHV_YawTo(self, khv_zone_entry[zone]);
+			}
+		}
+		// (b) ambush: a known enemy within 800 qu -- pre-place the aim on him
+		if (!timing_watch)
+		{
+			KHV_RefreshEnemies(self);
+			for (i = 0; i < khv_en_count; i++)
+			{
+				vec3_t d;
+
+				VectorSubtract(khv_en[i].pos, self->s.v.origin, d);
+				d[2] = 0;
+				if (vlen(d) < 800)
+				{
+					ambush = true;
+					yaw = vectoyaw(d);
+					break;
+				}
+			}
+		}
+		if (timing_watch || ambush)
+		{
+			h->until = g_globalvars.time + 3.0f + g_random() * 3.0f;	// 3-6 s
+			h->cool = h->until + 8.0f;
+			h->yaw = yaw;
+			KDLog_Play(self, "harvest", timing_watch ? "hold-timing" : "hold-ambush", "");
+			VectorClear(direction);
+			*jumping = false;
+			self->fb.desired_angle[0] = 0;
+			self->fb.desired_angle[1] = h->yaw;
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
 #endif // BOT_SUPPORT

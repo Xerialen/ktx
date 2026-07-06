@@ -61,6 +61,8 @@ float KBot_HarvestWaterPenalty(gedict_t *p); // B1: EvalPath water-marker cost
 float KBot_HarvestThreatPenalty(gedict_t *self, gedict_t *m); // B2: place threat
 void KBot_HarvestDeathEvent(gedict_t *targ); // B2: death-memory feed (Killed)
 float KBot_HarvestAnchorShim(gedict_t *self, gedict_t *goal, float goal_time); // B3
+float KBot_HarvestQuadShim(gedict_t *self, gedict_t *goal, float goal_time);   // B4
+qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction); // B4/B5
 
 // ---- KDLOG decision-log emitter (kbot_dlog.c) ----
 // Structured tactical-decision telemetry (G_cprint "KDLOG ..." lines into

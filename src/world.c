@@ -1095,9 +1095,14 @@ void FirstFrame(void)
 	// memory x known enemy weight x V; enemy-quad markers get max penalty.
 	// harvest_anchor = B3 zone-binding goal_time factor for the ANKARE (spec
 	// start 1.4; other armed+ bots get half the inflation; <=1 off).
+	// harvest_quad = B4 convergence (0/1); harvest_guard = B4 guard stance
+	// (0/1); harvest_hold = B5 posting (0/1).
 	RegisterCvarEx("k_kbot_harvest_route", "0");
 	RegisterCvarEx("k_kbot_harvest_threat", "0");
 	RegisterCvarEx("k_kbot_harvest_anchor", "0");
+	RegisterCvarEx("k_kbot_harvest_quad", "0");
+	RegisterCvarEx("k_kbot_harvest_guard", "0");
+	RegisterCvarEx("k_kbot_harvest_hold", "0");
 
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).

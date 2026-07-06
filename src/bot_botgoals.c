@@ -179,6 +179,10 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 		// weapons are exempt (objective rotation).
 		goal_time = KBot_HarvestAnchorShim(self, goal_entity, goal_time);
 
+		// HARVEST B4 (kbot-only, k_kbot_harvest_quad): the two nearest armed+
+		// kbots see the quad goal deflated while the window opens (T-10 s).
+		goal_time = KBot_HarvestQuadShim(self, goal_entity, goal_time);
+
 		if (self->fb.goal_enemy_repel)
 		{
 			// Time for our enemy to get there
