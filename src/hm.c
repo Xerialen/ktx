@@ -1322,6 +1322,14 @@ static void HMode_TimingCalls(gedict_t *self, hm_bot_t *slot)
 			continue; // mega: not in the directive's weapons/armors/powerups
 		}
 
+		if (HMode_ItemShortName(item) == item->classname)
+		{
+			// no dialect short name (plain nailgun etc.): the 142-clan
+			// vocabulary never times these and receivers cannot parse
+			// "weapon_nailgun on 33" -- stay silent
+			continue;
+		}
+
 		remaining = b->respawn_at - g_globalvars.time;
 
 		if ((remaining > HMODE_TIMING_LEAD) || (remaining <= 0.5f))
