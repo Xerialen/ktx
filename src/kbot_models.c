@@ -318,8 +318,12 @@ static float kbm_role_mul[4][9] = {
 	/* none    */ {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},
 	/* ankare  */ {1.40f, 1.30f, 1.10f, 0.60f, 0.50f, 0.90f, 1.60f, 1.20f, 1.0f},
 	/* flytare */ {1.00f, 1.00f, 1.00f, 1.00f, 0.80f, 1.00f, 1.40f, 1.30f, 1.0f},
-	/* ekonom  */ {0.70f, 0.70f, 1.00f, 1.80f, 1.40f, 1.20f, 0.40f, 1.40f, 1.0f},
+	/* ekonom  */ {0.90f, 0.90f, 1.00f, 1.80f, 1.40f, 1.20f, 0.40f, 1.40f, 1.0f},
 };
+// v1.1 (qual round 1 = 1/6, mean -16.8): ekonom armor/mega 0.7 -> 0.9 --
+// damping armor on half the team donated the armor economy to the frogs;
+// elite spawn-class armor share (8%) is a route-priority fact, not a
+// leave-armor-on-the-floor doctrine.
 
 static float KBot_KaptenScaleGoal(gedict_t *self, gedict_t *goal, float desire)
 {
@@ -350,8 +354,11 @@ static float KBot_KaptenScaleGoal(gedict_t *self, gedict_t *goal, float desire)
 			m *= (role == KBR_EKONOM) ? 0.5f : 1.6f;
 		}
 	}
-	// anchors never dive; economy bots may (class-conditioned water doctrine)
-	if ((role != KBR_EKONOM) && (KBot_StackClass(self) >= KBM_ARMED)
+	// class-conditioned water doctrine for EVERY role (v1.1): the corpus is
+	// unambiguous -- armed+ water share is 0-3% for all four elite players
+	// REGARDLESS of role; zero ran his water routes as spawn, never with the
+	// team's RL in hand. Role only decides how eagerly the poor classes dive.
+	if ((KBot_StackClass(self) >= KBM_ARMED)
 			&& (trap_pointcontents(PASSVEC3(goal->s.v.origin)) == CONTENT_WATER))
 	{
 		return 0;
