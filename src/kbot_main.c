@@ -813,6 +813,15 @@ static void GJ_Seat(gedict_t *self, int lane)
 	// Back the spawn off toward the takeoff side so the bot runs onto the lip.
 	org[0] -= fwd[0] * runup;
 	org[1] -= fwd[1] * runup;
+	// E15 lane 7: four trial bots seated on ONE point stack allsolid (pseed2
+	// traj: vel zeroed frame 1, the jump never executes). Give each slot its
+	// own y-row on the shelf (measured standable band y ~685-780).
+	if (lane == 7)
+	{
+		int slot = NUM_FOR_EDICT(self) - 1;
+
+		org[1] = 700 + (slot % 4) * 24;
+	}
 
 	// E12 AIR-SEAT (lane 4, k_kbot_gj_airseat, default on): seed the bot
 	// ALREADY AIRBORNE with the hop's vz=+270 and the exact v0. The grounded
@@ -2850,6 +2859,10 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 	{
 		if (ISDEAD(self))
 		{
+			// E15: leave no live trial behind -- a respawned bot otherwise
+			// CONTINUES the old CROSS from its spawn point (pseed1: constant
+			// FAIL loops at the spawn, never re-seated).
+			gj_state[slot] = GJ_IDLE;
 			return false;
 		}
 		cool = cvar("k_kbot_gj_cool");
