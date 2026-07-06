@@ -238,7 +238,7 @@ float KBot_DialGoalShim(gedict_t *self, gedict_t *goal, float goal_time)
 	float hoard = KBot_Dial(self, KDIAL_HOARD);
 	float adhere = KBot_Dial(self, KDIAL_ADHERE);
 	float share = KBot_Dial(self, KDIAL_SHARE);
-	float t0 = goal_time;
+	float m_hoard = 1, m_adhere = 1, m_share = 1;
 	int cat;
 	char detail[96];
 
@@ -257,7 +257,7 @@ float KBot_DialGoalShim(gedict_t *self, gedict_t *goal, float goal_time)
 	// cadence scaling lives in KBot_DialHoldScale).
 	if ((hoard >= 0) && ((cat == KBC_MEGA) || (cat == KBC_ARMOR)))
 	{
-		goal_time *= 1.2f - 0.4f * hoard;
+		m_hoard = 1.2f - 0.4f * hoard;
 	}
 
 	// D3 adhere: compactness -- goals near a living teammate look closer,
@@ -283,7 +283,7 @@ float KBot_DialGoalShim(gedict_t *self, gedict_t *goal, float goal_time)
 		}
 		if (best < 999999)
 		{
-			goal_time *= (best < 700) ? (1.0f - 0.3f * adhere) : (1.0f + 0.3f * adhere);
+			m_adhere = (best < 700) ? (1.0f - 0.3f * adhere) : (1.0f + 0.3f * adhere);
 		}
 	}
 
@@ -312,20 +312,32 @@ float KBot_DialGoalShim(gedict_t *self, gedict_t *goal, float goal_time)
 					|| (p->isBot && ((int)p->s.v.goalentity == NUM_FOR_EDICT(goal)));
 			if (wants)
 			{
-				goal_time *= 1.0f + 0.8f * share;
+				m_share = 1.0f + 0.8f * share;
 				break;
 			}
 		}
 	}
 
-	if (goal_time != t0)
+	// one log line per dial whose OWN multiplier moved (attribution: the
+	// first d-mid arm saturated the throttle by booking D3's constant
+	// effect on the hoard/share phases)
+	if (m_hoard != 1)
 	{
-		snprintf(detail, sizeof(detail), "cat=%d;mult=%.2f;h=%.1f;ad=%.1f;sh=%.1f",
-					cat, goal_time / t0, hoard, adhere, share);
-		KDial_Log(self, (goal_time > t0) ? KDIAL_SHARE : KDIAL_HOARD, detail);
+		snprintf(detail, sizeof(detail), "cat=%d;mult=%.2f", cat, m_hoard);
+		KDial_Log(self, KDIAL_HOARD, detail);
+	}
+	if (m_adhere != 1)
+	{
+		snprintf(detail, sizeof(detail), "cat=%d;mult=%.2f", cat, m_adhere);
+		KDial_Log(self, KDIAL_ADHERE, detail);
+	}
+	if (m_share != 1)
+	{
+		snprintf(detail, sizeof(detail), "cat=%d;mult=%.2f", cat, m_share);
+		KDial_Log(self, KDIAL_SHARE, detail);
 	}
 
-	return goal_time;
+	return goal_time * m_hoard * m_adhere * m_share;
 }
 
 // ---------------------------------------------------------------------------
