@@ -155,7 +155,7 @@ void BotClientEntersEvent(gedict_t *self, gedict_t *spawn_pos)
 	self->blocked = (func_t) BotBlocked;
 	self->fb.random_desired_weapon_impulse = tot_mode_enabled() && !FrogbotWeapon() ? i_rnd(2, 8) : 0;
 
-	HM_ClientEnters(self);
+	HMode_ClientEnters(self);
 }
 
 qbool BotUsingCorrectWeapon(gedict_t *self)
@@ -362,7 +362,7 @@ void BotPreThink(gedict_t *self)
 			PlayerReady(true);
 		}
 
-		HM_Frame(self);
+		HMode_Frame(self);
 
 		if (teamplay && (match_in_progress == 2))
 		{

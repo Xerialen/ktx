@@ -24,6 +24,9 @@
  */
 
 #include "g_local.h"
+#ifdef BOT_SUPPORT
+#include "hm.h"
+#endif
 
 #ifdef BOT_SUPPORT
 #endif
@@ -1325,6 +1328,10 @@ void SecondFrame(void)
 	LocationInitialise();
 
 	HM_restore_spawns();
+
+#ifdef BOT_SUPPORT
+	HMode_MapInit(); // mm2humanmode: item edicts are new each map
+#endif
 }
 
 void CheckSvUnlock(void)

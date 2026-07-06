@@ -24,6 +24,9 @@
  */
 
 #include "g_local.h"
+#ifdef BOT_SUPPORT
+#include "hm.h"
+#endif
 
 void SP_item_artifact_invisibility(void);
 void SP_item_artifact_super_damage(void);
@@ -53,6 +56,10 @@ static void ItemTaken(gedict_t *item, gedict_t *player)
 	{
 		self->fb.item_taken(item, player);
 	}
+
+	// mm2humanmode: distribute the pickup over the perception channels
+	// (self / seen / heard) for humanmode bots' item beliefs.
+	HMode_ItemTaken(item, player);
 #endif
 }
 
@@ -73,6 +80,10 @@ void SUB_regen(void)
 	{
 		self->fb.item_respawned(self);
 	}
+
+	// mm2humanmode: the respawn sound/sight tells nearby humanmode bots
+	// the item is up.
+	HMode_ItemRespawned(self);
 #endif
 }
 

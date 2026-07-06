@@ -2349,7 +2349,7 @@ static frogbot_cmd_t std_commands[] =
 		{ "skill", FrogbotsSetSkill, "Set skill level for next bot added" },
 		{ "addbot", FrogbotsAddbot_f, "Adds a bot. Skill & team optional" },
 		{ "addkbot", FrogbotsAddKbot_f, "Adds a komodobot. Skill & team optional" },
-		{ "hm", HM_BotCmd, "Humanmode: hm [<slot|all> <on|off|inherit>]" },
+		{ "hm", HMode_BotCmd, "Humanmode: hm [<slot|all> <on|off|inherit>]" },
 		{ "fill", FrogbotsFillServer, "Fills the server (max 8 bots at a time)" },
 		{ "removebot", FrogbotsRemovebot_f, "Removes a single bot" },
 		{ "removeall", FrogbotsRemoveAll, "Removes all bots from server" },

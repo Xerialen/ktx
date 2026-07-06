@@ -12,6 +12,7 @@
 
 #include "g_local.h"
 #include "kbot.h"
+#include "hm.h"
 
 //static float best_score;
 #define BACKPACK_CLASSNAME "backpack"
@@ -104,7 +105,10 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 		}
 
 		// If item isn't going to respawn before match end
-		if (match_end_time && goal_entity->fb.goal_respawn_time > match_end_time)
+		// (humanmode bots judge from their perception-based belief, not the
+		// engine's respawn clock -- HMode_ItemRespawnTime falls through to the
+		// engine value for stock bots)
+		if (match_end_time && HMode_ItemRespawnTime(self, goal_entity) > match_end_time)
 		{
 			goal_entity->fb.saved_goal_desire = 0;
 
@@ -156,7 +160,7 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 			return;
 		}
 
-		goal_entity->fb.saved_respawn_time = (goal_entity->fb.goal_respawn_time - g_globalvars.time)
+		goal_entity->fb.saved_respawn_time = (HMode_ItemRespawnTime(self, goal_entity) - g_globalvars.time)
 				+ (goal_time * self->fb.skill.prediction_error * g_random());
 		if (goal_entity->fb.G_ == 18)
 		{

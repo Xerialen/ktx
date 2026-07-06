@@ -22,14 +22,15 @@
 
 #ifdef BOT_SUPPORT
 
-#define HM_VERSION "hm-0.2.0-tmmodel"
+#define HMODE_VERSION "hm-0.2.0-tmmodel"
 
 // Knowledge sources, in rising order of directness. Kept on every snapshot
 // so the trust/merge policy (told vs seen) stays explicit.
-#define HM_SRC_NONE     0
-#define HM_SRC_KILLFEED 1	// read in the frag feed (respawned somewhere)
-#define HM_SRC_TOLD     2	// teamsay report (S5)
-#define HM_SRC_SEEN     3	// direct line of sight
+#define HMODE_SRC_NONE     0
+#define HMODE_SRC_KILLFEED 1	// read in the frag feed (respawned somewhere)
+#define HMODE_SRC_HEARD    2	// pickup/respawn sound in earshot, no LOS
+#define HMODE_SRC_TOLD     3	// teamsay report (S5)
+#define HMODE_SRC_SEEN     4	// direct line of sight (covers own pickups)
 
 // What a humanmode bot believes about one teammate. While the teammate is
 // in view the snapshot is refreshed every scan (fresh=true, the live
@@ -53,49 +54,66 @@ typedef struct hm_tm_s
 // Read-only view of what `bot` currently believes about `mate`.
 // NULL when there is no information (or humanmode inactive). This is THE
 // sanctioned way for decision code to ask about teammates when
-// HM_Active(bot) && HM_CapTmInfo() -- direct entity reads are omniscience.
-const hm_tm_t* HM_TeammateInfo(gedict_t *bot, gedict_t *mate);
+// HMode_Active(bot) && HMode_CapTmInfo() -- direct entity reads are omniscience.
+const hm_tm_t* HMode_TeammateInfo(gedict_t *bot, gedict_t *mate);
 
 // States for fb.hm (per-bot override; memset-0 default = inherit global)
-#define HM_INHERIT 0	// follow cvar k_hm
-#define HM_ON      1	// humanmode forced on for this bot
-#define HM_OFF     2	// humanmode forced off for this bot
+#define HMODE_INHERIT 0	// follow cvar k_hm
+#define HMODE_ON      1	// humanmode forced on for this bot
+#define HMODE_OFF     2	// humanmode forced off for this bot
 
 // True when humanmode governs this bot right now (per-bot override first,
 // then the global k_hm cvar). False for non-bots and world.
-qbool HM_Active(gedict_t *bot);
+qbool HMode_Active(gedict_t *bot);
 
-// Capability gates: effective only when HM_Active(). Each reads its cvar
+// Capability gates: effective only when HMode_Active(). Each reads its cvar
 // with default ON so a bare "k_hm 1" enables the full model.
-qbool HM_CapEmit(void);		// k_hm_emit
-qbool HM_CapParse(void);	// k_hm_parse
-qbool HM_CapTmInfo(void);	// k_hm_tminfo
-qbool HM_CapItemInfo(void);	// k_hm_iteminfo
+qbool HMode_CapEmit(void);		// k_hm_emit
+qbool HMode_CapParse(void);	// k_hm_parse
+qbool HMode_CapTmInfo(void);	// k_hm_tminfo
+qbool HMode_CapItemInfo(void);	// k_hm_iteminfo
 
 // "botcmd hm ..." handler: no args = show status; "<slot|all> <on|off|inherit>"
 // sets the per-bot override.
-void HM_BotCmd(void);
+void HMode_BotCmd(void);
+
+// Once per map (SecondFrame): item edicts are recreated on map load, so the
+// item registry and all per-bot humanmode state reset here.
+void HMode_MapInit(void);
 
 // Per-frame entry, called from BotPreThink for bots. Handles one-time
 // activation (3-letter k_nick tag, console log) and, once active, the
 // emit scheduler (S4).
-void HM_Frame(gedict_t *self);
+void HMode_Frame(gedict_t *self);
 
 // Player (re)spawn hook: resets the bot's own perception state and queues
 // the fresh-spawn report (S2/S4).
-void HM_ClientEnters(gedict_t *self);
+void HMode_ClientEnters(gedict_t *self);
 
-// Item pickup event: the taker knows (source=self), PVS-visible bystanders
-// in humanmode learn it too (source=seen); everyone else stays ignorant (S3).
-void HM_ItemTaken(gedict_t *item, gedict_t *player);
+// Item pickup event: the taker knows (source=self), bystanders with line of
+// sight learn it too (source=seen), bots in earshot of the pickup sound get
+// the timing anchor without the position confidence (source=heard, the #250
+// div1 marker); everyone else stays ignorant (S3).
+void HMode_ItemTaken(gedict_t *item, gedict_t *player);
+
+// Item respawn event (SUB_regen): the respawn sound is a real perception
+// cue -- humanmode bots that see or hear it learn the item is up (S3).
+void HMode_ItemRespawned(gedict_t *item);
+
+// The humanmode replacement for reading item->fb.goal_respawn_time (engine
+// truth) in goal evaluation: returns the bot's BELIEF about when this item
+// respawns. Unknown = 0 ("could be up, go look"). Falls through to the
+// engine value when humanmode/k_hm_iteminfo is off or the item is not a
+// tracked major (majors = armors, mega, guns, powerups -- what humans time).
+float HMode_ItemRespawnTime(gedict_t *bot, gedict_t *item);
 
 // Obituary/killfeed event: humanmode teammates of the victim invalidate
 // their held snapshot of the victim (S2).
-void HM_Killfeed(gedict_t *victim, gedict_t *attacker);
+void HMode_Killfeed(gedict_t *victim, gedict_t *attacker);
 
 // Incoming teamsay for a humanmode bot receiver: parse (multi-clan grammar)
 // and update teammate snapshots / item beliefs (S5).
-void HM_ParseTeamsay(gedict_t *receiver, gedict_t *sender, const char *text);
+void HMode_ParseTeamsay(gedict_t *receiver, gedict_t *sender, const char *text);
 
 #endif // BOT_SUPPORT
 

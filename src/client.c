@@ -5151,7 +5151,7 @@ void ClientObituary(gedict_t *targ, gedict_t *attacker)
 #ifdef BOT_SUPPORT
 	// mm2humanmode: the frag feed is on-screen text everyone reads --
 	// humanmode teammates collapse their held snapshot of the victim.
-	HM_Killfeed(targ, attacker);
+	HMode_Killfeed(targ, attacker);
 #endif
 
 	playerheight = Instagib_Obituary(targ, attacker);

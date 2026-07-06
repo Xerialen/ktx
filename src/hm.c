@@ -2,7 +2,7 @@
  hm.c -- mm2humanmode core (S1 skeleton).
 
  See hm.h for the model. This stage wires the toggles only:
- - HM_Active(): per-bot fb.hm override, else global cvar k_hm
+ - HMode_Active(): per-bot fb.hm override, else global cvar k_hm
  - capability gates (k_hm_emit / k_hm_parse / k_hm_tminfo / k_hm_iteminfo)
  - "botcmd hm" per-bot control
  - one-time activation: 3-letter k_nick tag (the Book self-prefix
@@ -16,6 +16,31 @@
 #include "g_local.h"
 #include "hm.h"
 
+// ---- item-belief types (S3) ----
+
+// Majors only: armors, mega, guns, powerups -- the items humans actually
+// time. Minor items (shards, small health, ammo boxes) fall through to the
+// engine value; they respawn in seconds and nobody times them (documented
+// realism leak, see plan).
+#define HMODE_MAX_ITEMS 64
+
+// Audible range for pickup/respawn sounds without line of sight. QW sounds
+// at ATTN_NORM are practically inaudible beyond ~1000 units.
+#define HMODE_HEARD_RADIUS 1000.0f
+
+typedef struct hm_item_belief_s
+{
+	int source;			// HM_SRC_* (SEEN covers self-pickup too); NONE = never witnessed
+	float taken_time;	// when the bot believes it was taken
+	float respawn_at;	// when the bot believes it comes back (0 = assume up)
+} hm_item_belief_t;
+
+// Global registry: stable index per major-item entity for the per-bot
+// belief arrays. Item edicts persist for the whole map, so registration is
+// lazy and never invalidated.
+static gedict_t *hm_item_ents[HMODE_MAX_ITEMS];
+static int hm_item_count;
+
 // Per-bot humanmode runtime state, indexed by entity number (1..MAX_CLIENTS).
 // Kept out of fb_entvars_t: every edict carries fb, only client slots need
 // this, and the QVM bss budget is tight.
@@ -25,11 +50,12 @@ typedef struct hm_bot_s
 	char tag[4];					// 3-letter lowercase self-prefix
 	float next_tm_scan;				// visibility-scan throttle (engine trap)
 	hm_tm_t tm[MAX_CLIENTS + 1];	// beliefs about teammates, by entity num
+	hm_item_belief_t items[HMODE_MAX_ITEMS];	// beliefs about major items
 } hm_bot_t;
 
 static hm_bot_t hm_bots[MAX_CLIENTS + 1];
 
-static hm_bot_t* HM_Slot(gedict_t *bot)
+static hm_bot_t* HMode_Slot(gedict_t *bot)
 {
 	int entity = NUM_FOR_EDICT(bot);
 
@@ -41,19 +67,19 @@ static hm_bot_t* HM_Slot(gedict_t *bot)
 	return &hm_bots[entity];
 }
 
-qbool HM_Active(gedict_t *bot)
+qbool HMode_Active(gedict_t *bot)
 {
 	if (!bot || !bot->isBot)
 	{
 		return false;
 	}
 
-	if (bot->fb.hm == HM_ON)
+	if (bot->fb.hm == HMODE_ON)
 	{
 		return true;
 	}
 
-	if (bot->fb.hm == HM_OFF)
+	if (bot->fb.hm == HMODE_OFF)
 	{
 		return false;
 	}
@@ -63,7 +89,7 @@ qbool HM_Active(gedict_t *bot)
 
 // Capability cvars default ON when unset, so "k_hm 1" alone gives the full
 // model. cvar() returns 0 for unset cvars, hence the explicit string check.
-static qbool HM_CapCvar(const char *name)
+static qbool HMode_CapCvar(const char *name)
 {
 	char buf[16];
 
@@ -77,24 +103,24 @@ static qbool HM_CapCvar(const char *name)
 	return cvar(name) != 0;
 }
 
-qbool HM_CapEmit(void)
+qbool HMode_CapEmit(void)
 {
-	return HM_CapCvar("k_hm_emit");
+	return HMode_CapCvar("k_hm_emit");
 }
 
-qbool HM_CapParse(void)
+qbool HMode_CapParse(void)
 {
-	return HM_CapCvar("k_hm_parse");
+	return HMode_CapCvar("k_hm_parse");
 }
 
-qbool HM_CapTmInfo(void)
+qbool HMode_CapTmInfo(void)
 {
-	return HM_CapCvar("k_hm_tminfo");
+	return HMode_CapCvar("k_hm_tminfo");
 }
 
-qbool HM_CapItemInfo(void)
+qbool HMode_CapItemInfo(void)
 {
-	return HM_CapCvar("k_hm_iteminfo");
+	return HMode_CapCvar("k_hm_iteminfo");
 }
 
 // ---- 3-letter self-prefix tag ----
@@ -102,7 +128,7 @@ qbool HM_CapItemInfo(void)
 // Derive the tag from the bot name: skip the "kb:" identity prefix and any
 // non-letters, take the first three letters lowercased. Falls back to
 // "b<slot>" style if the name yields fewer than 3 letters.
-static void HM_DeriveTag(gedict_t *bot, char *out, int outsize)
+static void HMode_DeriveTag(gedict_t *bot, char *out, int outsize)
 {
 	const char *src = bot->netname;
 	int i = 0;
@@ -146,7 +172,7 @@ static void HM_DeriveTag(gedict_t *bot, char *out, int outsize)
 // Make the tag unique among same-team humanmode bots: on collision, replace
 // the last letter with the slot digit (Book precedent: stepcop tags "nig" --
 // the tag needs to be stable and short, not derived from the nick).
-static void HM_UniqueTag(gedict_t *bot, char *tag)
+static void HMode_UniqueTag(gedict_t *bot, char *tag)
 {
 	int j;
 
@@ -165,7 +191,7 @@ static void HM_UniqueTag(gedict_t *bot, char *tag)
 			continue;
 		}
 
-		oslot = HM_Slot(other);
+		oslot = HMode_Slot(other);
 
 		if (oslot && oslot->active_logged && streq(oslot->tag, tag))
 		{
@@ -179,24 +205,24 @@ static void HM_UniqueTag(gedict_t *bot, char *tag)
 // One-time humanmode activation for a bot: derive + stamp the k_nick tag
 // (TeamplayMM2 prefixes k_nick to every teamsay, which is exactly the Book
 // convention) and log to the server console for run evidence.
-static void HM_Activate(gedict_t *self)
+static void HMode_Activate(gedict_t *self)
 {
-	hm_bot_t *slot = HM_Slot(self);
+	hm_bot_t *slot = HMode_Slot(self);
 
 	if (!slot || slot->active_logged)
 	{
 		return;
 	}
 
-	HM_DeriveTag(self, slot->tag, sizeof(slot->tag));
-	HM_UniqueTag(self, slot->tag);
+	HMode_DeriveTag(self, slot->tag, sizeof(slot->tag));
+	HMode_UniqueTag(self, slot->tag);
 	trap_SetBotUserInfo(NUM_FOR_EDICT(self), "k_nick", slot->tag, 0);
 	slot->active_logged = true;
 
 	G_cprint("[hm] slot=%d name=%s tag=%s version=%s emit=%d parse=%d tminfo=%d iteminfo=%d\n",
-				NUM_FOR_EDICT(self), self->netname, slot->tag, HM_VERSION,
-				(int)HM_CapEmit(), (int)HM_CapParse(), (int)HM_CapTmInfo(),
-				(int)HM_CapItemInfo());
+				NUM_FOR_EDICT(self), self->netname, slot->tag, HMODE_VERSION,
+				(int)HMode_CapEmit(), (int)HMode_CapParse(), (int)HMode_CapTmInfo(),
+				(int)HMode_CapItemInfo());
 }
 
 // ---- teammate-state model (S2) ----
@@ -206,7 +232,7 @@ static void HM_Activate(gedict_t *self)
 // which is also the perception definition the stock enemypwr spotting uses:
 // PVS filter first (visible_to), then eye-to-body tracelines. No view cone,
 // consistent with the enemy-perception model.
-static qbool HM_TraceVisible(gedict_t *viewer, vec3_t point)
+static qbool HMode_TraceVisible(gedict_t *viewer, vec3_t point)
 {
 	traceline(PASSVEC3(viewer->s.v.origin), PASSVEC3(point), true, viewer);
 
@@ -214,11 +240,11 @@ static qbool HM_TraceVisible(gedict_t *viewer, vec3_t point)
 			&& !(g_globalvars.trace_inopen && g_globalvars.trace_inwater);
 }
 
-static qbool HM_EntityVisibleTo(gedict_t *viewer, gedict_t *ent)
+static qbool HMode_EntityVisibleTo(gedict_t *viewer, gedict_t *ent)
 {
 	vec3_t vec;
 
-	if (HM_TraceVisible(viewer, ent->s.v.origin))
+	if (HMode_TraceVisible(viewer, ent->s.v.origin))
 	{
 		return true;
 	}
@@ -226,22 +252,22 @@ static qbool HM_EntityVisibleTo(gedict_t *viewer, gedict_t *ent)
 	VectorCopy(ent->s.v.origin, vec);
 	vec[2] = ent->s.v.absmin[2];
 
-	if (HM_TraceVisible(viewer, vec))
+	if (HMode_TraceVisible(viewer, vec))
 	{
 		return true;
 	}
 
 	vec[2] = ent->s.v.absmax[2];
 
-	return HM_TraceVisible(viewer, vec);
+	return HMode_TraceVisible(viewer, vec);
 }
 
 // Refresh a snapshot from the live entity. Only ever called when the bot
 // can actually see the teammate -- this is the single place where humanmode
 // touches another player's real state, and sight is the license for it.
-static void HM_TmRefresh(hm_tm_t *tm, gedict_t *mate)
+static void HMode_TmRefresh(hm_tm_t *tm, gedict_t *mate)
 {
-	tm->source = HM_SRC_SEEN;
+	tm->source = HMODE_SRC_SEEN;
 	tm->fresh = true;
 	tm->loc_known = true;
 	tm->time = g_globalvars.time;
@@ -256,10 +282,10 @@ static void HM_TmRefresh(hm_tm_t *tm, gedict_t *mate)
 // Periodic teammate visibility scan. Visible teammates get a fresh snapshot;
 // everyone else keeps their held snapshot untouched (fresh drops to false).
 // Throttled like the stock powerup spotting to keep trap_VisibleTo cheap.
-static void HM_TmScan(gedict_t *self)
+static void HMode_TmScan(gedict_t *self)
 {
 	byte visible[MAX_CLIENTS];
-	hm_bot_t *slot = HM_Slot(self);
+	hm_bot_t *slot = HMode_Slot(self);
 	gedict_t *mate;
 	int j;
 
@@ -287,9 +313,9 @@ static void HM_TmScan(gedict_t *self)
 			continue;
 		}
 
-		if (ISLIVE(mate) && visible[j - 1] && HM_EntityVisibleTo(self, mate))
+		if (ISLIVE(mate) && visible[j - 1] && HMode_EntityVisibleTo(self, mate))
 		{
-			HM_TmRefresh(tm, mate);
+			HMode_TmRefresh(tm, mate);
 		}
 		else
 		{
@@ -298,17 +324,17 @@ static void HM_TmScan(gedict_t *self)
 	}
 }
 
-const hm_tm_t* HM_TeammateInfo(gedict_t *bot, gedict_t *mate)
+const hm_tm_t* HMode_TeammateInfo(gedict_t *bot, gedict_t *mate)
 {
 	hm_bot_t *slot;
 	int m;
 
-	if (!HM_Active(bot) || !mate)
+	if (!HMode_Active(bot) || !mate)
 	{
 		return NULL;
 	}
 
-	slot = HM_Slot(bot);
+	slot = HMode_Slot(bot);
 	m = NUM_FOR_EDICT(mate);
 
 	if (!slot || (m < 1) || (m > MAX_CLIENTS))
@@ -316,7 +342,7 @@ const hm_tm_t* HM_TeammateInfo(gedict_t *bot, gedict_t *mate)
 		return NULL;
 	}
 
-	if (slot->tm[m].source == HM_SRC_NONE)
+	if (slot->tm[m].source == HMODE_SRC_NONE)
 	{
 		return NULL;
 	}
@@ -324,55 +350,260 @@ const hm_tm_t* HM_TeammateInfo(gedict_t *bot, gedict_t *mate)
 	return &slot->tm[m];
 }
 
-// ---- hooks ----
+// ---- item beliefs (S3) ----
 
-void HM_Frame(gedict_t *self)
+// Fixed respawn duration per major item, in seconds. These are the "fixed
+// parameters" a human just knows after learning the game (#256 §0): armors
+// 20, guns 30 (dmm1), quad 60, pent/ring 300. Mega is dynamically timed by
+// the engine (5s after the carrier drops below 100hp) which a human cannot
+// know exactly -- 20s is the human approximation. 0 = not a major item.
+static float HMode_ItemDuration(gedict_t *item)
 {
-	if (!HM_Active(self))
+	const char *cn = item->classname;
+
+	if (!cn || !cn[0])
+	{
+		return 0;
+	}
+
+	if (streq(cn, "item_armor1") || streq(cn, "item_armor2")
+			|| streq(cn, "item_armorInv"))
+	{
+		return 20;
+	}
+
+	if (streq(cn, "item_health") && ((int)item->s.v.spawnflags & H_MEGA))
+	{
+		return 20;
+	}
+
+	if (!strncmp(cn, "weapon_", 7))
+	{
+		return 30;
+	}
+
+	if (streq(cn, "item_artifact_super_damage"))
+	{
+		return 60;
+	}
+
+	if (streq(cn, "item_artifact_invulnerability")
+			|| streq(cn, "item_artifact_invisibility"))
+	{
+		return 300;
+	}
+
+	return 0;
+}
+
+// Stable per-map index for a major item; -1 for non-majors or table
+// overflow (dm3 has ~20 majors, the 64 cap is generous).
+static int HMode_ItemIndex(gedict_t *item, qbool add)
+{
+	int i;
+
+	for (i = 0; i < hm_item_count; i++)
+	{
+		if (hm_item_ents[i] == item)
+		{
+			return i;
+		}
+	}
+
+	if (!add || (hm_item_count >= HMODE_MAX_ITEMS))
+	{
+		return -1;
+	}
+
+	if (HMode_ItemDuration(item) <= 0)
+	{
+		return -1;
+	}
+
+	hm_item_ents[hm_item_count] = item;
+
+	return hm_item_count++;
+}
+
+float HMode_ItemRespawnTime(gedict_t *bot, gedict_t *item)
+{
+	hm_bot_t *slot;
+	int idx;
+
+	if (!bot || !bot->isBot || !HMode_Active(bot) || !HMode_CapItemInfo())
+	{
+		return item->fb.goal_respawn_time;
+	}
+
+	idx = HMode_ItemIndex(item, true);
+
+	if (idx < 0)
+	{
+		// Not a tracked major: engine value (shards and small pickups
+		// respawn in seconds; nobody times them).
+		return item->fb.goal_respawn_time;
+	}
+
+	slot = HMode_Slot(bot);
+
+	if (!slot || (slot->items[idx].source == HMODE_SRC_NONE))
+	{
+		return 0; // never witnessed anything: assume it could be up, go look
+	}
+
+	return slot->items[idx].respawn_at;
+}
+
+// Distribute an item event over the perception channels: SEEN needs PVS+LOS
+// to the item at event time (the taker trivially qualifies), HEARD needs
+// only earshot of the pickup/respawn sound. Everyone else learns nothing.
+static void HMode_ItemEvent(gedict_t *item, gedict_t *taker, float respawn_at)
+{
+	int idx = HMode_ItemIndex(item, true);
+	byte visible[1];
+	vec3_t item_eye, delta;
+	gedict_t *bot;
+	int j;
+
+	if (idx < 0)
 	{
 		return;
 	}
 
-	HM_Activate(self);
+	VectorCopy(item->s.v.origin, item_eye);
+	item_eye[2] += 16;
 
-	if (HM_CapTmInfo())
+	for (j = 1, bot = g_edicts + 1; j <= MAX_CLIENTS; j++, bot++)
 	{
-		HM_TmScan(self);
+		hm_bot_t *slot;
+		int src = HMODE_SRC_NONE;
+
+		if (!bot->isBot || (bot->ct != ctPlayer) || !HMode_Active(bot))
+		{
+			continue;
+		}
+
+		slot = HMode_Slot(bot);
+
+		if (!slot)
+		{
+			continue;
+		}
+
+		if (bot == taker)
+		{
+			src = HMODE_SRC_SEEN; // own pickup: exact, highest confidence
+		}
+		else if (!ISLIVE(bot))
+		{
+			continue; // dead bots perceive nothing
+		}
+		else
+		{
+			visible[0] = 0;
+			visible_to(bot, item, 1, visible);
+
+			if (visible[0] && HMode_TraceVisible(bot, item_eye))
+			{
+				src = HMODE_SRC_SEEN;
+			}
+			else
+			{
+				VectorSubtract(bot->s.v.origin, item->s.v.origin, delta);
+
+				if (vlen(delta) < HMODE_HEARD_RADIUS)
+				{
+					src = HMODE_SRC_HEARD;
+				}
+			}
+		}
+
+		if (src == HMODE_SRC_NONE)
+		{
+			continue;
+		}
+
+		slot->items[idx].source = src;
+		slot->items[idx].taken_time = g_globalvars.time;
+		slot->items[idx].respawn_at = respawn_at;
 	}
 }
 
-void HM_ClientEnters(gedict_t *self)
+void HMode_ItemTaken(gedict_t *item, gedict_t *player)
 {
-	hm_bot_t *slot;
+	float duration = HMode_ItemDuration(item);
 
-	if (!HM_Active(self))
+	if ((duration <= 0) || !player || (player->ct != ctPlayer))
 	{
 		return;
 	}
 
-	slot = HM_Slot(self);
+	HMode_ItemEvent(item, player, g_globalvars.time + duration);
+}
+
+void HMode_ItemRespawned(gedict_t *item)
+{
+	if (HMode_ItemDuration(item) <= 0)
+	{
+		return;
+	}
+
+	// The respawn sound/sight: item is up NOW.
+	HMode_ItemEvent(item, NULL, g_globalvars.time);
+}
+
+// ---- hooks ----
+
+void HMode_MapInit(void)
+{
+	memset(hm_bots, 0, sizeof(hm_bots));
+	memset(hm_item_ents, 0, sizeof(hm_item_ents));
+	hm_item_count = 0;
+}
+
+void HMode_Frame(gedict_t *self)
+{
+	if (!HMode_Active(self))
+	{
+		return;
+	}
+
+	HMode_Activate(self);
+
+	if (HMode_CapTmInfo())
+	{
+		HMode_TmScan(self);
+	}
+}
+
+void HMode_ClientEnters(gedict_t *self)
+{
+	hm_bot_t *slot;
+
+	if (!HMode_Active(self))
+	{
+		return;
+	}
+
+	slot = HMode_Slot(self);
 
 	if (slot && (match_in_progress != 2))
 	{
 		// Pre-match (re)spawn: clean knowledge baseline for the match.
 		// Mid-match respawns keep the bot's memory -- humans do.
 		memset(slot->tm, 0, sizeof(slot->tm));
+		memset(slot->items, 0, sizeof(slot->items));
 		slot->next_tm_scan = 0;
 	}
 
 	// S4: queue the fresh-spawn report ("0/100 sg {loc}") here.
 }
 
-void HM_ItemTaken(gedict_t *item, gedict_t *player)
-{
-	// S3: taker + PVS witnesses update item beliefs.
-}
-
 // Every player reads the frag feed, so a teammate's death is public
 // knowledge: the held snapshot collapses to "respawned: 0/100 sg, location
 // unknown". The gap usually closes within seconds -- the fresh-spawn report
 // ("0/100 sg {loc}") is a real, frequent template (1,082 in the Book corpus).
-void HM_Killfeed(gedict_t *victim, gedict_t *attacker)
+void HMode_Killfeed(gedict_t *victim, gedict_t *attacker)
 {
 	int j, v;
 	gedict_t *bot;
@@ -400,12 +631,12 @@ void HM_Killfeed(gedict_t *victim, gedict_t *attacker)
 			continue;
 		}
 
-		if (!HM_Active(bot) || !HM_CapTmInfo())
+		if (!HMode_Active(bot) || !HMode_CapTmInfo())
 		{
 			continue;
 		}
 
-		slot = HM_Slot(bot);
+		slot = HMode_Slot(bot);
 
 		if (!slot)
 		{
@@ -414,7 +645,7 @@ void HM_Killfeed(gedict_t *victim, gedict_t *attacker)
 
 		tm = &slot->tm[v];
 		memset(tm, 0, sizeof(*tm));
-		tm->source = HM_SRC_KILLFEED;
+		tm->source = HMODE_SRC_KILLFEED;
 		tm->time = g_globalvars.time;
 		tm->health = 100;
 		tm->armor = 0;
@@ -423,14 +654,14 @@ void HM_Killfeed(gedict_t *victim, gedict_t *attacker)
 	}
 }
 
-void HM_ParseTeamsay(gedict_t *receiver, gedict_t *sender, const char *text)
+void HMode_ParseTeamsay(gedict_t *receiver, gedict_t *sender, const char *text)
 {
 	// S5: multi-clan grammar -> teammate snapshots / item beliefs.
 }
 
 // ---- botcmd hm ----
 
-static void HM_PrintStatus(void)
+static void HMode_PrintStatus(void)
 {
 	int j, printed = 0;
 
@@ -447,11 +678,11 @@ static void HM_PrintStatus(void)
 			continue;
 		}
 
-		slot = HM_Slot(bot);
+		slot = HMode_Slot(bot);
 		G_sprint(self, 2, "  slot %2d %-16s %s%s%s\n", j, bot->netname,
-					(bot->fb.hm == HM_ON) ? "on" :
-					(bot->fb.hm == HM_OFF) ? "off" : "inherit",
-					HM_Active(bot) ? " [active" : " [inactive",
+					(bot->fb.hm == HMODE_ON) ? "on" :
+					(bot->fb.hm == HMODE_OFF) ? "off" : "inherit",
+					HMode_Active(bot) ? " [active" : " [inactive",
 					(slot && slot->active_logged) ? va(" tag=%s]", slot->tag) : "]");
 		printed++;
 	}
@@ -462,25 +693,25 @@ static void HM_PrintStatus(void)
 	}
 }
 
-static int HM_ParseMode(const char *arg, int *mode)
+static int HMode_ParseMode(const char *arg, int *mode)
 {
 	if (streq(arg, "on") || streq(arg, "1"))
 	{
-		*mode = HM_ON;
+		*mode = HMODE_ON;
 
 		return 1;
 	}
 
 	if (streq(arg, "off") || streq(arg, "0"))
 	{
-		*mode = HM_OFF;
+		*mode = HMODE_OFF;
 
 		return 1;
 	}
 
 	if (streq(arg, "inherit") || streq(arg, "-1"))
 	{
-		*mode = HM_INHERIT;
+		*mode = HMODE_INHERIT;
 
 		return 1;
 	}
@@ -488,17 +719,17 @@ static int HM_ParseMode(const char *arg, int *mode)
 	return 0;
 }
 
-void HM_BotCmd(void)
+void HMode_BotCmd(void)
 {
 	char arg[32];
-	int mode = HM_INHERIT;
+	int mode = HMODE_INHERIT;
 	int j, count = 0;
 
 	if (trap_CmdArgc() < 4)
 	{
 		if (trap_CmdArgc() == 2)
 		{
-			HM_PrintStatus();
+			HMode_PrintStatus();
 
 			return;
 		}
@@ -510,7 +741,7 @@ void HM_BotCmd(void)
 
 	trap_CmdArgv(3, arg, sizeof(arg));
 
-	if (!HM_ParseMode(arg, &mode))
+	if (!HMode_ParseMode(arg, &mode))
 	{
 		G_sprint(self, 2, "Usage: /botcmd hm <slot|all> <on|off|inherit>\n");
 
@@ -531,7 +762,7 @@ void HM_BotCmd(void)
 		}
 
 		G_sprint(self, 2, "humanmode %s for %d bot%s\n",
-					(mode == HM_ON) ? "on" : (mode == HM_OFF) ? "off" : "inherit",
+					(mode == HMODE_ON) ? "on" : (mode == HMODE_OFF) ? "off" : "inherit",
 					count, (count == 1) ? "" : "s");
 
 		return;
@@ -548,7 +779,7 @@ void HM_BotCmd(void)
 
 	g_edicts[j].fb.hm = mode;
 	G_sprint(self, 2, "humanmode %s for slot %d (%s)\n",
-				(mode == HM_ON) ? "on" : (mode == HM_OFF) ? "off" : "inherit",
+				(mode == HMODE_ON) ? "on" : (mode == HMODE_OFF) ? "off" : "inherit",
 				j, g_edicts[j].netname);
 }
 
