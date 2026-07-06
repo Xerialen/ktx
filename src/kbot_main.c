@@ -2407,8 +2407,17 @@ gj_app_drive:
 		}
 		// E14 lane 6 opts out: the build rotation would wobble the bot across
 		// the 28u-wide ledge, and the walk-speed dash already meets the floor.
+		// E14/s8 lane 5 opts out too: the 42-deg rotation dragged every walker
+		// off the leg line at the corridor mouth -- west down the yard slope to
+		// the pit floor z -16, where the 2D gates logged nonsense lat -45
+		// declines (s7 trace, sng-s7/20260706T110343Z-p28599 t 17.5-19.7).
+		// Straight steering holds goldenboy's over-the-hill line; the speed
+		// floor is met by the chain-hop (his own crossing IS one flat hop:
+		// launch (-541,786) along -299 -> peak z165 over the hill crown 163 ->
+		// touchdown (-515,512) IN the launch box, T 0.675 -- the trigger's
+		// existing pa/pl windows accept exactly that hop).
 		if (cvar("k_kbot_gj_app_build") && onground && (vh < build_hi) &&
-			along_u < 0 && (lane != 6))
+			along_u < 0 && (lane != 6) && (lane != 5))
 		{
 			vec3_t cur;
 			cur[0] = self->s.v.velocity[0];
