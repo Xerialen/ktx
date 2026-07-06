@@ -252,7 +252,7 @@ typedef struct
 // swim; waterlevel>=2 logs FAIL_WATER (E11c discharge guard). In-match the
 // approach gate needs BOTH a floor and a CEILING (k_kbot_gj_rl_mul/_max) --
 // too slow clips the sill, too fast clips the upper lip. Gated by k_kbot_gj_rl.
-#define GJ_NUM_LANES 7
+#define GJ_NUM_LANES 8
 static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 	// 0: ring -> quad, northern lips, bow south (-30) around the pillar.
 	{ "ring2quad", { 455, 146, 56 }, { 705, 146, 56 }, -40, -30, { 0, 0, 0 } },
@@ -292,6 +292,19 @@ static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 	//    perch (floor 160, west edge x~-818 -> org-x >= ~-802): the small
 	//    east diagonal is flown by the launch-aim + air-carve.
 	{ "sng2mega", { -848, 268, 184 }, { -800, 105, 184 }, -10, 0, { 0, 0, 0 } },
+	// 7: PENT PLAY (ticket #25, E15). The window rocket-jump: the z -104
+	//    lift-shaft shelf -> the window landing ledge (z 80). Human-measured
+	//    (artifacts/records/e15-pent-window-rj, 4 successes 2009+2022):
+	//    launch (646-680, 744-775, -104) heading -23..0 deg, rocket at feet
+	//    (pitch ~77, aim = travel + 180), vz0 ~600-650, apex z 123-136 at
+	//    x 1020-1125, touch ledge z 80 (1120-1200, 630-670) or window floor
+	//    z 56 further south. Landing detection uses a lane-7 AREA box in
+	//    GJ_Cross (the point+landrad circle misses thun-der's southern
+	//    entry); fail_z -150 sits under the shelf and above the yard floor
+	//    (-296), so a shorted arc logs FAIL_GAP before it touches down.
+	//    NOT goal-picked and NOT passively zone-triggered (all pickers skip
+	//    lane 7): the trigger is the PENT STATE (KBot_GapjumpFrame).
+	{ "pent2window", { 668, 758, -104 }, { 1160, 650, 80 }, -150, 0, { 0, 0, 0 } },
 };
 
 // Effective launch-heading offset for a lane: table default + cvar (for sweeps).
@@ -458,6 +471,7 @@ static void GJ_CarveTarget(int lane, vec3_t takeoff, vec3_t landing, vec3_t org,
 #define GJ_COOL  2
 #define GJ_BUILD 3   // E8: circle-jump run-up to reach v_req before launching
 #define GJ_APPROACH 4 // E9: deliberate drive-to-lip + align + build, then launch
+#define GJ_PENT     5 // E15: pent-play stage 1 (ramp -> lift -> shelf run-up)
 
 static int   gj_state[MAX_CLIENTS];
 static int   gj_lane_active[MAX_CLIENTS];
@@ -482,6 +496,10 @@ static qbool gj_chain_flew[MAX_CLIENTS]; // E12b hop actually left the ground (t
 static qbool gj_stage_on[MAX_CLIENTS];   // E10 stage-transition log latch
 static float gj_route_log[MAX_CLIENTS];  // E10 [gjroute] log throttle
 static qbool gj_sng_deep[MAX_CLIENTS];   // E14 lane-6: reached the deep-runway point
+static int   gj_pent_leg[MAX_CLIENTS];   // E15 stage-1 leg (0 ramp, 1 plate, 2 ride, 3 exit)
+static int   gj_pent_fire[MAX_CLIENTS];  // E15 rocket armed on the press frame, fired first air frame
+static float gj_pent_id[MAX_CLIENTS];    // E15 invincible_finished of the pent being played
+static int   gj_pent_tries[MAX_CLIENTS]; // E15 engage counter within one pent
 
 // E13 (dm3-jumps): the E12b chain-hop generalized to the mirror lanes 2/3.
 // Lane 4 keeps k_kbot_gj_chain; the mirror chain adds k_kbot_gj_mchain ON TOP
@@ -935,6 +953,12 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 
 	// Frame-perfect hop latch (E1): press only on a grounded, released frame.
 	press = onground && !gj_jump_latch[slot];
+	// E15 lane 7: exactly one rocket launch per trial -- after the flight the
+	// grounded frame is the OUTCOME (window or fail), never a re-hop.
+	if ((lane == 7) && gj_has_flown[slot])
+	{
+		press = false;
+	}
 	gj_jump_latch[slot] = press;
 
 	// E10c LAUNCH-AIM (mirror lanes only, gated). On the committed launch frame,
@@ -952,7 +976,8 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	if (press && speed > 1 && cvar("k_kbot_gj_aimlaunch") >= 0 &&
 		((cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3)) ||
 		 (lane == 4 && cvar("k_kbot_gj_rl")) ||
-		 ((lane == 5 || lane == 6) && cvar("k_kbot_gj_sng"))))
+		 ((lane == 5 || lane == 6) && cvar("k_kbot_gj_sng")) ||
+		 ((lane == 7) && cvar("k_kbot_gj_pent"))))
 	{
 		vec3_t la;
 		la[0] = 0;
@@ -982,6 +1007,37 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 				 org[0], org[1]);
 	}
 
+	// E15 lane 7: the launch is a ROCKET jump. Arm on the press frame, fire on
+	// the first airborne frame after it (the stock executor's order: jump,
+	// then fire while rising -- bot_botjump.c BotPerformRocketJump, delay 0).
+	// Aim = launch heading + 180 (the rocket goes where you LOOK; the kick is
+	// away from the floor burst behind), pitch from k_kbot_gj_pent_pitch. The
+	// command angles are sent verbatim via trap_SetBotCMD, so the one-frame
+	// backward snap is exactly what the humans' views do in the E15 traces.
+	if ((lane == 7) && press)
+	{
+		gj_pent_fire[slot] = 1;
+	}
+	if ((lane == 7) && gj_pent_fire[slot] && !onground)
+	{
+		float rjp = cvar("k_kbot_gj_pent_pitch");
+
+		gj_pent_fire[slot] = 0;
+		gj_has_flown[slot] = true;
+		self->fb.desired_angle[PITCH] = (rjp > 0) ? rjp : 77.0f;
+		self->fb.desired_angle[YAW] = launch_bearing + 180.0f;
+		self->fb.desired_angle[ROLL] = 0;
+		VectorClear(direction);
+		*jumping = false;
+		*firing = true;
+		*impulse = 7;
+		if (cvar("k_kbot_gj_gatelog"))
+		{
+			G_cprint("[pentrj] result=FIRE pos=%.0f,%.0f,%.0f vz=%.0f\n",
+					 org[0], org[1], org[2], self->s.v.velocity[2]);
+		}
+		return true;
+	}
 	if (!onground)
 	{
 		gj_has_flown[slot] = true;
@@ -1023,6 +1079,22 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	hdist = sqrt((org[0] - landing[0]) * (org[0] - landing[0]) +
 				 (org[1] - landing[1]) * (org[1] - landing[1]));
 
+	// E15 lane 7: the window is an AREA (outer ledge z 80 + floor z 56 running
+	// south), not a point -- thun-der's reference entry touches 160u south of
+	// the pad center. Any grounded touchdown inside the box converts the play.
+	if ((lane == 7) && gj_has_flown[slot] && onground &&
+		(org[0] > 1060) && (org[0] < 1260) &&
+		(org[1] > 380) && (org[1] < 730) &&
+		(org[2] > 40) && (org[2] < 150))
+	{
+		G_cprint("[gapjump] lane=%s slot=%d name=%s trial=%d result=LAND land_pos=%.0f,%.0f,%.0f "
+				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
+				 gj_lanes[lane].name, slot, self->netname, gj_trial[slot], org[0], org[1], org[2],
+				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		gj_state[slot] = GJ_COOL;
+		gj_cool_t0[slot] = now;
+		return true;
+	}
 	if (gj_has_flown[slot] && onground && hdist < landrad &&
 		fabs(org[2] - landing[2]) < 64)
 	{
@@ -1072,6 +1144,189 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	return true;
 }
 
+// E15 (ticket #25): the pent-play trigger region -- pent yard + west ramp +
+// lift-shaft bottom + the z -104 shelf. z < -88 keeps it below the flight.
+static qbool GJ_PentRegion(vec3_t org)
+{
+	return (org[0] > 560) && (org[0] < 1250) &&
+		   (org[1] > 560) && (org[1] < 1100) &&
+		   (org[2] > -310) && (org[2] < -88);
+}
+
+// E15 (ticket #25): pent-play stage 1 -- drive the measured human route to
+// the window-RJ launch pad. Legs (gj_pent_leg):
+//   0 RAMP  west up the yard ramp (z -296 -> the -264 corridor)
+//   1 PLATE onto the lift plate at x~608 (rest top ~-240)
+//   2 RIDE  hold the plate while it rises (lift speed ~143 u/s)
+//   3 EXIT  step off east onto the z -104 shelf; short run-up; hand the
+//           grounded, aligned, speed-banded bot to GJ_Cross (lane 7), which
+//           hops + fires (the window RJ).
+// This is the tom/anni route (V2: 0 rockets, stock lift physics). The E15
+// fail-correlation drives the design: all 3 human fails launched ROLLING
+// (hs 409-485), all 4 successes controlled (hs 77-392) -- the 48-70u shelf
+// runway physically caps the run-up inside the success band. Leg carrots from
+// artifacts/records/e15-pent-window-rj/traces/.
+static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
+						  qbool *firing, int *impulse, vec3_t direction)
+{
+	vec3_t wish, ang, org, carrot, take, land;
+	float now = g_globalvars.time, myaw, d, vh, fz;
+	qbool onground = ((int)self->s.v.flags & FL_ONGROUND) ? true : false;
+	int leg = gj_pent_leg[slot];
+
+	VectorCopy(self->s.v.origin, org);
+	*jumping = false;
+	*firing = false;
+	*impulse = 0;
+	VectorClear(direction);
+
+	// The play holds only while the pent does (and a rocket remains).
+	if (ISDEAD(self) || (self->invincible_finished <= now)
+		|| !((int)self->s.v.items & IT_ROCKET_LAUNCHER)
+		|| (self->s.v.ammo_rockets < 1))
+	{
+		if (cvar("k_kbot_gj_gatelog"))
+		{
+			G_cprint("[pentrj] result=ABORT_STATE pos=%.0f,%.0f,%.0f leg=%d\n",
+					 org[0], org[1], org[2], leg);
+		}
+		gj_state[slot] = GJ_IDLE;
+		return false;
+	}
+	// Stage timeout: the traced walk is ~2.5-6 s; 12 covers a lift-return
+	// wait. Release is safe -- vanilla nav resumes, the trigger re-engages
+	// from anywhere in the region while the pent lasts.
+	if ((now - gj_app_t0[slot]) > 12.0f)
+	{
+		G_cprint("[pentrj] result=ABORT_TIMEOUT pos=%.0f,%.0f,%.0f leg=%d\n",
+				 org[0], org[1], org[2], leg);
+		gj_app_supp[slot] = now + 1.0f;
+		gj_state[slot] = GJ_IDLE;
+		return false;
+	}
+	// Missed the shelf exit: the lift is carrying us to the top (z 216).
+	// That is the humans' own fallback (lakso/anni walk down onto the window
+	// from above), so hand back to nav instead of fighting the lift.
+	if ((leg >= 2) && (org[2] > -60.0f))
+	{
+		G_cprint("[pentrj] result=LIFT_OVERSHOOT pos=%.0f,%.0f,%.0f\n",
+				 org[0], org[1], org[2]);
+		gj_app_supp[slot] = now + 3.0f;
+		gj_state[slot] = GJ_IDLE;
+		return false;
+	}
+
+	// Advance legs by POSITION (re-entrant: an engage mid-route starts at the
+	// leg its position proves; a knockback that loses ground falls back on
+	// the next engage, not mid-play).
+	if ((leg <= 0) && (org[2] > -272.0f) && (org[0] < 800.0f))
+	{
+		leg = 1;
+	}
+	if ((leg <= 1) && (org[0] < 632.0f) && (org[2] > -252.0f))
+	{
+		leg = 2;
+	}
+	if ((leg <= 2) && (org[2] > -120.0f))
+	{
+		leg = 3;
+		if (cvar("k_kbot_gj_gatelog"))
+		{
+			G_cprint("[pentrj] leg=EXIT pos=%.0f,%.0f,%.0f\n",
+					 org[0], org[1], org[2]);
+		}
+	}
+	gj_pent_leg[slot] = leg;
+
+	switch (leg)
+	{
+		case 0:  VectorSet(carrot, 770, 700, -264); break;    // ramp top
+		case 1:  VectorSet(carrot, 604, 720, -240); break;    // lift plate
+		case 2:  VectorSet(carrot, 604, 720, org[2]); break;  // hold the plate
+		default: VectorSet(carrot, 676, 758, -104); break;    // shelf east edge
+	}
+
+	{
+		vec3_t hv;
+
+		hv[0] = self->s.v.velocity[0];
+		hv[1] = self->s.v.velocity[1];
+		hv[2] = 0;
+		vh = VectorLength(hv);
+	}
+
+	// Launch handoff: grounded on the shelf, east of the run-up start, moving
+	// east inside the heading band. The runway length caps vh inside the
+	// measured success band; minv only rejects a from-standstill first frame.
+	if ((leg == 3) && onground && (org[2] > -116.0f) && (org[0] > 652.0f))
+	{
+		float minv = cvar("k_kbot_gj_pent_minv");
+		float verr = 999;
+
+		if (minv <= 0)
+		{
+			minv = 200;
+		}
+		GJ_Geometry(7, take, land, &fz);
+		if (vh > 1)
+		{
+			float vyaw = atan2(self->s.v.velocity[1], self->s.v.velocity[0])
+					* 180.0f / M_PI;
+
+			verr = GJ_Bearing(take, land) - vyaw;
+			while (verr > 180) { verr -= 360; }
+			while (verr < -180) { verr += 360; }
+		}
+		if ((vh >= minv) && (fabs(verr) <= 35.0f))
+		{
+			G_cprint("[pentrj] result=LAUNCH try=%d name=%s vh=%.0f verr=%.0f "
+					 "pos=%.0f,%.0f,%.0f pentleft=%.1f\n",
+					 gj_pent_tries[slot], self->netname, vh, verr,
+					 org[0], org[1], org[2], self->invincible_finished - now);
+			gj_trial[slot]++;
+			gj_t0[slot] = now;
+			gj_peak[slot] = 0;
+			gj_flip[slot] = 1;
+			gj_jump_latch[slot] = false;
+			gj_has_flown[slot] = false;
+			gj_chain_on[slot] = false;
+			gj_pent_fire[slot] = 0;
+			gj_state[slot] = GJ_CROSS;
+			return GJ_Cross(self, slot, 7, jumping, firing, impulse, direction);
+		}
+	}
+
+	// Carrot drive (the lane-5/6 idiom): full wishdir toward the carrot, view
+	// along the wish. Leg 2 parks on the plate (small standoff keeps the
+	// plate trigger pressed without rubbing the shaft wall).
+	VectorSubtract(carrot, org, wish);
+	wish[2] = 0;
+	d = VectorLength(wish);
+	if ((leg == 2) && (d < 12.0f))
+	{
+		VectorClear(direction);
+		self->fb.desired_angle[PITCH] = 0;
+		self->fb.desired_angle[YAW] = 0; // face the exit (east) while riding
+		self->fb.desired_angle[ROLL] = 0;
+		return true;
+	}
+	if (d < 1.0f)
+	{
+		return true;
+	}
+	VectorNormalize(wish);
+	myaw = vectoyaw(wish);
+	VectorSet(ang, 0, myaw, 0);
+	trap_makevectors(ang);
+	self->fb.desired_angle[PITCH] = 0;
+	self->fb.desired_angle[YAW] = myaw;
+	self->fb.desired_angle[ROLL] = 0;
+	direction[0] = DotProduct(g_globalvars.v_forward, wish) * 800;
+	direction[1] = DotProduct(g_globalvars.v_right, wish) * 800;
+	direction[2] = 0;
+	return true;
+}
+
 // Start a fresh trial for the given lane.
 static void GJ_StartTrial(gedict_t *self, int slot, int lane)
 {
@@ -1082,6 +1337,18 @@ static void GJ_StartTrial(gedict_t *self, int slot, int lane)
 	gj_flip[slot] = 1;
 	gj_jump_latch[slot] = false;
 	gj_has_flown[slot] = false;
+	// E15 lane 7 seeded trials: the launch needs a loaded RL and (like the
+	// human play) pent to eat the rocket self-damage. Lab-only path -- the
+	// trial driver runs only under k_kbot_gj_lane, never in counted matches.
+	if (lane == 7)
+	{
+		self->s.v.items = (int)self->s.v.items | IT_ROCKET_LAUNCHER;
+		if (self->s.v.ammo_rockets < 10)
+		{
+			self->s.v.ammo_rockets = 10;
+		}
+		self->invincible_finished = g_globalvars.time + 3600;
+	}
 	gj_state[slot] = GJ_CROSS;
 	GJ_Seat(self, lane);
 }
@@ -1283,6 +1550,10 @@ static int GJ_PickLaneWithin(gedict_t *self, float back, float pmax, float zband
 		{
 			continue; // SNG lanes disabled -> invisible to intent/route
 		}
+		if (i == 7)
+		{
+			continue; // E15 pent lane: engaged by the pent trigger ONLY
+		}
 		// Use GJ_Geometry (not raw table) so the E10c mirror-carve relocation of
 		// lanes 2/3 is honoured by the active-path intent/route lane picker too.
 		GJ_Geometry(i, take, land, &fz);
@@ -1423,6 +1694,10 @@ float KBot_GJ_RouteShim(gedict_t *self, gedict_t *goal_entity, float goal_time)
 		if ((i == 5 || i == 6) && !cvar("k_kbot_gj_sng"))
 		{
 			continue; // SNG lanes disabled -> not priced as route edges
+		}
+		if (i == 7)
+		{
+			continue; // E15 pent lane: engaged by the pent trigger ONLY
 		}
 		GJ_Geometry(i, take, land, &fail_z);
 		u[0] = land[0] - take[0];
@@ -2646,6 +2921,19 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 		return GJ_ApproachFrame(self, slot, gj_lane_active[slot], jumping, firing,
 								impulse, direction);
 	}
+	// Continue an in-flight E15 pent-play stage 1 (ramp -> lift -> shelf).
+	// Placed with the other continuations, BEFORE the combat-yield: the
+	// carrier is invulnerable and the play is exactly how humans leave the
+	// yard under fire.
+	if (gj_state[slot] == GJ_PENT)
+	{
+		if (ISDEAD(self))
+		{
+			gj_state[slot] = GJ_IDLE;
+			return false;
+		}
+		return GJ_PentFrame(self, slot, jumping, firing, impulse, direction);
+	}
 	if (gj_state[slot] == GJ_COOL)
 	{
 		// E14 lane 6 POST-LAND: the mega perch is orphaned in the marker
@@ -2684,6 +2972,49 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 		}
 		gj_state[slot] = GJ_IDLE; // release movement back to vanilla nav
 		return false;
+	}
+
+	// ---- E15 PENT PLAY TRIGGER (ticket #25, k_kbot_gj_pent) ----
+	// pent + RL => ALWAYS convert pent time into the window hold via the
+	// measured two-stage play (owner directive 2026-07-06: quad follows pent;
+	// the window RJ is the shortest path). Deliberately BEFORE the
+	// combat-yield: the carrier is invulnerable, and under fire is exactly
+	// when humans run this play. Re-engages after fails while the pent lasts
+	// (gj_app_supp paces the retries).
+	if (cvar("k_kbot_gj_pent") && !ISDEAD(self) && (match_in_progress == 2)
+		&& !intermission_running && (gj_state[slot] == GJ_IDLE)
+		&& (now >= gj_app_supp[slot])
+		&& ((int)self->s.v.items & IT_ROCKET_LAUNCHER)
+		&& (self->s.v.ammo_rockets >= 1)
+		&& GJ_PentRegion(self->s.v.origin))
+	{
+		float minleft = cvar("k_kbot_gj_pent_minleft");
+
+		if (minleft <= 0)
+		{
+			minleft = 8;
+		}
+		if (self->invincible_finished > now + minleft)
+		{
+			if (self->invincible_finished != gj_pent_id[slot])
+			{
+				gj_pent_id[slot] = self->invincible_finished;
+				gj_pent_tries[slot] = 0;
+			}
+			gj_pent_tries[slot]++;
+			gj_pent_leg[slot] = 0;
+			gj_pent_fire[slot] = 0;
+			gj_lane_active[slot] = 7;
+			gj_app_t0[slot] = now;
+			gj_state[slot] = GJ_PENT;
+			G_cprint("[pentrj] result=ENGAGE try=%d name=%s pos=%.0f,%.0f,%.0f "
+					 "pentleft=%.1f rk=%d\n",
+					 gj_pent_tries[slot], self->netname,
+					 PASSVEC3(self->s.v.origin),
+					 self->invincible_finished - now,
+					 (int)self->s.v.ammo_rockets);
+			return GJ_PentFrame(self, slot, jumping, firing, impulse, direction);
+		}
 	}
 
 	// Combat-yield: never trigger with an enemy near (D5). Reuse the frogbot's
@@ -2832,6 +3163,10 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 			vec3_t t;
 			float d;
 
+			if (i == 7)
+			{
+				continue; // E15 pent lane: never a passive zone trigger
+			}
 			VectorCopy(gj_lanes[i].takeoff, t);
 			d = sqrt((org[0] - t[0]) * (org[0] - t[0]) +
 					 (org[1] - t[1]) * (org[1] - t[1]) +

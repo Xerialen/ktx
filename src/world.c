@@ -1234,6 +1234,15 @@ void FirstFrame(void)
 	// the pre-route decline skip. s4/s5 orbit attempts removed (geometry:
 	// on-axis deep point walled; hold-boundary was an oscillation trap).
 	RegisterCvarEx("k_kbot_gj_schain", "1");
+	// E15 pent play, lane 7 (ticket #25): pent + RL => the two-stage lift
+	// play to the window. pent_pitch = rocket fire pitch on the RJ frame;
+	// pent_minv = launch speed floor on the shelf run-up (the CEILING comes
+	// free from the 48-70u runway -- the E15 fail-correlation); pent_minleft
+	// = minimum pent seconds remaining to start a run.
+	RegisterCvarEx("k_kbot_gj_pent", "1");
+	RegisterCvarEx("k_kbot_gj_pent_pitch", "77");
+	RegisterCvarEx("k_kbot_gj_pent_minv", "200");
+	RegisterCvarEx("k_kbot_gj_pent_minleft", "8");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
