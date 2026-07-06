@@ -1103,6 +1103,7 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_harvest_quad", "0");
 	RegisterCvarEx("k_kbot_harvest_guard", "0");
 	RegisterCvarEx("k_kbot_harvest_hold", "0");
+	RegisterCvarEx("k_kbot_harvest_debug", "0");
 
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).

@@ -534,14 +534,42 @@ static gedict_t* KHV_QuadItem(void)
 	return khv_quad;
 }
 
-// live on the floor, or respawning within lead seconds
+// The WINDOW is the timed team event around a quad spawn: respawning within
+// lead seconds, or freshly up (<15 s). "Lying untaken on the floor" is NOT a
+// window -- with kbot quad take rates a solid==TRIGGER test held the window
+// open for minutes and kept B5 posting permanently gated (hvdebug diagnosis)
+// while making B4 convergence near-constant instead of T-10-timed.
+static float khv_quad_live_since = -1;
+static qbool khv_quad_was_live = false;
+
 static qbool KHV_QuadWindowSoon(float lead)
 {
 	gedict_t *q = KHV_QuadItem();
+	qbool live;
 
-	return q && ((q->s.v.solid == SOLID_TRIGGER)
-			|| ((q->fb.goal_respawn_time > g_globalvars.time)
-					&& (q->fb.goal_respawn_time < g_globalvars.time + lead)));
+	if (!q)
+	{
+		return false;
+	}
+	live = (q->s.v.solid == SOLID_TRIGGER);
+	if (khv_quad_live_since > g_globalvars.time)
+	{
+		khv_quad_live_since = -1;	// clock rewound (map restart)
+	}
+	if (live && !khv_quad_was_live)
+	{
+		khv_quad_live_since = g_globalvars.time;
+	}
+	khv_quad_was_live = live;
+
+	if ((q->fb.goal_respawn_time > g_globalvars.time)
+			&& (q->fb.goal_respawn_time < g_globalvars.time + lead))
+	{
+		return true;
+	}
+
+	return live && (khv_quad_live_since >= 0)
+			&& (g_globalvars.time - khv_quad_live_since < 15);
 }
 
 // 2 s cadence: rank armed+ kbots by distance to the quad; [0] is the TAKER,
@@ -764,6 +792,33 @@ qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction)
 		}
 
 		return false;	// own window, not guarding: converge, never post
+	}
+
+	// diagnosis emitter (k_kbot_harvest_debug): why does posting not trigger?
+	// 2 s throttle per bot, control-class frames only. Temporary tooling.
+	if (hold_on && (KBot_StackClass(self) == KBM_CONTROL))
+	{
+		static float khv_dbg_next[MAX_EDICTS];
+		static float khv_dbg_f = 0;
+		static float khv_dbg_f_next = -1;
+
+		if (KHV_CvarCached("k_kbot_harvest_debug", &khv_dbg_f, &khv_dbg_f_next)
+				&& (g_globalvars.time > khv_dbg_next[idx]))
+		{
+			gedict_t *goal = &g_edicts[(int)self->s.v.goalentity];
+			char detail[128];
+
+			KHV_RefreshEnemies(self);
+			khv_dbg_next[idx] = g_globalvars.time + 2.0f;
+			snprintf(detail, sizeof(detail),
+					 "zone=%d;qwin=%d;seen=%d;ong=%d;hurt=%d;goalrt=%.1f;encnt=%d",
+					 zone, (int)KHV_QuadWindowSoon(10), (int)enemy_seen,
+					 (int)((int)self->s.v.flags & FL_ONGROUND ? 1 : 0),
+					 (int)(self->fb.last_hurt > g_globalvars.time - 1.0f),
+					 goal ? (goal->fb.goal_respawn_time - g_globalvars.time) : -999,
+					 khv_en_count);
+			KDLog_Play(self, "hvdebug", "eval", detail);
+		}
 	}
 
 	// B5 posting: control class with RL+rockets, standing inside a tactical
