@@ -34,6 +34,7 @@ gedict_t *self = g_edicts;
 gedict_t *other = g_edicts;
 int timelimit, fraglimit, teamplay, deathmatch, framecount, coop, skill;
 float match_in_progress;
+float match_start_time;
 
 // ---- string utils (real semantics: these DO run on the classify path) ----
 
@@ -180,6 +181,15 @@ qbool VisibleEntity(gedict_t *ent)
 qbool SameTeam(gedict_t *p1, gedict_t *p2)
 {
 	return false;
+}
+
+char* LocationName(float x, float y, float z)
+{
+	return "";
+}
+
+void TeamplayMM2Raw(gedict_t *client, char *text)
+{
 }
 
 void visible_to(gedict_t *viewer, gedict_t *first, int len, byte *visible)

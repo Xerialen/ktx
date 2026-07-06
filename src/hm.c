@@ -87,6 +87,11 @@ typedef struct hm_bot_s
 	float spawn_report_at;			// pending fresh-spawn report (0 = none)
 	float coming_at;				// pending post-spawn "coming" (0 = none)
 
+	// Timing calls (S8): share own item-clock knowledge 15s before the
+	// believed respawn ("rl on 35"). Dedup per announced respawn value.
+	float next_timing_scan;
+	float timing_announced[HMODE_MAX_ITEMS];
+
 	// Comm-derived world model (S7): what teammates SAID, consumed by the
 	// goal-desire bias. All of it ages out on its own TTL.
 	hm_sight_t sights[HMODE_MAX_SIGHT];	// believed enemy sightings (ring)
@@ -1256,6 +1261,120 @@ static void HMode_SpotEnemyPowerups(gedict_t *self, hm_bot_t *slot)
 	}
 }
 
+// S8 timing calls (owner directive 2026-07-06): a humanmode bot ALWAYS
+// shares its item-clock knowledge 15 seconds before the believed respawn,
+// in match-clock seconds counted from 0 ("rl on 35" for an RL taken at
+// 0:05). Applies to weapons, armors and powerups (mega excluded per the
+// directive's enumeration; its clock is a human approximation anyway).
+//
+// Only OWN perception announces (source seen/heard): a told clock was
+// already on the wire, and re-broadcasting it would echo-storm the team
+// (every receiver would re-announce inside the same window). Urgent
+// tokens (may run debt) + retry-until-respawn make the rule effectively
+// unconditional; dedup is per announced respawn value so a re-taken item
+// announces again for its new clock.
+#define HMODE_TIMING_LEAD 15.0f
+
+// More than one entity of this type on the map (dm2 low/high RL, dm3's
+// two YAs/SNGs)? Then the bare short name would be ambiguous.
+static qbool HMode_ItemTypeAmbiguous(gedict_t *item)
+{
+	gedict_t *it;
+	int count = 0;
+
+	for (it = world; (it = find(it, FOFCLSN, (char *)item->classname));)
+	{
+		if (++count > 1)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static void HMode_TimingCalls(gedict_t *self, hm_bot_t *slot)
+{
+	extern char* LocationName(float x, float y, float z); // teamplay.c
+	int i;
+
+	if (g_globalvars.time < slot->next_timing_scan)
+	{
+		return;
+	}
+
+	slot->next_timing_scan = g_globalvars.time + 0.3f;
+
+	for (i = 0; i < hm_item_count; i++)
+	{
+		hm_item_belief_t *b = &slot->items[i];
+		gedict_t *item = hm_item_ents[i];
+		float remaining;
+		int sec;
+
+		if (!item || (b->source != HMODE_SRC_SEEN && b->source != HMODE_SRC_HEARD))
+		{
+			continue;
+		}
+
+		if (streq(item->classname, "item_health"))
+		{
+			continue; // mega: not in the directive's weapons/armors/powerups
+		}
+
+		remaining = b->respawn_at - g_globalvars.time;
+
+		if ((remaining > HMODE_TIMING_LEAD) || (remaining <= 0.5f))
+		{
+			continue;
+		}
+
+		if (slot->timing_announced[i] == b->respawn_at)
+		{
+			continue; // this clock is already on the wire
+		}
+
+		if (!HMode_TryEmit(slot, true))
+		{
+			return; // no token even at debt: retry next scan
+		}
+
+		sec = (int)(b->respawn_at - match_start_time + 0.5f) % 60;
+
+		if (sec < 0)
+		{
+			sec += 60;
+		}
+
+		slot->timing_announced[i] = b->respawn_at;
+
+		if (HMode_DebugOn())
+		{
+			G_cprint("[hm-emit-timing] bot=%s item=%s on=%d respawn_at=%.1f "
+						"src=%s t=%.1f\n",
+						self->netname, HMode_ItemLogName(item), sec,
+						b->respawn_at, hm_src_names[b->source], g_globalvars.time);
+		}
+
+		if (HMode_ItemTypeAmbiguous(item))
+		{
+			// disambiguate with the map's own loc name ("rl low-rl on 35"):
+			// receivers resolve it back to coords and pick the nearest entity
+			char lbuf[32];
+
+			strlcpy(lbuf, LocationName(PASSVEC3(item->s.v.origin)), sizeof(lbuf));
+			TeamplayMM2Raw(self, va("%s %s on %d", HMode_ItemShortName(item),
+									lbuf, sec));
+		}
+		else
+		{
+			TeamplayMM2Raw(self, va("%s on %d", HMode_ItemShortName(item), sec));
+		}
+
+		return; // one call per scan tick; the next pending item drains in 0.3s
+	}
+}
+
 // The humanmode replacement for BotPeriodicMessages: same builders (they
 // already produce the ezQuake-standard templates the Book corpus is made
 // of), Book-informed triggers and rates. Status is the workhorse family
@@ -1340,6 +1459,11 @@ void HMode_PeriodicMessages(gedict_t *self)
 	if (HMode_FamilyOn("k_hm_emit_pwr"))
 	{
 		HMode_SpotEnemyPowerups(self, slot);
+	}
+
+	if (HMode_FamilyOn("k_hm_emit_timing"))
+	{
+		HMode_TimingCalls(self, slot);
 	}
 }
 
@@ -2652,10 +2776,19 @@ static qbool HMP_ResolveLoc(hmp_tok_t *toks, int n, vec3_t out)
 				return true;
 			}
 
-			// try the single first token too ("ra" out of "ra tunnel")
-			if (LocationCoordsByName(toks[i].text, out))
+			// try each single token of the run too: "ra" out of "ra tunnel",
+			// and the appended loc in S8 timing calls ("rl low-rl on 35" --
+			// the item word is rarely a .loc name, the loc token is)
 			{
-				return true;
+				int k;
+
+				for (k = i; k < j; k++)
+				{
+					if (LocationCoordsByName(toks[k].text, out))
+					{
+						return true;
+					}
+				}
 			}
 
 			i = j;
@@ -3303,6 +3436,36 @@ static void HMP_Apply(gedict_t *receiver, gedict_t *sender, int cat,
 					|| HMP_HasWord(toks, n, "out"))
 			{
 				HMP_ClearPowerupAlarm(receiver, sender);
+			}
+			else if (match_in_progress == 2)
+			{
+				// "{item} [{loc}] on {n}" (S8 timing call): the clock
+				// collapses to the announced match-second. {n} is mod-60,
+				// so anchor it in the current match minute and wrap
+				// forward if it already passed ("on 05" said at 0:52).
+				int j;
+
+				for (j = 0; j + 1 < n; j++)
+				{
+					if ((toks[j].type == HMP_WORD)
+							&& (streq(toks[j].text, "on") || streq(toks[j].text, "in"))
+							&& (toks[j + 1].type == HMP_NUM))
+					{
+						float elapsed = g_globalvars.time - match_start_time;
+						float at = match_start_time
+								+ (float)(((int)(elapsed / 60)) * 60)
+								+ (float)toks[j + 1].num;
+
+						if (at < g_globalvars.time - 2)
+						{
+							at += 60;
+						}
+
+						HMP_ApplyItemUp(receiver, sender, toks, n, at);
+
+						break;
+					}
+				}
 			}
 
 			break;

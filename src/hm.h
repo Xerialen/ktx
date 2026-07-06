@@ -22,7 +22,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define HMODE_VERSION "hm-0.7.1-hmsay-probe"
+#define HMODE_VERSION "hm-0.8.0-timing-calls"
 
 // Knowledge sources, in rising order of directness. Kept on every snapshot
 // so the trust/merge policy (told vs seen) stays explicit.
