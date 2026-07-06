@@ -214,6 +214,27 @@ qbool HMode_Active(gedict_t *bot)
 	return (cvar("k_hm") != 0) && HMode_TeamAllowed(bot);
 }
 
+float HMode_FovMinDot(gedict_t *bot)
+{
+	float fov = cvar("k_hm_fov");
+
+	if ((fov <= 0) || !HMode_Active(bot))
+	{
+		return 0.0f; // vanilla: 360-degree acquisition
+	}
+
+	if (fov < 10)
+	{
+		fov = 10;
+	}
+	else if (fov > 350)
+	{
+		fov = 350;
+	}
+
+	return cos(fov * (M_PI / 360.0)); // half the cone, in radians
+}
+
 // Capability cvars default ON when unset, so "k_hm 1" alone gives the full
 // model. cvar() returns 0 for unset cvars, hence the explicit string check.
 static qbool HMode_CapCvar(const char *name)

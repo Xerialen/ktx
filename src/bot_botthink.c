@@ -79,7 +79,9 @@ static void NewlyPickedEnemyLogic(void)
 
 	if (self->s.v.goalentity == self->s.v.enemy)
 	{
-		if (Visible_360(self, goalentity_))
+		// hm view cone (k_hm_fov) gates this acquisition; vanilla bots get
+		// the stock Visible_360 through it unchanged.
+		if (Visible_fov(self, goalentity_))
 		{
 			LookEnemy(self, goalentity_);
 		}

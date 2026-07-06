@@ -12,8 +12,8 @@
 
  Toggles: global cvar k_hm; per-bot override "botcmd hm <slot|all> <mode>";
  per-capability cvars k_hm_emit[_family], k_hm_parse, k_hm_tminfo,
- k_hm_iteminfo, k_hm_rate. k_hm 0 + no overrides == stock behavior,
- bit-identical.
+ k_hm_iteminfo, k_hm_rate, k_hm_fov. k_hm 0 + no overrides == stock
+ behavior, bit-identical.
 
  Expects g_local.h to have been included first (KTX header convention).
  */
@@ -22,7 +22,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define HMODE_VERSION "hm-0.8.0-timing-calls"
+#define HMODE_VERSION "hm-0.9.0-fov"
 
 // Knowledge sources, in rising order of directness. Kept on every snapshot
 // so the trust/merge policy (told vs seen) stays explicit.
@@ -89,6 +89,16 @@ int HMode_Sightings(gedict_t *bot, const hm_sight_t **out);
 // then the global k_hm cvar scoped by the optional k_hm_teams team filter).
 // False for non-bots and world.
 qbool HMode_Active(gedict_t *bot);
+
+// FOV-gated visual acquisition (k_hm_fov = full view cone in degrees,
+// e.g. 120; 0/unset = off). Returns the minimum forward-dot an enemy must
+// satisfy to be NOTICED by this bot, 0.0 for the vanilla 360-degree
+// acquisition (also for non-hm bots). Perception layer only: consumed by
+// Visible_fov / Visible_infront (bot_world.c). Hearing (BotsSoundMadeEvent),
+// pain reactions and tracking of an already-acquired look_object stay
+// ungated -- sound is directionless and an engaged opponent is not
+// forgotten at the cone edge.
+float HMode_FovMinDot(gedict_t *bot);
 
 // Colored teamsay alias: wrap `name` in the bot's ezQuake &cRGB tint so
 // same-team tags stand out from each other (rotation red/blue/orange/purple,

@@ -194,6 +194,7 @@ char* BotNameFriendly(int botNumber);
 char* BotNameEnemy(int botNumber);
 
 qbool Visible_360(gedict_t *self, gedict_t *visible_object);
+qbool Visible_fov(gedict_t *self, gedict_t *visible_object);
 qbool Visible_infront(gedict_t *self, gedict_t *visible_object);
 
 // marker_util.qc

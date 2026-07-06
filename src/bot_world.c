@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "hm.h"
 
 void BotEventPlatformHitTop(gedict_t *self)
 {
@@ -108,9 +109,45 @@ qbool Visible_360(gedict_t *self, gedict_t *visible_object)
 	return (self->fb.enemy_visible = VisibilityTest(self, visible_object, 0.0f));
 }
 
+// Enemy ACQUISITION through the humanmode view cone (k_hm_fov): identical
+// to Visible_360 when the cone is off (min_dot 0). An hm-active bot only
+// notices an enemy it is facing; hearing (BotsSoundMadeEvent), pain
+// reactions and tracking of an already-acquired look_object keep
+// Visible_360 -- sound is directionless, and an engaged opponent is not
+// forgotten at the cone edge (which would also cancel the sound-snap
+// before the bot has turned).
+qbool Visible_fov(gedict_t *self, gedict_t *visible_object)
+{
+	float min_dot = HMode_FovMinDot(self);
+	qbool seen = VisibilityTest(self, visible_object, min_dot);
+
+	// [hm-fov-deny]: LOS existed but the cone withheld the contact --
+	// proves the gate bites (k_hm_debug, throttled per bot; the probe
+	// retrace only runs when a line is due).
+	if (!seen && (min_dot > 0))
+	{
+		static float deny_next[MAX_CLIENTS + 1];
+		int slot = NUM_FOR_EDICT(self);
+
+		if ((slot >= 1) && (slot <= MAX_CLIENTS) && (g_globalvars.time >= deny_next[slot])
+				&& cvar("k_hm_debug") && VisibilityTest(self, visible_object, 0.0f))
+		{
+			deny_next[slot] = g_globalvars.time + 2.0f;
+			G_cprint("[hm-fov-deny] bot=%s enemy=%s t=%f\n", self->netname,
+						visible_object->netname, g_globalvars.time);
+		}
+	}
+
+	return (self->fb.enemy_visible = seen);
+}
+
 qbool Visible_infront(gedict_t *self, gedict_t *visible_object)
 {
-	return (self->fb.enemy_visible = VisibilityTest(self, visible_object, self->fb.skill.visibility));
+	float min_dot = self->fb.skill.visibility;
+	float hm_dot = HMode_FovMinDot(self);
+
+	return (self->fb.enemy_visible = VisibilityTest(self, visible_object,
+													(hm_dot > min_dot) ? hm_dot : min_dot));
 }
 
 qbool BotDoorIsClosed(gedict_t *door)
