@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.28.0-dials"
+#define KBOT_VERSION "kbot-0.28.1-pentrj2"
 
 // ---- tournament decision models (kbot_models.c, 2026-07-06) ----
 // Three cvar-gated models over the frogbot value function, data-filled from
