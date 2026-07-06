@@ -1066,7 +1066,9 @@ float HMode_GoalDesireBias(gedict_t *self, gedict_t *goal, float desire)
 		kinds |= HMODE_ACT_ASSIST;
 	}
 
-	// coverage: a believed teammate is at this item and closer than we are
+	// coverage: a TOLD-of teammate is at this item and closer than we are.
+	// Strictly comm-sourced (source == TOLD): vision-scanned snapshots must
+	// not create new behavior here -- S7 is the comm layer only.
 	if (!strncmp(goal->classname, "item_", 5) || !strncmp(goal->classname, "weapon_", 7))
 	{
 		for (i = 1; i <= MAX_CLIENTS; i++)
@@ -1080,7 +1082,7 @@ float HMode_GoalDesireBias(gedict_t *self, gedict_t *goal, float desire)
 				continue;
 			}
 
-			if ((tm->source == HMODE_SRC_NONE) || !tm->loc_known
+			if ((tm->source != HMODE_SRC_TOLD) || !tm->loc_known
 					|| (tm->time < now - 12))
 			{
 				continue;
