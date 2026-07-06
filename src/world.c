@@ -1093,8 +1093,11 @@ void FirstFrame(void)
 	// path-score units (spec start 2.5), scaled by carried value V.
 	// harvest_threat = B2 place-threat base weight (spec start 2.0): death
 	// memory x known enemy weight x V; enemy-quad markers get max penalty.
+	// harvest_anchor = B3 zone-binding goal_time factor for the ANKARE (spec
+	// start 1.4; other armed+ bots get half the inflation; <=1 off).
 	RegisterCvarEx("k_kbot_harvest_route", "0");
 	RegisterCvarEx("k_kbot_harvest_threat", "0");
+	RegisterCvarEx("k_kbot_harvest_anchor", "0");
 
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).

@@ -28,7 +28,25 @@
 // the Book/]sr[ dm3 win corpus (komodobots2 report 2026-07-06):
 //   k_kbot_model 1=TDM 2=KAPTEN 3=UTBYTE (0 off, byte-neutral);
 //   k_kbot_model_red / k_kbot_model_blue override per team for face-offs.
+// stack classes (KBot_StackClass) -- shared vocabulary with the analyzer
+#define KBM_SPAWN   0
+#define KBM_MID     1
+#define KBM_ARMED   2
+#define KBM_CONTROL 3
+
+// goal categories (KBot_GoalCategory) -- 1:1 with the analyzer item kinds
+#define KBC_ARMOR   0
+#define KBC_MEGA    1
+#define KBC_HEALTH  2
+#define KBC_WBIG    3
+#define KBC_WSMALL  4
+#define KBC_AMMO    5
+#define KBC_POWERUP 6
+#define KBC_PACK    7
+#define KBC_OTHER   8
+
 int KBot_StackClass(gedict_t *p);       // 0 spawn / 1 mid / 2 armed / 3 control
+int KBot_GoalCategory(gedict_t *g);     // KBC_* for a world goal entity
 int KBot_TeamRLLG(gedict_t *self);      // RL/LG count in team hands (owner param)
 int KBot_ActiveModel(gedict_t *self);
 float KBot_ModelScaleGoal(gedict_t *self, gedict_t *goal, float desire);
@@ -42,6 +60,7 @@ float KBot_CarriedValue(gedict_t *p);        // 0..1, stack x firepower
 float KBot_HarvestWaterPenalty(gedict_t *p); // B1: EvalPath water-marker cost
 float KBot_HarvestThreatPenalty(gedict_t *self, gedict_t *m); // B2: place threat
 void KBot_HarvestDeathEvent(gedict_t *targ); // B2: death-memory feed (Killed)
+float KBot_HarvestAnchorShim(gedict_t *self, gedict_t *goal, float goal_time); // B3
 
 // ---- KDLOG decision-log emitter (kbot_dlog.c) ----
 // Structured tactical-decision telemetry (G_cprint "KDLOG ..." lines into

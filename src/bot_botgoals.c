@@ -173,6 +173,12 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 			goal_time = KBot_GJ_RouteShim(self, goal_entity, goal_time);
 		}
 
+		// HARVEST B3 (kbot-only, k_kbot_harvest_anchor): the stacked bot's
+		// zone looks near, the rest of the map looks far. Cost shaping via
+		// perceived travel time -- desire untouched (R2). Powerups and big
+		// weapons are exempt (objective rotation).
+		goal_time = KBot_HarvestAnchorShim(self, goal_entity, goal_time);
+
 		if (self->fb.goal_enemy_repel)
 		{
 			// Time for our enemy to get there

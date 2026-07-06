@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 qbool DM6DoorClosed(fb_path_eval_t *eval);
 qbool BotDoorIsClosed(gedict_t *door);

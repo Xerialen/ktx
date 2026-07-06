@@ -23,6 +23,7 @@
  */
 
 #include "g_local.h"
+#include "kbot.h"
 
 #ifdef BOT_SUPPORT
 
@@ -32,10 +33,8 @@
 // shared state helpers
 // ---------------------------------------------------------------------------
 
-#define KBM_SPAWN   0
-#define KBM_MID     1
-#define KBM_ARMED   2
-#define KBM_CONTROL 3
+// KBM_ stack classes + KBC_ goal categories now live in kbot.h (HARVEST
+// reads them too).
 
 #define KBM_OFF     0
 #define KBM_TDM     1
@@ -106,18 +105,8 @@ int KBot_ActiveModel(gedict_t *self)
 	return (int)cvar("k_kbot_model");
 }
 
-// goal category (mirrors the analyzer vocabulary 1:1)
-#define KBC_ARMOR   0
-#define KBC_MEGA    1
-#define KBC_HEALTH  2
-#define KBC_WBIG    3
-#define KBC_WSMALL  4
-#define KBC_AMMO    5
-#define KBC_POWERUP 6
-#define KBC_PACK    7
-#define KBC_OTHER   8
-
-static int KBot_GoalCategory(gedict_t *g)
+// goal category (mirrors the analyzer vocabulary 1:1; KBC_ defines in kbot.h)
+int KBot_GoalCategory(gedict_t *g)
 {
 	char *cn = g->classname;
 

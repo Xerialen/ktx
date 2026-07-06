@@ -26,6 +26,7 @@
  */
 
 #include "g_local.h"
+#include "kbot.h"
 
 #ifdef BOT_SUPPORT
 
@@ -302,6 +303,210 @@ float KBot_HarvestThreatPenalty(gedict_t *self, gedict_t *m)
 	}
 
 	return base * threat * v;
+}
+
+// ---------------------------------------------------------------------------
+// B3: zone anchoring (k_kbot_harvest_anchor) -- the stacked bot lives in its
+// zone
+// ---------------------------------------------------------------------------
+// Owner zone doctrine (spec section 2, dm3): RA zone (RA + Ring + SNG +
+// lifts), Quad zone (quad + hill corridor), Pent zone, YA zone (YA + RL +
+// window). Goals outside the bound zone look FURTHER away (goal_time
+// inflation at the KBot_GJ_RouteShim seam) -- no desire is touched (R2);
+// Book does not want armor less, they just never cross the map for it.
+// Objective rotation exempt: powerups and big-weapon spawns (deny) are what
+// you LEAVE the zone for. Zone membership = the mod's own location table
+// (LocationName nearest-node, same vocabulary as the analyzer + mm2).
+
+#define KHZ_NONE 0
+#define KHZ_RA   1
+#define KHZ_QUAD 2
+#define KHZ_PENT 3
+#define KHZ_YA   4
+
+char* LocationName(float x, float y, float z);	// teamplay.c
+
+static int KHV_ZoneOfName(const char *n)
+{
+	// precedence matters: "ya-quad"/"window-quad" belong to the quad zone,
+	// so quad tests run before ya/window.
+	if (strstr(n, "pent"))
+	{
+		return KHZ_PENT;
+	}
+	if (strstr(n, "quad") || !strncmp(n, "hill", 4))
+	{
+		return KHZ_QUAD;
+	}
+	if (!strncmp(n, "ra", 2) || !strncmp(n, "ring", 4) || !strncmp(n, "sng", 3)
+			|| !strncmp(n, "lifts", 5))
+	{
+		return KHZ_RA;
+	}
+	if (!strncmp(n, "rl", 2) || !strncmp(n, "window", 6) || !strncmp(n, "ya", 2))
+	{
+		return KHZ_YA;
+	}
+
+	return KHZ_NONE;	// water/bridge/boundary: no zone
+}
+
+static int KHV_ZoneOfPoint(vec3_t p)
+{
+	return KHV_ZoneOfName(LocationName(p[0], p[1], p[2]));
+}
+
+// zone lookups are O(node_count); cache per entity for static world goals
+static signed char khv_zone_cache[MAX_EDICTS];
+static char khv_zone_map[64];
+
+static int KHV_ZoneOfEnt(gedict_t *e)
+{
+	int idx = NUM_FOR_EDICT(e);
+
+	if ((idx <= 0) || (idx >= MAX_EDICTS))
+	{
+		return KHZ_NONE;
+	}
+	if (!streq(khv_zone_map, mapname))
+	{
+		memset(khv_zone_cache, 0, sizeof(khv_zone_cache));
+		strlcpy(khv_zone_map, mapname, sizeof(khv_zone_map));
+	}
+	if (!khv_zone_cache[idx])
+	{
+		khv_zone_cache[idx] = (signed char)(KHV_ZoneOfPoint(e->s.v.origin) + 1);
+	}
+
+	return khv_zone_cache[idx] - 1;
+}
+
+// zone representative points (world units) for the nearest-zone fallback
+// when a bot is bound while in transit (no zone under its feet)
+static const float khv_zone_center[5][3] = {
+	{ 0, 0, 0 },			// KHZ_NONE (unused)
+	{ 59, -528, 152 },		// RA plateau
+	{ 920, 160, 56 },		// quad floor
+	{ 1312, 712, -300 },	// pent
+	{ 1500, -812, -24 },	// YA floor
+};
+
+static int KHV_NearestZone(vec3_t org)
+{
+	int z, best = KHZ_RA;
+	float bd = 999999;
+
+	for (z = KHZ_RA; z <= KHZ_YA; z++)
+	{
+		vec3_t d;
+
+		VectorSubtract(org, khv_zone_center[z], d);
+		if (vlen(d) < bd)
+		{
+			bd = vlen(d);
+			best = z;
+		}
+	}
+
+	return best;
+}
+
+// blackboard tick (KAPTEN allocator pattern, 2 s cadence): the most stacked
+// armed+ kbot is the ANKARE, bound to the team control zone (doctrine start:
+// RA). Other armed+ kbots get a weaker binding to the zone they are in (or
+// nearest). Spawn/mid bots are unbound -- they must cross the map freely.
+static float khv_anchor_next = 0;
+static gedict_t *khv_anchor = NULL;
+static signed char khv_bound[MAX_EDICTS];
+
+static void KHV_AnchorTick(void)
+{
+	gedict_t *p, *best = NULL;
+	float bs = -1;
+
+	if (g_globalvars.time < khv_anchor_next)
+	{
+		return;
+	}
+	if (khv_anchor_next > g_globalvars.time + 3)
+	{
+		khv_anchor_next = 0;	// clock rewound (map restart)
+	}
+	khv_anchor_next = g_globalvars.time + 2.0f;
+	memset(khv_bound, 0, sizeof(khv_bound));
+	khv_anchor = NULL;
+	for (p = world; (p = find_plr(p));)
+	{
+		float s;
+		int idx = NUM_FOR_EDICT(p);
+		int zone;
+
+		if (!p->isBot || !p->fb.kbot || ISDEAD(p)
+				|| (KBot_StackClass(p) < KBM_ARMED)
+				|| (idx <= 0) || (idx >= MAX_EDICTS))
+		{
+			continue;
+		}
+		zone = KHV_ZoneOfPoint(p->s.v.origin);
+		khv_bound[idx] = (signed char)(zone ? zone : KHV_NearestZone(p->s.v.origin));
+		s = KBot_StackClass(p) * 1000.0f + p->s.v.health + p->s.v.armorvalue;
+		if (s > bs)
+		{
+			bs = s;
+			best = p;
+		}
+	}
+	khv_anchor = best;
+	if (best)
+	{
+		khv_bound[NUM_FOR_EDICT(best)] = KHZ_RA;	// control zone doctrine
+	}
+}
+
+static float khv_anchor_f = 0;
+static float khv_anchor_f_next = -1;
+
+static float KBot_HarvestAnchorFactor(void)
+{
+	if (g_globalvars.time > khv_anchor_f_next)
+	{
+		khv_anchor_f = cvar("k_kbot_harvest_anchor");
+		khv_anchor_f_next = g_globalvars.time + 1;
+	}
+
+	return khv_anchor_f;
+}
+
+// B3 seam, called from EvalGoal right after KBot_GJ_RouteShim: goals outside
+// the bound zone get their perceived travel time inflated.
+float KBot_HarvestAnchorShim(gedict_t *self, gedict_t *goal, float goal_time)
+{
+	float f = KBot_HarvestAnchorFactor();
+	int idx, zs, zg, cat;
+
+	if ((f <= 1) || !self->isBot || !self->fb.kbot || (goal->ct == ctPlayer))
+	{
+		return goal_time;
+	}
+	cat = KBot_GoalCategory(goal);
+	if ((cat == KBC_POWERUP) || (cat == KBC_WBIG))
+	{
+		return goal_time;	// strategic objectives: rotation exempt
+	}
+	KHV_AnchorTick();
+	idx = NUM_FOR_EDICT(self);
+	if ((idx <= 0) || (idx >= MAX_EDICTS) || !khv_bound[idx])
+	{
+		return goal_time;
+	}
+	zs = khv_bound[idx];
+	zg = KHV_ZoneOfEnt(goal);
+	if (zg == zs)
+	{
+		return goal_time;
+	}
+
+	return goal_time * ((self == khv_anchor) ? f : (1.0f + (f - 1.0f) * 0.5f));
 }
 
 #endif // BOT_SUPPORT
