@@ -1,5 +1,5 @@
 /*
- hm.c -- mm2humanmode core (S1 skeleton).
+ hm.c -- mm2humanmode core.
 
  See hm.h for the model. This stage wires the toggles only:
  - HMode_Active(): per-bot fb.hm override, else global cvar k_hm
@@ -51,9 +51,18 @@ typedef struct hm_bot_s
 	float next_tm_scan;				// visibility-scan throttle (engine trap)
 	hm_tm_t tm[MAX_CLIENTS + 1];	// beliefs about teammates, by entity num
 	hm_item_belief_t items[HMODE_MAX_ITEMS];	// beliefs about major items
+
+	// Emit scheduler (S4)
+	float emit_tokens;				// token bucket, 1 token = 1 message
+	float emit_refill_time;			// last refill timestamp
+	float next_periodic;			// next periodic status-class report
+	float spawn_report_at;			// pending fresh-spawn report (0 = none)
+	float coming_at;				// pending post-spawn "coming" (0 = none)
 } hm_bot_t;
 
 static hm_bot_t hm_bots[MAX_CLIENTS + 1];
+
+static void HMode_TookReport(gedict_t *self, gedict_t *item); // emit, S4
 
 static hm_bot_t* HMode_Slot(gedict_t *bot)
 {
@@ -539,6 +548,13 @@ void HMode_ItemTaken(gedict_t *item, gedict_t *player)
 	}
 
 	HMode_ItemEvent(item, player, g_globalvars.time + duration);
+
+	// Taker-side "took" callout (weapons included, unlike the stock
+	// mega/armor-only BotTookMessage which is bypassed for humanmode bots).
+	if (player->isBot && HMode_Active(player))
+	{
+		HMode_TookReport(player, item);
+	}
 }
 
 void HMode_ItemRespawned(gedict_t *item)
@@ -550,6 +566,230 @@ void HMode_ItemRespawned(gedict_t *item)
 
 	// The respawn sound/sight: item is up NOW.
 	HMode_ItemEvent(item, NULL, g_globalvars.time);
+}
+
+// ---- emit (S4) ----
+
+// Book traffic band (docs/notes/book-teamsay-study.md §3): per-player median
+// ~10.8 msg/min, hard ceiling 23/min, same-tick 2-message macro bursts are
+// native. Token bucket: refill at the median rate scaled by k_hm_rate,
+// burst headroom of 2, urgent families (lost) may run a small debt.
+#define HMODE_EMIT_RATE_PER_MIN 11.0f
+#define HMODE_EMIT_BURST 2.0f
+#define HMODE_EMIT_DEBT -2.0f
+
+// Same periodic base as the stock BotPeriodicMessages (bot_client.c).
+#define HMODE_PERIODIC 4
+
+static float HMode_RateScale(void)
+{
+	char buf[16];
+	float v;
+
+	trap_cvar_string("k_hm_rate", buf, sizeof(buf));
+
+	if (strnull(buf))
+	{
+		return 1.0f;
+	}
+
+	v = cvar("k_hm_rate");
+
+	return bound(0.0f, v, 5.0f);
+}
+
+static qbool HMode_TryEmit(hm_bot_t *slot, qbool urgent)
+{
+	float now = g_globalvars.time;
+	float refill = (now - slot->emit_refill_time) * (HMODE_EMIT_RATE_PER_MIN / 60.0f)
+			* HMode_RateScale();
+
+	slot->emit_tokens = bound(HMODE_EMIT_DEBT, slot->emit_tokens + refill, HMODE_EMIT_BURST);
+	slot->emit_refill_time = now;
+
+	if (slot->emit_tokens >= 1.0f || (urgent && (slot->emit_tokens > HMODE_EMIT_DEBT + 1.0f)))
+	{
+		slot->emit_tokens -= 1.0f;
+
+		return true;
+	}
+
+	return false;
+}
+
+// Per-family gate cvars (default on when unset, like the capability gates):
+// k_hm_emit_status/_took/_lost/_coming/_safe/_help/_point/_pwr.
+static qbool HMode_FamilyOn(const char *name)
+{
+	return HMode_CapCvar(name);
+}
+
+// Enemy-powerup spotting for humanmode bots: same perception logic as the
+// stock TeamplayReportVisiblePowerups, but metered by the governor and the
+// pwr family gate. (Reimplemented rather than wrapped so the token is only
+// spent when a report actually fires.)
+static void HMode_SpotEnemyPowerups(gedict_t *self, hm_bot_t *slot)
+{
+	byte visible[MAX_CLIENTS];
+	gedict_t *opponent;
+
+	if (FUTURE(last_mm2_spot_attempt))
+	{
+		return;
+	}
+
+	self->fb.last_mm2_spot_attempt = g_globalvars.time + 0.5 + g_random() * 0.2;
+
+	visible_to(self, g_edicts + 1, MAX_CLIENTS, visible);
+
+	for (opponent = g_edicts + 1; opponent <= g_edicts + MAX_CLIENTS; opponent++)
+	{
+		qbool diff_team = opponent->k_teamnum != self->k_teamnum;
+		qbool powerups = (int)opponent->s.v.items & (IT_QUAD | IT_INVULNERABILITY);
+
+		if (diff_team && powerups && (opponent->ct == ctPlayer)
+				&& visible[opponent - (g_edicts + 1)]
+				&& (opponent->fb.last_mm2_spot < g_globalvars.time))
+		{
+			if (VisibleEntity(opponent) && HMode_TryEmit(slot, true))
+			{
+				TeamplayMessageByName(self, "enemypwr");
+				opponent->fb.last_mm2_spot = g_globalvars.time + 2;
+				break;
+			}
+		}
+	}
+}
+
+// The humanmode replacement for BotPeriodicMessages: same builders (they
+// already produce the ezQuake-standard templates the Book corpus is made
+// of), Book-informed triggers and rates. Status is the workhorse family
+// (48.6% of real elite traffic) and fires regardless of strength; safe/help
+// take precedence in their specific situations, exactly like the stock
+// selection did.
+void HMode_PeriodicMessages(gedict_t *self)
+{
+	hm_bot_t *slot = HMode_Slot(self);
+
+	if (!slot || !HMode_CapEmit())
+	{
+		return;
+	}
+
+	// Fresh-spawn report: "0/100 sg {loc}" -- 1,082 instances in the Book
+	// corpus; closes the killfeed knowledge gap for teammates.
+	if (slot->spawn_report_at && (g_globalvars.time >= slot->spawn_report_at))
+	{
+		slot->spawn_report_at = 0;
+
+		if (ISLIVE(self) && HMode_FamilyOn("k_hm_emit_status") && HMode_TryEmit(slot, false))
+		{
+			TeamplayMessageByName(self, "report");
+			slot->next_periodic = g_globalvars.time
+					+ HMODE_PERIODIC * (g_random() + 0.5);
+		}
+	}
+
+	// Post-spawn "coming {loc}" -- third most common Book family.
+	if (slot->coming_at && (g_globalvars.time >= slot->coming_at))
+	{
+		slot->coming_at = 0;
+
+		if (ISLIVE(self) && HMode_FamilyOn("k_hm_emit_coming") && HMode_TryEmit(slot, false))
+		{
+			TeamplayMessageByName(self, "coming");
+		}
+	}
+
+	// Periodic situation report.
+	if (g_globalvars.time >= slot->next_periodic)
+	{
+		qbool has_rl = ((int)self->s.v.items & IT_ROCKET_LAUNCHER)
+				&& (self->s.v.ammo_rockets >= 3);
+		qbool has_lg = ((int)self->s.v.items & IT_LIGHTNING) && (self->s.v.ammo_cells >= 6);
+		qbool is_strong = (has_rl || has_lg) && (self->fb.total_damage >= 120);
+
+		slot->next_periodic = g_globalvars.time + HMODE_PERIODIC * (g_random() + 0.5);
+
+		if (ISLIVE(self))
+		{
+			if (is_strong && (self->tp.enemy_count == 0))
+			{
+				if (HMode_FamilyOn("k_hm_emit_safe") && HMode_TryEmit(slot, false))
+				{
+					TeamplayMessageByName(self, "secure");
+				}
+			}
+			else if (is_strong && (self->tp.enemy_count > self->tp.teammate_count))
+			{
+				if (HMode_FamilyOn("k_hm_emit_help") && HMode_TryEmit(slot, true))
+				{
+					TeamplayMessageByName(self, "help");
+				}
+			}
+			else if (self->fb.look_object
+					&& (NUM_FOR_EDICT(self->fb.look_object) == self->s.v.enemy))
+			{
+				if (HMode_FamilyOn("k_hm_emit_point") && HMode_TryEmit(slot, false))
+				{
+					TeamplayMessageByName(self, "point");
+				}
+			}
+			else if (HMode_FamilyOn("k_hm_emit_status") && HMode_TryEmit(slot, false))
+			{
+				TeamplayMessageByName(self, "report");
+			}
+		}
+	}
+
+	if (HMode_FamilyOn("k_hm_emit_pwr"))
+	{
+		HMode_SpotEnemyPowerups(self, slot);
+	}
+}
+
+// Death report: Book bots call "lost" on EVERY death (2,502 instances, the
+// second-largest family; the builder upgrades it to "quad over" / "DROPPED
+// RL" variants from death_items/death_weapon). Urgent: may run a debt.
+void HMode_DeathReport(gedict_t *self)
+{
+	hm_bot_t *slot = HMode_Slot(self);
+
+	if (!slot || !HMode_CapEmit() || !HMode_FamilyOn("k_hm_emit_lost"))
+	{
+		return;
+	}
+
+	if (HMode_TryEmit(slot, true))
+	{
+		TeamplayMessageByName(self, "lost");
+	}
+}
+
+// Taker-side "took {item} {loc}" / "team {powerup}". Wired from the item
+// event so weapons count too (stock BotTookMessage only covered mega+armor);
+// tp.took memory is fresh because TeamplayEventItemTaken runs first in
+// ItemTaken(). Powerup pickups report under the pwr family ("team quad"),
+// everything else under took.
+static void HMode_TookReport(gedict_t *self, gedict_t *item)
+{
+	hm_bot_t *slot = HMode_Slot(self);
+	qbool is_powerup = !strncmp(item->classname, "item_artifact_", 14);
+
+	if (!slot || !HMode_CapEmit() || !teamplay || (match_in_progress != 2))
+	{
+		return;
+	}
+
+	if (!HMode_FamilyOn(is_powerup ? "k_hm_emit_pwr" : "k_hm_emit_took"))
+	{
+		return;
+	}
+
+	if (HMode_TryEmit(slot, is_powerup))
+	{
+		TeamplayMessageByName(self, "took");
+	}
 }
 
 // ---- hooks ----
@@ -594,9 +834,17 @@ void HMode_ClientEnters(gedict_t *self)
 		memset(slot->tm, 0, sizeof(slot->tm));
 		memset(slot->items, 0, sizeof(slot->items));
 		slot->next_tm_scan = 0;
+		slot->spawn_report_at = 0;
+		slot->coming_at = 0;
 	}
 
-	// S4: queue the fresh-spawn report ("0/100 sg {loc}") here.
+	if (slot && (match_in_progress == 2))
+	{
+		// Queue the fresh-spawn report and the follow-up "coming" call
+		// (small jitter so four bots don't report in lockstep).
+		slot->spawn_report_at = g_globalvars.time + 0.4 + g_random() * 0.8;
+		slot->coming_at = g_globalvars.time + 2.0 + g_random() * 3.0;
+	}
 }
 
 // Every player reads the frag feed, so a teammate's death is public

@@ -112,14 +112,22 @@ void BotPlayerDeathEvent(gedict_t *self)
 
 	if (self->isBot && teamplay)
 	{
-		qbool dropped_weapon = self->s.v.weapon == IT_ROCKET_LAUNCHER
-				|| self->s.v.weapon == IT_LIGHTNING;
-		qbool no_teammates = self->tp.teammate_count == 0
-				|| self->tp.enemy_count > self->tp.teammate_count;
-
-		if (dropped_weapon || no_teammates)
+		if (HMode_Active(self))
 		{
-			TeamplayMessageByName(self, "lost");
+			// Book bots report every death (2nd-largest family).
+			HMode_DeathReport(self);
+		}
+		else
+		{
+			qbool dropped_weapon = self->s.v.weapon == IT_ROCKET_LAUNCHER
+					|| self->s.v.weapon == IT_LIGHTNING;
+			qbool no_teammates = self->tp.teammate_count == 0
+					|| self->tp.enemy_count > self->tp.teammate_count;
+
+			if (dropped_weapon || no_teammates)
+			{
+				TeamplayMessageByName(self, "lost");
+			}
 		}
 	}
 
@@ -366,9 +374,14 @@ void BotPreThink(gedict_t *self)
 
 		if (teamplay && (match_in_progress == 2))
 		{
-			// S4 will route hm-active bots to the Book-derived emitter
-			// instead of this stock periodic block.
-			BotPeriodicMessages(self);
+			if (HMode_Active(self))
+			{
+				HMode_PeriodicMessages(self);
+			}
+			else
+			{
+				BotPeriodicMessages(self);
+			}
 		}
 	}
 

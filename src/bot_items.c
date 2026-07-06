@@ -11,6 +11,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "hm.h"
 
 // Goal functions
 void item_megahealth_rot(void);
@@ -457,6 +458,11 @@ void StartItemFB(gedict_t *ent)
 
 static void BotTookMessage(gedict_t *item, gedict_t *player)
 {
+	if (player->isBot && HMode_Active(player))
+	{
+		return; // humanmode owns took reporting (governor + weapons too)
+	}
+
 	if (player->isBot && teamplay)
 	{
 		TeamplayMessageByName(player, "took");

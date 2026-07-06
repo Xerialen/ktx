@@ -22,7 +22,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define HMODE_VERSION "hm-0.2.0-tmmodel"
+#define HMODE_VERSION "hm-0.4.0-emit"
 
 // Knowledge sources, in rising order of directness. Kept on every snapshot
 // so the trust/merge policy (told vs seen) stays explicit.
@@ -82,9 +82,20 @@ void HMode_BotCmd(void);
 void HMode_MapInit(void);
 
 // Per-frame entry, called from BotPreThink for bots. Handles one-time
-// activation (3-letter k_nick tag, console log) and, once active, the
-// emit scheduler (S4).
+// activation (3-letter k_nick tag, console log) and the teammate scan.
 void HMode_Frame(gedict_t *self);
+
+// The humanmode replacement for the stock BotPeriodicMessages block:
+// Book-derived triggers/rates through the same ezQuake-standard builders
+// (status is the workhorse), metered by a token-bucket governor inside the
+// Book traffic band (~11/min median, 23/min ceiling, k_hm_rate scales).
+// Call only for hm-active bots in teamplay with match running (S4).
+void HMode_PeriodicMessages(gedict_t *self);
+
+// Death report: "lost {loc} {n}" on every death (builder upgrades to
+// "quad over"/"DROPPED RL" from death state). Replaces the stock
+// conditional lost call for hm-active bots (S4).
+void HMode_DeathReport(gedict_t *self);
 
 // Player (re)spawn hook: resets the bot's own perception state and queues
 // the fresh-spawn report (S2/S4).
