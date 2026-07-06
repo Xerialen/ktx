@@ -151,9 +151,17 @@ int KBot_GoalCategory(gedict_t *g)
 // KLUSTER regions RA/RING/SNG/LIFTS/QUAD all sit within ~1100 units of quad)
 static gedict_t *kbm_quad = NULL;
 static float kbm_quad_checked = 0;
+static char kbm_quad_map[64] = "";
 
 static gedict_t* KBot_QuadItem(void)
 {
+	// changelevel: the cached edict belongs to the old map -- drop it
+	if (!streq(kbm_quad_map, mapname))
+	{
+		kbm_quad = NULL;
+		kbm_quad_checked = 0;
+		strlcpy(kbm_quad_map, mapname, sizeof(kbm_quad_map));
+	}
 	if ((kbm_quad == NULL) && (g_globalvars.time > kbm_quad_checked))
 	{
 		kbm_quad = ez_find(world, "item_artifact_super_damage");
@@ -267,6 +275,10 @@ static void KBot_KaptenAllocate(gedict_t *self)
 	int n = 0, i, j;
 	gedict_t *p;
 
+	if (kbm_kapten_next > g_globalvars.time + 3)
+	{
+		kbm_kapten_next = 0; // clock rewound (map change/restart)
+	}
 	if (g_globalvars.time < kbm_kapten_next)
 	{
 		return;

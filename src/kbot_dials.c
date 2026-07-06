@@ -61,6 +61,10 @@ static float kdial_next[KDIAL_COUNT][5];
 
 static float KDial_Read(int dial, int slot)
 {
+	if (kdial_next[dial][slot] > g_globalvars.time + 3)
+	{
+		kdial_next[dial][slot] = -1; // clock rewound (map change/restart)
+	}
 	if (g_globalvars.time > kdial_next[dial][slot])
 	{
 		char name[48];
@@ -145,6 +149,10 @@ static void KDial_RefreshBalance(gedict_t *self)
 	gedict_t *p;
 	char *team = getteam(self);
 
+	if (kdial_bal_next > g_globalvars.time + 5)
+	{
+		kdial_bal_next = -1; // clock rewound (map change/restart)
+	}
 	if ((g_globalvars.time < kdial_bal_next) && team && streq(team, kdial_bal_team))
 	{
 		return;

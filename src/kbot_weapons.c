@@ -60,6 +60,10 @@ static float khw_sgdown = 0, khw_sgdown_next = -1;
 
 static float KHW_Cvar(const char *name, float *val, float *next)
 {
+	if (*next > g_globalvars.time + 3)
+	{
+		*next = -1; // clock rewound (map change/restart)
+	}
 	if (g_globalvars.time > *next)
 	{
 		*val = cvar(name);

@@ -230,6 +230,25 @@ static int KDLog_CandCompareDesc(const void *a, const void *b)
 	return (sa < sb) ? 1 : ((sa > sb) ? -1 : 0);
 }
 
+// qsort is not in the QVM's bg_lib; n is at most KDLOG_CAND_MAX so a hand
+// insertion sort over the same comparator is plenty.
+static void KDLog_CandSortDesc(void)
+{
+	int i, j;
+	kdlog_cand_t tmp;
+
+	for (i = 1; i < kdlog_cand_n; ++i)
+	{
+		tmp = kdlog_cand[i];
+		for (j = i - 1;
+			 (j >= 0) && (KDLog_CandCompareDesc(&kdlog_cand[j], &tmp) > 0); --j)
+		{
+			kdlog_cand[j + 1] = kdlog_cand[j];
+		}
+		kdlog_cand[j + 1] = tmp;
+	}
+}
+
 // Emit the goal record at the end of UpdateGoal. chosen = what the bot now
 // pursues (goalentity / best_goal2); prim = best_goal when the two-step
 // lookahead routed through an intermediate goal.
@@ -297,7 +316,7 @@ void KDLog_GoalChosen(gedict_t *self)
 
 	if (kdlog_cand_n > 1)
 	{
-		qsort(kdlog_cand, kdlog_cand_n, sizeof(kdlog_cand[0]), KDLog_CandCompareDesc);
+		KDLog_CandSortDesc();
 	}
 
 	for (i = 0; i < kdlog_cand_n; ++i)

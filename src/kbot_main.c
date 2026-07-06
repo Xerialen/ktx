@@ -1234,7 +1234,7 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 					 gj_lanes[lane].name, vh, vreq, onground ? 1 : 0);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "abort", "build"); // KDLOG
-			gj_state[slot] = GJ_IDLE;
+		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 
@@ -1949,7 +1949,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 gj_lanes[lane].name, along_u, vh);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "yield", "seen"); // KDLOG
-			gj_state[slot] = GJ_IDLE;
+		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 
@@ -2152,7 +2152,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 gj_lanes[lane].name, along_u, lat_n, vh, aerr);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "decline", "past"); // KDLOG
-			gj_state[slot] = GJ_IDLE;
+		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 
@@ -2170,7 +2170,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 gj_lanes[lane].name, along_u, lat_n, vh, floor);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "decline", "slow"); // KDLOG
-			gj_state[slot] = GJ_IDLE;
+		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 

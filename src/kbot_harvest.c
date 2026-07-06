@@ -75,6 +75,10 @@ static float khv_route_next = -1;
 
 static float KBot_HarvestRouteBase(void)
 {
+	if (khv_route_next > g_globalvars.time + 3)
+	{
+		khv_route_next = -1; // clock rewound (map change/restart)
+	}
 	if (g_globalvars.time > khv_route_next)
 	{
 		khv_route = cvar("k_kbot_harvest_route");
@@ -136,13 +140,22 @@ static float KHV_HeatNow(int idx)
 	return (h > 0) ? h : 0;
 }
 
+static void KHV_HoldClear(int pidx);	// defined with khv_hold below
+
 // Killed() -> BotPlayerKilledEvent seam: feed the death memory on kbot deaths.
 void KBot_HarvestDeathEvent(gedict_t *targ)
 {
 	gedict_t *m;
 	int idx;
 
-	if (!targ->isBot || !targ->fb.kbot || !(m = targ->fb.touch_marker))
+	if (!targ->isBot || !targ->fb.kbot)
+	{
+		return;
+	}
+	// a death always ends any guard/posting hold -- the respawned bot must
+	// not stand frozen in the stale watch until the old timer expires
+	KHV_HoldClear(NUM_FOR_EDICT(targ));
+	if (!(m = targ->fb.touch_marker))
 	{
 		return;
 	}
@@ -211,6 +224,10 @@ static float khv_threat_next = -1;
 
 static float KBot_HarvestThreatBase(void)
 {
+	if (khv_threat_next > g_globalvars.time + 3)
+	{
+		khv_threat_next = -1; // clock rewound (map change/restart)
+	}
 	if (g_globalvars.time > khv_threat_next)
 	{
 		khv_threat = cvar("k_kbot_harvest_threat");
@@ -369,6 +386,13 @@ static int KHV_ZoneOfEnt(gedict_t *e)
 	{
 		return KHZ_NONE;
 	}
+	// transient edicts (dropped packs) get freed and their index reused by
+	// later packs elsewhere -- never cache those, the stale zone would leak
+	// onto the next tenant
+	if (e->classname && streq(e->classname, "backpack"))
+	{
+		return KHV_ZoneOfPoint(e->s.v.origin);
+	}
 	if (!streq(khv_zone_map, mapname))
 	{
 		memset(khv_zone_cache, 0, sizeof(khv_zone_cache));
@@ -469,6 +493,10 @@ static float khv_anchor_f_next = -1;
 
 static float KBot_HarvestAnchorFactor(void)
 {
+	if (khv_anchor_f_next > g_globalvars.time + 3)
+	{
+		khv_anchor_f_next = -1; // clock rewound (map change/restart)
+	}
 	if (g_globalvars.time > khv_anchor_f_next)
 	{
 		khv_anchor_f = cvar("k_kbot_harvest_anchor");
@@ -523,9 +551,17 @@ float KBot_HarvestAnchorShim(gedict_t *self, gedict_t *goal, float goal_time)
 
 static gedict_t *khv_quad = NULL;
 static float khv_quad_checked = 0;
+static char khv_quad_map[64] = "";
 
 static gedict_t* KHV_QuadItem(void)
 {
+	// changelevel: the cached edict belongs to the old map -- drop it
+	if (!streq(khv_quad_map, mapname))
+	{
+		khv_quad = NULL;
+		khv_quad_checked = 0;
+		strlcpy(khv_quad_map, mapname, sizeof(khv_quad_map));
+	}
 	if ((khv_quad == NULL) && (g_globalvars.time > khv_quad_checked))
 	{
 		khv_quad = ez_find(world, "item_artifact_super_damage");
@@ -635,6 +671,10 @@ static float khv_hold_f_next = -1;
 
 static float KHV_CvarCached(const char *name, float *val, float *next)
 {
+	if (*next > g_globalvars.time + 3)
+	{
+		*next = -1; // clock rewound (map change/restart)
+	}
 	if (g_globalvars.time > *next)
 	{
 		*val = cvar(name);
@@ -703,6 +743,14 @@ typedef struct
 } khv_hold_state_t;
 
 static khv_hold_state_t khv_hold[MAX_EDICTS];
+
+static void KHV_HoldClear(int pidx)
+{
+	if ((pidx > 0) && (pidx < MAX_EDICTS))
+	{
+		khv_hold[pidx].until = 0;
+	}
+}
 
 // accessor for kbot_weapons.c rule 3: a hold wants the real gun out
 qbool KBot_HarvestHolding(gedict_t *p)
@@ -822,6 +870,10 @@ qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction)
 		static float khv_dbg_f = 0;
 		static float khv_dbg_f_next = -1;
 
+		if (khv_dbg_next[idx] > g_globalvars.time + 4)
+		{
+			khv_dbg_next[idx] = 0; // clock rewound (map change/restart)
+		}
 		if (KHV_CvarCached("k_kbot_harvest_debug", &khv_dbg_f, &khv_dbg_f_next)
 				&& (g_globalvars.time > khv_dbg_next[idx]))
 		{
