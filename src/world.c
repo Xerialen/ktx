@@ -1229,6 +1229,12 @@ void FirstFrame(void)
 	// E14: launch speed-floor multiplier for lanes 5/6 (floor = vreq * mul,
 	// gated on the ALONG-axis velocity component, not total vh).
 	RegisterCvarEx("k_kbot_gj_sng_mul", "0"); // 0 = per-lane defaults (5: 1.0, 6: 1.08)
+	// E14/s4: lane-5 build orbit (s3: every in-match arrival engaged AT the
+	// take and declined slow -- the orbit holds a deep yard carrot until exit
+	// speed, then dashes straight in). Orbit only, no airborne chain-hop.
+	RegisterCvarEx("k_kbot_gj_schain", "1");
+	RegisterCvarEx("k_kbot_gj_schain_exit", "390");
+	RegisterCvarEx("k_kbot_gj_schain_back", "260");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{

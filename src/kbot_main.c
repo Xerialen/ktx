@@ -503,6 +503,17 @@ static qbool GJ_ChainLane(int lane)
 	{
 		return cvar("k_kbot_gj_mchain") != 0;
 	}
+	// E14/s4 lane 5: in-match arrivals engage already AT the yard takeoff and
+	// decline slow (s3: 13/13 DECLINE_SLOW at along 0-8, vh 242-348 vs floor
+	// 354; the lone LAUNCH came from a bot that happened in from along -338 at
+	// 434). The build-orbit is the existing cure: hold a deep-runway carrot
+	// until exit speed, then a straight inbound dash. Orbit only -- the
+	// airborne chain-hop is excluded (floor 354 sits well under the ~430
+	// ground-build cap, no bridge needed).
+	if (lane == 5)
+	{
+		return cvar("k_kbot_gj_schain") != 0;
+	}
 	return false;
 }
 
@@ -535,6 +546,14 @@ static float GJ_ChainExitV(int lane)
 		float ce = cvar("k_kbot_gj_chain_exit");
 
 		return (ce > 0) ? ce : 430;
+	}
+	// E14/s4 lane 5: floor 354 + dash top-up; 390 leaves ~35 ups of margin for
+	// the turn-out alignment loss before the along-component gate.
+	if (lane == 5)
+	{
+		float se = cvar("k_kbot_gj_schain_exit");
+
+		return (se > 0) ? se : 390;
 	}
 	{
 		float me = cvar("k_kbot_gj_mchain_exit");
@@ -1634,8 +1653,16 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		apptime = cvar("k_kbot_gj_chain") ? 8.0f : 6.0f;
 	}
 	// E14 lane 6: the scripted L-approach (walkway -> strip -> ledge north ->
-	// south run) is up to ~450u of walking before the build leg.
+	// south run) is up to ~450u of walking before the build leg. s4: chain
+	// arrivals start ~380u further east on the shelf -- 12s covers the full
+	// route; the timeout is a safe decline either way.
 	if (lane == 6)
+	{
+		apptime = 12.0f;
+	}
+	// E14/s4 lane 5: the build orbit needs loops + the inbound dash (same
+	// rationale as lane 4's chain).
+	if ((lane == 5) && GJ_ChainLane(lane))
 	{
 		apptime = 8.0f;
 	}
@@ -1981,6 +2008,18 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// 93-177 and killed every orbit). Suppress both grounded declines inside
 	// the maneuver band; keep a HARD past-limit (along > 64) as the edge/fin
 	// safety -- beyond that the bot really is drifting off the deck plate.
+	// E14/s4 lane 6: chain arrivals touch down EAST of the take (shelf x -468,
+	// along up to ~+104 inside the widened lat window) and the L-legs below
+	// must route them west -- but the grounded lip declines fired first and
+	// killed the approach on frame one (s3: the only shelf landing drew
+	// APP_DECLINE_PAST along=32 lat=104 aerr=153 one second after touchdown,
+	// and lane 6 stayed silent). Until the bot has reached the deep-runway
+	// point every grounded decline is premature; the 12s apptime and the
+	// vh<30 stuck guard remain the safety net.
+	if ((lane == 6) && !gj_sng_deep[slot])
+	{
+		goto gj_app_drive;
+	}
 	{
 		qbool orbiting = GJ_ChainLane(lane) && (vh < GJ_ChainExitV(lane));
 
@@ -2048,7 +2087,7 @@ gj_app_drive:
 	// ~100u past the lip along u (BSP: floor to y=112/160) -> DECLINE_PAST.
 	// Same-frame hop on the press frame means ground friction never applies
 	// (the E3 motor's documented contact-frame idiom).
-	if (GJ_ChainLane(lane) && onground &&
+	if (GJ_ChainLane(lane) && (lane != 5) && onground &&
 		(along_u < -launch_win) && (vh > 1))
 	{
 		float cmin = (lane == 4) ? cvar("k_kbot_gj_chain_min")
@@ -2180,6 +2219,15 @@ gj_app_drive:
 		{
 			float cback = (lane == 4) ? cvar("k_kbot_gj_chain_back")
 									  : cvar("k_kbot_gj_mchain_back");
+			// E14/s4 lane 5: own runway depth -- the yard is open north of
+			// the take (take y 490; the deep point at ~y 750 stays inside
+			// the yard bowl), and 260u at ~340 ups is a <1s straight dash.
+			if (lane == 5)
+			{
+				float sb = cvar("k_kbot_gj_schain_back");
+
+				cback = (sb > 0) ? sb : 260;
+			}
 			float cexit = GJ_ChainExitV(lane);
 			// Bias the orbit 40u toward the open (negative-lat) side: a
 			// centered orbit's loops grazed the WEST deck edge x1264
@@ -2207,7 +2255,11 @@ gj_app_drive:
 		{
 			float va = self->s.v.velocity[0] * u[0] + self->s.v.velocity[1] * u[1];
 
-			if (along_u <= -140)
+			// s4: threshold loosened -140 -> -120. The north L-leg target
+			// (-848,408) sits at along -134; a bot steering AT it hovers just
+			// short of -140 and the flag never set (latent deadlock -- the
+			// va<200 leg then holds the carrot there forever).
+			if (along_u <= -120)
 			{
 				gj_sng_deep[slot] = true; // deep-runway point reached
 			}
@@ -2242,7 +2294,9 @@ gj_app_drive:
 			else if (!gj_sng_deep[slot] && (va < 200))
 			{
 				// on the ledge without south speed: walk north for runway
-				VectorSet(tgt, -848, 408, org[2]);
+				// (s4: 408 -> 430 so the deep flag at along -120 trips well
+				// before the carrot is reached; ledge floor runs to y~460)
+				VectorSet(tgt, -848, 430, org[2]);
 			}
 			// else: the default lip carrot (south dash at the take) stands
 		}
