@@ -1229,16 +1229,11 @@ void FirstFrame(void)
 	// E14: launch speed-floor multiplier for lanes 5/6 (floor = vreq * mul,
 	// gated on the ALONG-axis velocity component, not total vh).
 	RegisterCvarEx("k_kbot_gj_sng_mul", "0"); // 0 = per-lane defaults (5: 1.0, 6: 1.08)
-	// E14/s4: lane-5 build orbit (s3: every in-match arrival engaged AT the
-	// take and declined slow -- the orbit holds a deep yard carrot until exit
-	// speed, then dashes straight in). Orbit only, no airborne chain-hop.
+	// E14/s6: lane-5 scripted L-approach (corridor mouth -> south dash along
+	// the demo-measured x~-540 corridor). Gates the legs + the 8s apptime +
+	// the pre-route decline skip. s4/s5 orbit attempts removed (geometry:
+	// on-axis deep point walled; hold-boundary was an oscillation trap).
 	RegisterCvarEx("k_kbot_gj_schain", "1");
-	RegisterCvarEx("k_kbot_gj_schain_exit", "390");
-	// s5: 260 -> 240 + eastward bias -90 (perp units; negative = +x): s4
-	// measured the on-axis deep point walled at along -200; the NE-corridor
-	// hold reproduces the only organic 434-launch ansats (s3 goldenboy).
-	RegisterCvarEx("k_kbot_gj_schain_back", "240");
-	RegisterCvarEx("k_kbot_gj_schain_bias", "-90");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{

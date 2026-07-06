@@ -503,17 +503,15 @@ static qbool GJ_ChainLane(int lane)
 	{
 		return cvar("k_kbot_gj_mchain") != 0;
 	}
-	// E14/s4 lane 5: in-match arrivals engage already AT the yard takeoff and
-	// decline slow (s3: 13/13 DECLINE_SLOW at along 0-8, vh 242-348 vs floor
-	// 354; the lone LAUNCH came from a bot that happened in from along -338 at
-	// 434). The build-orbit is the existing cure: hold a deep-runway carrot
-	// until exit speed, then a straight inbound dash. Orbit only -- the
-	// airborne chain-hop is excluded (floor 354 sits well under the ~430
-	// ground-build cap, no bridge needed).
-	if (lane == 5)
-	{
-		return cvar("k_kbot_gj_schain") != 0;
-	}
+	// E14/s6: lane 5 is NOT a chain lane. The s4/s5 orbit attempts both
+	// failed on geometry: s4's on-axis deep point sat behind the yard-center
+	// structure (7/7 timeouts grinding at along -200), and s5's hold-boundary
+	// at -(cback-64) is a carrot-flip oscillation trap for bots that walk
+	// (lane 4 never sees it -- its bots reach exit speed before the
+	// boundary; s5: all jams dithering at along -175..-182, vh 0-59, in
+	// OPEN ground). Lane 5 uses scripted L-legs instead (the lane-6
+	// pattern) along the demo-measured corridor -- see the drive-carrot
+	// section.
 	return false;
 }
 
@@ -546,14 +544,6 @@ static float GJ_ChainExitV(int lane)
 		float ce = cvar("k_kbot_gj_chain_exit");
 
 		return (ce > 0) ? ce : 430;
-	}
-	// E14/s4 lane 5: floor 354 + dash top-up; 390 leaves ~35 ups of margin for
-	// the turn-out alignment loss before the along-component gate.
-	if (lane == 5)
-	{
-		float se = cvar("k_kbot_gj_schain_exit");
-
-		return (se > 0) ? se : 390;
 	}
 	{
 		float me = cvar("k_kbot_gj_mchain_exit");
@@ -1660,9 +1650,9 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	{
 		apptime = 12.0f;
 	}
-	// E14/s4 lane 5: the build orbit needs loops + the inbound dash (same
-	// rationale as lane 4's chain).
-	if ((lane == 5) && GJ_ChainLane(lane))
+	// E14/s6 lane 5: the L-leg route (corridor mouth at along -312, then a
+	// ~310u dash) needs more than the 3.5s default.
+	if ((lane == 5) && cvar("k_kbot_gj_schain"))
 	{
 		apptime = 8.0f;
 	}
@@ -2014,9 +2004,12 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// killed the approach on frame one (s3: the only shelf landing drew
 	// APP_DECLINE_PAST along=32 lat=104 aerr=153 one second after touchdown,
 	// and lane 6 stayed silent). Until the bot has reached the deep-runway
-	// point every grounded decline is premature; the 12s apptime and the
-	// vh<30 stuck guard remain the safety net.
-	if ((lane == 6) && !gj_sng_deep[slot])
+	// point every grounded decline is premature; the apptime timeout and the
+	// vh<30 stuck guard remain the safety net. s6: same for lane 5 -- its
+	// engages start AT the lip (s3: 13/13 DECLINE_SLOW at along 0-8) and the
+	// L-leg below must first route them north up the corridor.
+	if ((lane == 6 || (lane == 5 && cvar("k_kbot_gj_schain"))) &&
+		!gj_sng_deep[slot])
 	{
 		goto gj_app_drive;
 	}
@@ -2226,22 +2219,6 @@ gj_app_drive:
 			// deck-specific; the mirror runways are unmeasured -> no bias.
 			float obias = (lane == 4) ? 40 : 0;
 
-			// E14/s5 lane 5: the yard is NOT open due north of the take --
-			// s4 measured a wall on the axis at along -200 (all 7 engages
-			// timed out grinding at (-527,688) vh 0 pushing the on-axis
-			// deep point). But the NE corridor IS open: the only organic
-			// 434-launch (s3 goldenboy) came in from along -338 lat -64
-			// (x -440..-483, y ~820). Hold the orbit IN that corridor:
-			// cback 240 + an EASTWARD bias (negative obias shifts along
-			// +perp = +x) puts the deep point at ~(-444,740).
-			if (lane == 5)
-			{
-				float sb = cvar("k_kbot_gj_schain_back");
-				float sbias = cvar("k_kbot_gj_schain_bias");
-
-				cback = (sb > 0) ? sb : 240;
-				obias = (sbias != 0) ? sbias : -90;
-			}
 			if (cback <= 0) { cback = (lane == 4) ? 340 : 240; }
 			if ((vh < cexit) && (along_u > -(cback - 64)))
 			{
@@ -2249,6 +2226,32 @@ gj_app_drive:
 				tgt[1] = take[1] + u[1] * (-cback) - u[0] * obias;
 				tgt[2] = org[2];
 			}
+		}
+		// E14/s6 lane-5 L-APPROACH (replaces the s4/s5 orbit attempts). Every
+		// point below is measured from the s3 goldenboy LAND demo track
+		// (mvd-api stream-slice, sng-s3/20260706T072051Z-p28599 t 291-299):
+		// the yard NORTH BAND y~800-870 is walkable x -118..-646, and the
+		// dash corridor x~-530..-545 runs open from y~800 down to the take
+		// (his bunny dash crossed y 687 at x -541 and launched at -515,512
+		// carrying 434). Leg 1: walk to the corridor mouth (-540,800), which
+		// lip-engagers reach by running straight north up the corridor and
+		// NE-band bots reach along the band. Deep flag latches when the bot
+		// is IN the corridor column (along <= -240, lat -60..+30 -- the
+		// mouth sits at along -312 lat ~-15, so the flag trips ~70u before
+		// the carrot is reached, no hover-deadlock); then the default lip
+		// carrot pulls the straight south dash and the circle-build tops up
+		// (goldenboy did it organically at 434 vs floor 354).
+		if ((lane == 5) && cvar("k_kbot_gj_schain"))
+		{
+			if ((along_u <= -240) && (lat_n >= -60) && (lat_n <= 30))
+			{
+				gj_sng_deep[slot] = true;
+			}
+			if (!gj_sng_deep[slot])
+			{
+				VectorSet(tgt, -540, 800, org[2]);
+			}
+			// else: the default lip carrot (south dash) stands
 		}
 		// E14 lane-6 L-APPROACH. The takeoff sits on the narrow west ledge and
 		// the measured floor map (findings 07-05) shows the only walk from the
