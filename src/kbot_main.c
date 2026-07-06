@@ -515,6 +515,20 @@ static qbool GJ_ChainLane(int lane)
 	return false;
 }
 
+// E14/s7: lanes that use the airborne chain-hop + its in-flight E1 hold.
+// Superset of GJ_ChainLane: lane 5 hops WITHOUT the build orbit (s6 measured
+// the walking dash capping at 317-351 vs floor 354 -- the same actuation
+// wall the E13 mirror lanes hit, same cure: one flat hop lifts ~335 to ~400.
+// The lone organic 434-launch bunny-hopped the corridor; this is that, aimed).
+static qbool GJ_HopLane(int lane)
+{
+	if (lane == 5)
+	{
+		return cvar("k_kbot_gj_schain") != 0;
+	}
+	return GJ_ChainLane(lane);
+}
+
 // E13: per-lane chain flight/trigger hold-speed target (the E1 hold speed).
 // Lane 4 aims the middle of the slot speed window (the coupled needle); the
 // mirror lanes have NO ceiling -- aim inside the measured in-match LAND band
@@ -1795,7 +1809,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// re-runs every grounded gate (incl. this timeout), so let it finish
 	// instead of discarding a completed build on a boundary technicality.
 	if (((now - gj_app_t0[slot]) > apptime) &&
-		!(GJ_ChainLane(lane) && gj_chain_on[slot] && !onground))
+		!(GJ_HopLane(lane) && gj_chain_on[slot] && !onground))
 	{
 		if (cvar("k_kbot_gj_gatelog"))
 		{
@@ -1820,7 +1834,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// frame is grounded, so BOTH this yield and the unseen rule below still
 	// gate the actual launch.
 	if (self->fb.enemy_visible &&
-		!(GJ_ChainLane(lane) && gj_chain_on[slot] && !onground))
+		!(GJ_HopLane(lane) && gj_chain_on[slot] && !onground))
 	{
 		// E14: log the yield for the SNG lanes -- s2 could not distinguish
 		// "yielded to combat" from "never progressed" (both were silent),
@@ -1859,7 +1873,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// through to the launch gate below (launch-aim snap + GJ_Cross), which is
 	// the proven in-match launch path. Timeout/enemy yields above still apply
 	// mid-flight (bot is over the deck the whole hop -- bailing is safe).
-	if (GJ_ChainLane(lane) && gj_chain_on[slot] && !onground)
+	if (GJ_HopLane(lane) && gj_chain_on[slot] && !onground)
 	{
 		float tgt_v = GJ_ChainTargetV(lane, vreq);
 		vec3_t cur, cwish, cang;
@@ -2080,7 +2094,7 @@ gj_app_drive:
 	// ~100u past the lip along u (BSP: floor to y=112/160) -> DECLINE_PAST.
 	// Same-frame hop on the press frame means ground friction never applies
 	// (the E3 motor's documented contact-frame idiom).
-	if (GJ_ChainLane(lane) && (lane != 5) && onground &&
+	if (GJ_HopLane(lane) && onground &&
 		(along_u < -launch_win) && (vh > 1))
 	{
 		float cmin = (lane == 4) ? cvar("k_kbot_gj_chain_min")
@@ -2090,6 +2104,10 @@ gj_app_drive:
 		vec3_t land, lrel;
 
 		if (cmin <= 0) { cmin = (lane == 4) ? 410 : 320; }
+		// E14/s7 lane 5: dash speeds pass ~310 around the hop-distance
+		// window (s6 lip arrivals 317-351); mchain's 320 floor misses the
+		// low half of a window the hop itself lifts to ~395+.
+		if (lane == 5) { cmin = 310; }
 		vpred = sqrt(vh * vh + 67593.0f * 0.675f);
 		if (vpred > tgt_v) { vpred = tgt_v; }
 		if ((vh >= cmin) && (vpred >= floor))
@@ -2250,6 +2268,15 @@ gj_app_drive:
 			if (!gj_sng_deep[slot])
 			{
 				VectorSet(tgt, -540, 800, org[2]);
+			}
+			else if (along_u < -160)
+			{
+				// s7 leg 2: mid-corridor gate at goldenboy's own line. The
+				// on-axis lip carrot clips the yard-center hill (west face
+				// x~-527), so s6 dashers slid along it and arrived at lat
+				// -45 -- outside the +-28 launch window. This point sits at
+				// lat -5: the last 112u run in nearly on-axis.
+				VectorSet(tgt, -520, 600, org[2]);
 			}
 			// else: the default lip carrot (south dash) stands
 		}
