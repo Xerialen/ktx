@@ -193,6 +193,14 @@ static qbool TA_Clear(gedict_t *self)
 	{
 		return false;
 	}
+	// The clear state is NOT weapon-idle: frogbots lob "luck shots" at
+	// corners with no enemy visible (SHOT_FOR_LUCK), and the rocket leaves
+	// along desired_angle at fire time -- redirecting those wastes real
+	// damage. Door/wait logic keeps its view too.
+	if (self->fb.firing || (self->fb.state & (SHOT_FOR_LUCK | WAIT)))
+	{
+		return false;
+	}
 	if (KBot_GapjumpBusy(self))
 	{
 		return false;
