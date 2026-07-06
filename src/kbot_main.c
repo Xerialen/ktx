@@ -63,14 +63,49 @@ void KBot_MarkBot(gedict_t *bot)
 	bot->fb.kbot = KBOT_STATE_MARKED;
 	KBot_StampedVersion(stamped, sizeof(stamped));
 
-	// Identity markers: userinfo key + "kb:" name prefix, so identity shows
-	// up in ktxstats / MVD player names.
+	// Identity marker: the "kbot" userinfo key + the [kbot] stamp line below
+	// are the identity proof (ledger maps stamps onto roster names).
 	trap_SetBotUserInfo(entity, "kbot", stamped, 0);
-	if (strncmp(bot->netname, "kb:", 3))
+
+	// Owner roster rule (2026-07-06): komodobots field the owner's chosen
+	// names (k_kbot_name1..4, default hib/dag/Angua/Rock) and color
+	// (k_kbot_color, default 3). Same cvar interface as the mm2humanmode
+	// branch so the branches merge cleanly. Team seating stays with the
+	// bench (k_kbot_team registered for interface parity only). Index = how
+	// many kbots are already marked, in join order. Empty name cvar falls
+	// back to the legacy kb: prefix.
 	{
-		snprintf(newname, sizeof(newname), "kb:%s", bot->netname);
-		trap_SetBotUserInfo(entity, "name", newname, 0);
-		infokey(bot, "name", bot->netname, CLIENT_NAME_LEN); // refresh game-side copy
+		char namecvar[16];
+		char color[8];
+		gedict_t *p;
+		int idx = 1;
+
+		for (p = world; (p = find_plr(p));)
+		{
+			if ((p != bot) && p->isBot && p->fb.kbot)
+			{
+				idx++;
+			}
+		}
+		snprintf(namecvar, sizeof(namecvar), "k_kbot_name%d", idx);
+		trap_cvar_string(namecvar, newname, sizeof(newname));
+		if (!strnull(newname))
+		{
+			trap_SetBotUserInfo(entity, "name", newname, 0);
+			infokey(bot, "name", bot->netname, CLIENT_NAME_LEN);
+		}
+		else if (strncmp(bot->netname, "kb:", 3))
+		{
+			snprintf(newname, sizeof(newname), "kb:%s", bot->netname);
+			trap_SetBotUserInfo(entity, "name", newname, 0);
+			infokey(bot, "name", bot->netname, CLIENT_NAME_LEN);
+		}
+		trap_cvar_string("k_kbot_color", color, sizeof(color));
+		if (!strnull(color))
+		{
+			trap_SetBotUserInfo(entity, "topcolor", color, 0);
+			trap_SetBotUserInfo(entity, "bottomcolor", color, 0);
+		}
 	}
 
 	// Advertise the brain version via serverinfo (set once, on first kbot).

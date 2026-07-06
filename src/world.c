@@ -1075,6 +1075,17 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
 
+	// Owner roster rule (2026-07-06): komodobots field team komo, color 3,
+	// names hib/dag/Angua/Rock. Applied in KBot_MarkBot; team seating stays
+	// with the bench (cvar registered for interface parity with the
+	// mm2humanmode branch).
+	RegisterCvarEx("k_kbot_name1", "hib");
+	RegisterCvarEx("k_kbot_name2", "dag");
+	RegisterCvarEx("k_kbot_name3", "Angua");
+	RegisterCvarEx("k_kbot_name4", "Rock");
+	RegisterCvarEx("k_kbot_color", "3");
+	RegisterCvarEx("k_kbot_team", "komo");
+
 	// KDLOG decision log (kbot_dlog.c): 0 off, 1 komodobots, 2 all bots.
 	RegisterCvarEx("k_kbot_dlog", "0");
 	RegisterCvarEx("k_kbot_commit", "0");
