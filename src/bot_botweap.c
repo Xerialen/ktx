@@ -12,6 +12,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 // FIXME: globals, this is just setting
 void DM6SelectWeaponToOpenDoor(gedict_t *self);
@@ -618,7 +619,10 @@ void SetFireButton(gedict_t *self, vec3_t rel_pos, float rel_dist)
 			{
 				if (!SameTeam(traced, self))
 				{
-					if (!((int)self->s.v.flags & FL_WATERJUMP))
+					// KBot model v1: route focus -- don't adopt a blocking
+					// player as the new target while on an item route.
+					if (!((int)self->s.v.flags & FL_WATERJUMP)
+							&& !KBot_RouteFocusIgnore(self, traced))
 					{
 						self->s.v.enemy = NUM_FOR_EDICT(traced);
 						LookEnemy(self, traced);
@@ -729,6 +733,18 @@ static int DesiredWeapon(void)
 	if (TP_CouldDamageTeammate(self))
 	{
 		return IT_SHOTGUN;
+	}
+
+	// KBOT weapon discipline (kbot_weapons.c, owner rules 2026-07-06):
+	// quad-shaft / cheap finish / sg-down, each behind its own cvar.
+	if (self->isBot && self->fb.kbot)
+	{
+		int w = KBot_WeaponOverride(self);
+
+		if (w)
+		{
+			return w;
+		}
 	}
 
 	// When to always use RL

@@ -63,14 +63,50 @@ void KBot_MarkBot(gedict_t *bot)
 	bot->fb.kbot = KBOT_STATE_MARKED;
 	KBot_StampedVersion(stamped, sizeof(stamped));
 
-	// Identity markers: userinfo key + "kb:" name prefix, so identity shows
-	// up in ktxstats / MVD player names.
+	// Identity marker: the "kbot" userinfo key + the [kbot] stamp line below
+	// are the identity proof (ledger maps stamps onto roster names).
 	trap_SetBotUserInfo(entity, "kbot", stamped, 0);
-	if (strncmp(bot->netname, "kb:", 3))
+
+	// Owner roster rule (2026-07-06): komodobots field the owner's chosen
+	// names (k_kbot_name1..4, default hib/dag/Angua/Rock) and color
+	// (k_kbot_color, default 3). Same cvar interface as the mm2humanmode
+	// branch so the branches merge cleanly. Team seating stays with the
+	// bench (k_kbot_team registered for interface parity only). Index = how
+	// many kbots are already marked, in join order. Empty name cvar falls
+	// back to the legacy kb: prefix.
 	{
-		snprintf(newname, sizeof(newname), "kb:%s", bot->netname);
-		trap_SetBotUserInfo(entity, "name", newname, 0);
-		infokey(bot, "name", bot->netname, CLIENT_NAME_LEN); // refresh game-side copy
+		char namecvar[16];
+		char color[8];
+		gedict_t *p;
+		int idx = 1;
+
+		for (p = world; (p = find_plr(p));)
+		{
+			if ((p != bot) && p->isBot && p->fb.kbot)
+			{
+				idx++;
+			}
+		}
+		bot->fb.kbot_slot = idx;	// stable per-bot identity for dial overrides
+		snprintf(namecvar, sizeof(namecvar), "k_kbot_name%d", idx);
+		trap_cvar_string(namecvar, newname, sizeof(newname));
+		if (!strnull(newname))
+		{
+			trap_SetBotUserInfo(entity, "name", newname, 0);
+			infokey(bot, "name", bot->netname, CLIENT_NAME_LEN);
+		}
+		else if (strncmp(bot->netname, "kb:", 3))
+		{
+			snprintf(newname, sizeof(newname), "kb:%s", bot->netname);
+			trap_SetBotUserInfo(entity, "name", newname, 0);
+			infokey(bot, "name", bot->netname, CLIENT_NAME_LEN);
+		}
+		trap_cvar_string("k_kbot_color", color, sizeof(color));
+		if (!strnull(color))
+		{
+			trap_SetBotUserInfo(entity, "topcolor", color, 0);
+			trap_SetBotUserInfo(entity, "bottomcolor", color, 0);
+		}
 	}
 
 	// Advertise the brain version via serverinfo (set once, on first kbot).
@@ -126,12 +162,59 @@ qbool KBot_AvoidFights(gedict_t *self)
 	{
 		return true;
 	}
-	if ((self->s.v.health + self->s.v.armorvalue) < KBot_WeakStack())
+	// D1 engage dial: low aggression retreats earlier, high fights lower
+	if ((self->s.v.health + self->s.v.armorvalue)
+			< KBot_WeakStack() * KBot_DialWeakScale(self))
 	{
 		return true;
 	}
 
 	return false;
+}
+
+// ---- decision model v1: route focus (owner doctrine 2026-07-05) ----
+//
+// A weak kbot (KBot_AvoidFights) routing to a world item ignores enemies
+// entirely: no retarget, no chase, no combat-driven goal refresh. The
+// decision-log baseline showed 91% of weak-bot damage events fire while the
+// goal is a world item -- combat micro blind to the route is how the bot
+// "jumps down shooting from quad" and loses its position. Two doctrine
+// exceptions re-enable engagement:
+//   (a) finish-off: the enemy carries a real weapon (RL/LG) AND is low
+//       health (<= k_kbot_finish_hp) -- a couple of shotgun shells convert.
+//   (b) jump-denial (enemy mid gap-jump) -- NOT implemented in v1; needs the
+//       gj-lane flight zones, documented in the model spec.
+// Gated per-call by k_kbot_route_focus; baseline bots can't take the branch.
+qbool KBot_RouteFocusIgnore(gedict_t *self, gedict_t *enemy)
+{
+	gedict_t *goal;
+
+	if (!self->isBot || !self->fb.kbot || !cvar("k_kbot_route_focus"))
+	{
+		return false;
+	}
+	// SG-only, literally (owner doctrine): any real weapon means the bot
+	// fights as vanilla. The stack-based weak test (KBot_AvoidFights) proved
+	// far too broad here -- an RL-carrier at stack 90 refusing to fight gets
+	// farmed (wave-1 A/B 2026-07-05: mean -54.75 over 4 matches, 0 wins).
+	if ((int)self->s.v.items & (IT_ROCKET_LAUNCHER | IT_LIGHTNING | IT_GRENADE_LAUNCHER
+			| IT_SUPER_NAILGUN | IT_NAILGUN | IT_SUPER_SHOTGUN))
+	{
+		return false;
+	}
+	goal = &g_edicts[(int)self->s.v.goalentity];
+	if ((goal == world) || (goal->ct == ctPlayer))
+	{
+		return false; // no route to protect
+	}
+	if (enemy && (enemy->ct == ctPlayer)
+			&& ((int)enemy->s.v.items & (IT_ROCKET_LAUNCHER | IT_LIGHTNING))
+			&& (enemy->s.v.health <= max(1, (int)cvar("k_kbot_finish_hp"))))
+	{
+		return false; // exception (a): finish-off
+	}
+
+	return true;
 }
 
 // ============================================================================
@@ -1030,6 +1113,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, slot, self->netname, gj_trial[slot], org[0], org[1], org[2],
 				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		KDLog_Play(self, gj_lanes[lane].name, "land", NULL); // KDLOG
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -1044,6 +1128,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
 				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		KDLog_Play(self, gj_lanes[lane].name, "fail", "water"); // KDLOG
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -1054,6 +1139,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
 				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		KDLog_Play(self, gj_lanes[lane].name, "fail", "gap"); // KDLOG
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -1064,6 +1150,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
 				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
 				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+		KDLog_Play(self, gj_lanes[lane].name, "fail", "timeout"); // KDLOG
 		gj_state[slot] = GJ_COOL;
 		gj_cool_t0[slot] = now;
 		return true;
@@ -1146,6 +1233,7 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 			G_cprint("[gapjump] lane=%s result=BUILD_ABORT vh=%.0f vreq=%.0f og=%d\n",
 					 gj_lanes[lane].name, vh, vreq, onground ? 1 : 0);
 		}
+		KDLog_Play(self, gj_lanes[lane].name, "abort", "build"); // KDLOG
 		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
@@ -1817,6 +1905,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 "vh=%.0f floor=%.0f\n",
 					 gj_lanes[lane].name, along_u, lat_n, vh, floor);
 		}
+		KDLog_Play(self, gj_lanes[lane].name, "abort", "app_timeout"); // KDLOG
 		// E14: a stalled approach that re-engages every apptime pinned a bot
 		// in place for minutes (s1: 138 lane-6 timeouts at vh 0, same spot).
 		// A stalled timeout gets a LONG suppression so vanilla nav really
@@ -1859,6 +1948,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 			G_cprint("[gapjump] lane=%s result=APP_YIELD_SEEN along=%.0f vh=%.0f\n",
 					 gj_lanes[lane].name, along_u, vh);
 		}
+		KDLog_Play(self, gj_lanes[lane].name, "yield", "seen"); // KDLOG
 		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
@@ -1997,6 +2087,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 gj_lanes[lane].name, along_u, lat_n, vh, vreq, floor, vyaw,
 					 u_yaw, now - gj_app_t0[slot]);
 		}
+		KDLog_Play(self, gj_lanes[lane].name, "launch", NULL); // KDLOG
 		gj_t0[slot] = now;
 		gj_peak[slot] = 0;
 		gj_flip[slot] = 1;
@@ -2038,6 +2129,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 						 "lat=%.0f vh=%.0f aerr=%.0f\n",
 						 gj_lanes[lane].name, along_u, lat_n, vh, aerr);
 			}
+			KDLog_Play(self, gj_lanes[lane].name, "decline", "past_orbit"); // KDLOG
 			gj_state[slot] = GJ_IDLE;
 			return false;
 		}
@@ -2059,6 +2151,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 "vh=%.0f aerr=%.0f\n",
 					 gj_lanes[lane].name, along_u, lat_n, vh, aerr);
 		}
+		KDLog_Play(self, gj_lanes[lane].name, "decline", "past"); // KDLOG
 		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
@@ -2076,6 +2169,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 "vh=%.0f floor=%.0f\n",
 					 gj_lanes[lane].name, along_u, lat_n, vh, floor);
 		}
+		KDLog_Play(self, gj_lanes[lane].name, "decline", "slow"); // KDLOG
 		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
@@ -2174,6 +2268,10 @@ gj_app_drive:
 								 "lhop=%.0f pa=%.0f pl=%.0f along=%.0f\n",
 								 gj_lanes[lane].name, vh, vpred, lhop, pa, pl,
 								 along_u);
+					}
+					if (!gj_chain_on[slot])
+					{
+						KDLog_Play(self, gj_lanes[lane].name, "chainhop", NULL); // KDLOG
 					}
 					gj_chain_on[slot] = true;
 					gj_chain_flip[slot] = 0;
@@ -2743,6 +2841,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 				G_cprint("[gapjump] lane=%s result=APP_ENGAGE\n",
 						 gj_lanes[pick].name);
 			}
+			KDLog_Play(self, gj_lanes[pick].name, "engage", NULL); // KDLOG
 			return GJ_ApproachFrame(self, slot, pick, jumping, firing, impulse,
 									direction);
 		}

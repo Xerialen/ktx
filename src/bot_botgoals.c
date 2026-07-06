@@ -49,6 +49,7 @@ void UpdateGoalEntity(gedict_t *item, gedict_t *taker)
 		if (plr->s.v.goalentity == item_entity)
 		{
 			plr->fb.goal_refresh_time = min(plr->fb.goal_refresh_time, g_globalvars.time + delay);
+			KDLog_MarkTrigger(plr, "item_taken"); // KDLOG
 			ResetGoalEntity(plr);
 		}
 	}
@@ -89,9 +90,51 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 		goal_desire = (self->fb.fixed_goal == goal_entity ? 1000 : 0);
 	}
 
+	// KBot model v1: incumbent-goal hysteresis. The goal the bot is already
+	// routing to keeps a multiplicative desire bonus (k_kbot_commit > 1), so a
+	// marginally better alternative no longer flips the route every refresh
+	// (baseline: 54% switch rate, armor conversion 24%). Desire-level boost
+	// propagates coherently through both scoring stages (EvalGoal/EvalGoal2
+	// read saved_goal_desire).
+	if (self->fb.kbot && (goal_desire > 0) && !self->fb.fixed_goal
+			&& (NUM_FOR_EDICT(goal_entity) == (int)self->s.v.goalentity))
+	{
+		float commit = cvar("k_kbot_commit");
+
+		if (commit > 1)
+		{
+			goal_desire *= commit;
+		}
+	}
+
+	// Tournament models (kbot_models.c): class/role/economy desire policy on
+	// world goals. Returns 0 for gated candidates (class-conditioned dive).
+	// No-op unless k_kbot_model[_red/_blue] selects a model for this bot.
+	if (self->fb.kbot && (goal_desire > 0) && !self->fb.fixed_goal)
+	{
+		goal_desire = KBot_ModelScaleGoal(self, goal_entity, goal_desire);
+	}
+
 	goal_entity->fb.saved_goal_desire = goal_desire;
 	if (goal_desire > 0)
 	{
+		// KBot model v1: dive gate. A stacked bot (h+a >= k_kbot_dive_gate)
+		// never takes an underwater goal -- the decision-log baseline had 18%
+		// of item intents in WATER vs Milton's one water pickup in 5 minutes.
+		// Underwater = engine pointcontents at the item origin, map-agnostic.
+		if (self->fb.kbot)
+		{
+			int gate = (int)cvar("k_kbot_dive_gate");
+
+			if ((gate > 0) && ((self->s.v.health + self->s.v.armorvalue) >= gate)
+					&& (trap_pointcontents(PASSVEC3(goal_entity->s.v.origin)) == CONTENT_WATER))
+			{
+				goal_entity->fb.saved_goal_desire = 0;
+
+				return;
+			}
+		}
+
 		if (POVDMM4DontWalkThroughDoor(goal_entity))
 		{
 			return;
@@ -129,6 +172,21 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 
 			goal_time = KBot_GJ_RouteShim(self, goal_entity, goal_time);
 		}
+
+		// HARVEST B3 (kbot-only, k_kbot_harvest_anchor): the stacked bot's
+		// zone looks near, the rest of the map looks far. Cost shaping via
+		// perceived travel time -- desire untouched (R2). Powerups and big
+		// weapons are exempt (objective rotation).
+		goal_time = KBot_HarvestAnchorShim(self, goal_entity, goal_time);
+
+		// HARVEST B4 (kbot-only, k_kbot_harvest_quad): the two nearest armed+
+		// kbots see the quad goal deflated while the window opens (T-10 s).
+		goal_time = KBot_HarvestQuadShim(self, goal_entity, goal_time);
+
+		// Tactical dials D2/D3/D5 (kbot_dials.c, owner directive): hoarding
+		// vs map control, team adherence, economic sharing -- all perceived
+		// travel time, never desire (R2). Off (-1) is byte-neutral.
+		goal_time = KBot_DialGoalShim(self, goal_entity, goal_time);
 
 		if (self->fb.goal_enemy_repel)
 		{
@@ -187,6 +245,8 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 				return;
 			}
 		}
+
+		KDLog_GoalCandidate(self, goal_entity, goal_desire, goal_time); // KDLOG: viable candidate
 
 		// If the bot can think far enough ahead...
 		if (goal_time < self->fb.skill.lookahead_time)
@@ -425,6 +485,8 @@ void UpdateGoal(gedict_t *self)
 	self->fb.best_goal = NULL;
 	self->fb.goal_enemy_repel = self->fb.goal_enemy_desire = 0;
 
+	KDLog_GoalReset(self); // KDLOG: arm the candidate collector for this pass
+
 	BotEvadeLogic(self);
 
 	if (enemy_->fb.touch_marker)
@@ -446,6 +508,15 @@ void UpdateGoal(gedict_t *self)
 		{
 			self->fb.goal_enemy_desire = 0;
 		}
+		// UTBYTE (kbot_models.c): engagement economics scale the HUNT desire
+		// only -- TA passes through, POKA damps, VAGRA zeroes, FINISH boosts.
+		// s.v.enemy is never touched here: repel, dodge and evade keep their
+		// vanilla inputs (the b2 death-spiral lesson, hard rule).
+		if (self->fb.kbot && (self->fb.goal_enemy_desire > 0))
+		{
+			self->fb.goal_enemy_desire = KBot_ModelScaleHunt(self, enemy_,
+															self->fb.goal_enemy_desire);
+		}
 		if (self->fb.goal_enemy_desire > 0)
 		{
 			gedict_t *enemy = &g_edicts[self->s.v.enemy];
@@ -456,6 +527,8 @@ void UpdateGoal(gedict_t *self)
 											self->fb.canRocketJump);
 			enemy_->fb.saved_respawn_time = 0;
 			enemy_->fb.saved_goal_time = traveltime;
+
+			KDLog_GoalCandidate(self, enemy_, self->fb.goal_enemy_desire, traveltime); // KDLOG
 
 			if (traveltime < self->fb.skill.lookahead_time)
 			{
@@ -574,6 +647,8 @@ void UpdateGoal(gedict_t *self)
 	{
 		self->s.v.goalentity = NUM_FOR_EDICT(world);
 	}
+
+	KDLog_GoalChosen(self); // KDLOG: emit the goal record for this pass
 }
 
 #endif // BOT_SUPPORT

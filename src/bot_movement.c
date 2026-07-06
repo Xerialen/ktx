@@ -6221,6 +6221,14 @@ void BotSetCommand(gedict_t *self)
 
 	BotApplyMoveProbe(self, &jumping, &firing, &impulse, direction);
 
+	// KBOT HARVEST (B4 guard / B5 posting): hold primitive -- stand still with
+	// the look locked on an entry line. Runs BEFORE the gapjump so a triggered
+	// crossing keeps final authority. Aborts itself on contact/damage (R1).
+	if (self->fb.kbot)
+	{
+		KBot_HarvestHoldFrame(self, &jumping, direction);
+	}
+
 	// KBOT (E6 gap-jump): final-authority movement override for a triggered
 	// gap crossing. Inert (returns false, no effect) unless k_kbot_gapjump != 0
 	// and a lane is selected/passively triggered. Placed after the moveprobe so

@@ -12,6 +12,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 #define PERIODIC_MM2_STATUS 4
 
@@ -101,6 +102,11 @@ void BotPlayerKilledEvent(gedict_t *targ, gedict_t *attacker, gedict_t *inflicto
 	{
 		targ->fb.state |= BACKPACK_IS_UNREACHABLE;
 	}
+
+	// HARVEST B2: kbot deaths feed the per-marker death memory
+	KBot_HarvestDeathEvent(targ);
+	// weapon discipline rule 2: killfeed death stamps (all players)
+	KBot_WeaponsDeathEvent(targ);
 }
 
 // Called whenever a player dies
@@ -147,6 +153,7 @@ void BotClientEntersEvent(gedict_t *self, gedict_t *spawn_pos)
 	self->fb.firing = false;
 	self->fb.desired_weapon_impulse = 2;
 	self->fb.goal_refresh_time = 0;
+	KDLog_MarkTrigger(self, "spawn"); // KDLOG
 	self->fb.allowedMakeNoise = true;
 
 	FrogbotSetHealthArmour(self);

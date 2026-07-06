@@ -1075,6 +1075,74 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weak_cells", "15");
 	RegisterCvarEx("k_kbot_version_suffix", "");
 
+	// Owner roster rule (2026-07-06): komodobots field team komo, color 3,
+	// names hib/dag/Angua/Rock. Applied in KBot_MarkBot; team seating stays
+	// with the bench (cvar registered for interface parity with the
+	// mm2humanmode branch).
+	RegisterCvarEx("k_kbot_name1", "hib");
+	RegisterCvarEx("k_kbot_name2", "dag");
+	RegisterCvarEx("k_kbot_name3", "Angua");
+	RegisterCvarEx("k_kbot_name4", "Rock");
+	RegisterCvarEx("k_kbot_color", "3");
+	RegisterCvarEx("k_kbot_team", "komo");
+
+	// KDLOG decision log (kbot_dlog.c): 0 off, 1 komodobots, 2 all bots.
+	RegisterCvarEx("k_kbot_dlog", "0");
+	RegisterCvarEx("k_kbot_commit", "0");
+	RegisterCvarEx("k_kbot_route_focus", "0");
+	RegisterCvarEx("k_kbot_finish_hp", "40");
+	RegisterCvarEx("k_kbot_dive_gate", "0");
+
+	// Tournament decision models (kbot_models.c): 0 off (byte-neutral),
+	// 1 TDM, 2 KAPTEN, 3 UTBYTE. Per-team overrides for model face-offs.
+	RegisterCvarEx("k_kbot_model", "0");
+	RegisterCvarEx("k_kbot_model_red", "0");
+	RegisterCvarEx("k_kbot_model_blue", "0");
+
+	// HARVEST possession layer (kbot_harvest.c), one lever per mechanism,
+	// byte-neutral defaults. harvest_route = B1 water-route base penalty in
+	// path-score units (spec start 2.5), scaled by carried value V.
+	// harvest_threat = B2 place-threat base weight (spec start 2.0): death
+	// memory x known enemy weight x V; enemy-quad markers get max penalty.
+	// harvest_anchor = B3 zone-binding goal_time factor for the ANKARE (spec
+	// start 1.4; other armed+ bots get half the inflation; <=1 off).
+	// harvest_quad = B4 convergence (0/1); harvest_guard = B4 guard stance
+	// (0/1); harvest_hold = B5 posting (0/1).
+	RegisterCvarEx("k_kbot_harvest_route", "0");
+	RegisterCvarEx("k_kbot_harvest_threat", "0");
+	RegisterCvarEx("k_kbot_harvest_anchor", "0");
+	RegisterCvarEx("k_kbot_harvest_quad", "0");
+	RegisterCvarEx("k_kbot_harvest_guard", "0");
+	RegisterCvarEx("k_kbot_harvest_hold", "0");
+	RegisterCvarEx("k_kbot_harvest_debug", "0");
+
+	// Weapon discipline (kbot_weapons.c, owner rules 2026-07-06):
+	// quad-shaft always-in-reach / cheap hitscan finish on clipped fresh
+	// spawns / sg carried outside engagements (pack economy).
+	RegisterCvarEx("k_kbot_weap_quadlg", "0");
+	RegisterCvarEx("k_kbot_weap_finish", "0");
+	RegisterCvarEx("k_kbot_weap_sgdown", "0");
+
+	// The five tactical dials (kbot_dials.c, owner directive 2026-07-06):
+	// -1 = off (byte-neutral), 0..1 active. Global value + per-bot override
+	// k_kbot_dial_<name>_s<slot> (slot = kbot join order 1..4).
+	{
+		static const char *dials[] = { "engage", "hoard", "adhere", "quad", "share" };
+		char name[48];
+		int i, s;
+
+		for (i = 0; i < 5; i++)
+		{
+			snprintf(name, sizeof(name), "k_kbot_dial_%s", dials[i]);
+			RegisterCvarEx(name, "-1");
+			for (s = 1; s <= 4; s++)
+			{
+				snprintf(name, sizeof(name), "k_kbot_dial_%s_s%d", dials[i], s);
+				RegisterCvarEx(name, "-1");
+			}
+		}
+	}
+
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).
 	// k_kbot_gj_lane -1 = passive trigger (real feature); 0..3 = trial driver
