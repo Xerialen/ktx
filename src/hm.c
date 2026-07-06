@@ -2802,27 +2802,63 @@ static gedict_t* HMP_FindReportedItem(hmp_tok_t *toks, int n)
 	return NULL;
 }
 
-// A teammate said "took {item} [{loc}]" (or implied it): the item's belief
-// clock starts now.
-static void HMP_ApplyItemTaken(gedict_t *receiver, gedict_t *sender,
-							   hmp_tok_t *toks, int n)
+// The powerup item a message names, tolerant of punctuation ("quad!",
+// "quad,rl"). Powerups are unique per map, so no loc disambiguation.
+static gedict_t* HMP_FindPowerupItem(hmp_tok_t *toks, int n)
+{
+	int i;
+
+	for (i = 0; i < n; i++)
+	{
+		const char *t = toks[i].text;
+		const char *cn = NULL;
+
+		if ((toks[i].type != HMP_WORD) && (toks[i].type != HMP_LOC))
+		{
+			continue;
+		}
+
+		if (HMP_StartsWord(t, "quad"))
+		{
+			cn = "item_artifact_super_damage";
+		}
+		else if (HMP_StartsWord(t, "penta") || HMP_StartsWord(t, "pent"))
+		{
+			cn = "item_artifact_invulnerability";
+		}
+		else if (HMP_StartsWord(t, "ring") || HMP_StartsWord(t, "eyes"))
+		{
+			cn = "item_artifact_invisibility";
+		}
+
+		if (cn)
+		{
+			return find(world, FOFCLSN, (char *)cn);
+		}
+	}
+
+	return NULL;
+}
+
+// Start the belief clock of one specific item entity (told report).
+static void HMP_ApplyItemTakenEnt(gedict_t *receiver, gedict_t *sender,
+								  gedict_t *item)
 {
 	hm_bot_t *slot = HMode_Slot(receiver);
-	gedict_t *best = HMP_FindReportedItem(toks, n);
 	int idx;
 
-	if (!slot || !best)
+	if (!slot || !item)
 	{
 		return;
 	}
 
-	idx = HMode_ItemIndex(best, true);
+	idx = HMode_ItemIndex(item, true);
 
 	if (idx >= 0)
 	{
-		float duration = HMode_ItemDuration(best);
+		float duration = HMode_ItemDuration(item);
 
-		HMode_LogItemUpd(receiver, best, HMODE_SRC_TOLD, slot->items[idx].respawn_at,
+		HMode_LogItemUpd(receiver, item, HMODE_SRC_TOLD, slot->items[idx].respawn_at,
 							g_globalvars.time + duration, sender->netname);
 
 		// A told report never downgrades a same-moment direct sighting;
@@ -2831,6 +2867,14 @@ static void HMP_ApplyItemTaken(gedict_t *receiver, gedict_t *sender,
 		slot->items[idx].taken_time = g_globalvars.time;
 		slot->items[idx].respawn_at = g_globalvars.time + duration;
 	}
+}
+
+// A teammate said "took {item} [{loc}]" (or implied it): the item's belief
+// clock starts now.
+static void HMP_ApplyItemTaken(gedict_t *receiver, gedict_t *sender,
+							   hmp_tok_t *toks, int n)
+{
+	HMP_ApplyItemTakenEnt(receiver, sender, HMP_FindReportedItem(toks, n));
 }
 
 // A teammate reports an item UP ("ra at raup", "quad up", "mega at 5"):
@@ -2977,26 +3021,6 @@ static qbool HMP_ReportOrg(gedict_t *receiver, gedict_t *sender, hmp_tok_t *toks
 		{
 			VectorCopy(tm->org, out);
 
-			return true;
-		}
-	}
-
-	return false;
-}
-
-// does the message name a powerup at all (word or loc-typed token)?
-static qbool HMP_MentionsPowerup(hmp_tok_t *toks, int n)
-{
-	int i;
-
-	for (i = 0; i < n; i++)
-	{
-		const char *t = toks[i].text;
-
-		if (((toks[i].type == HMP_WORD) || (toks[i].type == HMP_LOC))
-				&& (streq(t, "quad") || streq(t, "pent") || streq(t, "penta")
-					|| streq(t, "ring") || streq(t, "eyes")))
-		{
 			return true;
 		}
 	}
@@ -3190,10 +3214,12 @@ static void HMP_Apply(gedict_t *receiver, gedict_t *sender, int cat,
 		case HMP_CAT_ENEMY_POWERUP:
 		{
 			// "enemy quad [at {loc}]": the powerup is down (clock starts) and
-			// a powered enemy is about, maybe with a known position
+			// a powered enemy is about, maybe with a known position. The
+			// powerup lookup is punctuation-tolerant ("## quad! mega" must
+			// start the QUAD clock, not mega's).
 			qbool has = HMP_ResolveLoc(toks, n, loc);
 
-			HMP_ApplyItemTaken(receiver, sender, toks, n);
+			HMP_ApplyItemTakenEnt(receiver, sender, HMP_FindPowerupItem(toks, n));
 			HMP_AddSighting(receiver, sender, has ? loc : NULL,
 							HMP_EcountOr(toks, n, 1), true);
 
@@ -3216,9 +3242,11 @@ static void HMP_Apply(gedict_t *receiver, gedict_t *sender, int cat,
 		{
 			// "quad missed": the enemy got it -> clock starts, powered enemy
 			// about (position unknown). Without a powerup word: no-op.
-			if (HMP_MentionsPowerup(toks, n))
+			gedict_t *pw = HMP_FindPowerupItem(toks, n);
+
+			if (pw)
 			{
-				HMP_ApplyItemTaken(receiver, sender, toks, n);
+				HMP_ApplyItemTakenEnt(receiver, sender, pw);
 				HMP_AddSighting(receiver, sender, NULL, 1, true);
 			}
 
