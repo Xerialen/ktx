@@ -2091,6 +2091,19 @@ gj_app_drive:
 	return true;
 }
 
+// kbot_threataim yield probe: any non-idle gap-jump state owns the view.
+qbool KBot_GapjumpBusy(gedict_t *self)
+{
+	int slot = NUM_FOR_EDICT(self) - 1;
+
+	if ((slot < 0) || (slot >= MAX_CLIENTS))
+	{
+		return false;
+	}
+
+	return gj_state[slot] != GJ_IDLE;
+}
+
 qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 					   int *impulse, vec3_t direction)
 {

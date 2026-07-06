@@ -57,6 +57,29 @@ typedef struct hm_tm_s
 // HMode_Active(bot) && HMode_CapTmInfo() -- direct entity reads are omniscience.
 const hm_tm_t* HMode_TeammateInfo(gedict_t *bot, gedict_t *mate);
 
+// A believed enemy sighting, sourced from teamsay reports (enemy_seen /
+// enemy_powerup / enemy_at_nick / lost-with-count / slipped). Ring buffer:
+// old sightings age out via HMODE_SIGHT_TTL, overwrite via the head.
+#define HMODE_MAX_SIGHT 8
+#define HMODE_SIGHT_TTL 15.0f	// a told enemy position is stale after this
+
+typedef struct hm_sight_s
+{
+	float time;			// when the report arrived (0 = empty/invalidated)
+	qbool org_known;	// org below is meaningful
+	vec3_t org;			// believed enemy position
+	int count;			// enemies reported (>= 1)
+	qbool powerup;		// a quaded/pented/ringed enemy
+	int source;			// HM_SRC_*
+} hm_sight_t;
+
+// Read-only view of the bot's believed enemy sightings (the S7 ring).
+// Returns the ring size and points *out at it; 0/NULL when humanmode is
+// inactive for this bot. Callers filter by time > 0 and age < HMODE_SIGHT_TTL.
+// THE sanctioned way for aim/decision code to ask about enemies it cannot
+// see (kbot_threataim B_sight term).
+int HMode_Sightings(gedict_t *bot, const hm_sight_t **out);
+
 // States for fb.hm (per-bot override; memset-0 default = inherit global)
 #define HMODE_INHERIT 0	// follow cvar k_hm
 #define HMODE_ON      1	// humanmode forced on for this bot

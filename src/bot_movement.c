@@ -6119,6 +6119,12 @@ void BotSetCommand(gedict_t *self)
 	VectorNormalize(self->fb.dir_move_);
 	VectorScale(self->fb.dir_move_, sv_maxspeed, self->fb.last_cmd_direction);
 
+	// kbot_threataim (issue #29): clear-state crosshair placement. Owns
+	// desired_angle only in the CLEAR state (k_kbot_threataim, default 0 =
+	// untouched). Before the makevectors below so the world-space wishdir
+	// projection uses the same final view angles the command sends.
+	KBot_ThreatAimFrame(self);
+
 	trap_makevectors(self->fb.desired_angle);
 
 	// During intermission, always do nothing and leave humans to change level

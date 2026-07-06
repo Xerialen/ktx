@@ -37,20 +37,8 @@ typedef struct hm_item_belief_s
 
 // ---- comm-consumption types (S7: the brain acts on comms) ----
 
-// A believed enemy sighting, sourced from teamsay reports (enemy_seen /
-// enemy_powerup / enemy_at_nick / lost-with-count / slipped). Ring buffer:
-// old sightings age out via HMODE_SIGHT_TTL, overwrite via the head.
-#define HMODE_MAX_SIGHT 8
-
-typedef struct hm_sight_s
-{
-	float time;			// when the report arrived (0 = empty/invalidated)
-	qbool org_known;	// org below is meaningful
-	vec3_t org;			// believed enemy position
-	int count;			// enemies reported (>= 1)
-	qbool powerup;		// a quaded/pented/ringed enemy
-	int source;			// HM_SRC_*
-} hm_sight_t;
+// hm_sight_t + HMODE_MAX_SIGHT/HMODE_SIGHT_TTL live in hm.h since the
+// kbot_threataim module reads the ring via HMode_Sightings().
 
 // One comm-influenced goal evaluation this refresh (for the [hm-goal]
 // commit log: was the chosen goal comm-biased, and how).
@@ -573,6 +561,32 @@ const hm_tm_t* HMode_TeammateInfo(gedict_t *bot, gedict_t *mate)
 	return &slot->tm[m];
 }
 
+int HMode_Sightings(gedict_t *bot, const hm_sight_t **out)
+{
+	hm_bot_t *slot;
+
+	if (!out)
+	{
+		return 0;
+	}
+	*out = NULL;
+
+	if (!bot || !bot->isBot || !HMode_Active(bot))
+	{
+		return 0;
+	}
+
+	slot = HMode_Slot(bot);
+	if (!slot)
+	{
+		return 0;
+	}
+
+	*out = slot->sights;
+
+	return HMODE_MAX_SIGHT;
+}
+
 // ---- item beliefs (S3) ----
 
 // Fixed respawn duration per major item, in seconds. These are the "fixed
@@ -915,7 +929,6 @@ void HMode_ItemRespawned(gedict_t *item)
 // with actionable content now influences goal choice. Multiplicative
 // factors keep the stock desire scale intact; k_hm 0 bots never get here.
 
-#define HMODE_SIGHT_TTL 15.0f	// a told enemy position is stale after this
 #define HMODE_PACK_TTL  20.0f
 #define HMODE_REQ_TTL   20.0f
 #define HMODE_NEED_TTL  15.0f

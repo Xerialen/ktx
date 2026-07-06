@@ -64,6 +64,26 @@ qbool KBot_AvoidFights(gedict_t *self);
 qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 					   int *impulse, vec3_t direction);
 
+// True while the gap-jump state machine owns this bot's movement/view
+// (any state but idle). kbot_threataim yields on it.
+qbool KBot_GapjumpBusy(gedict_t *self);
+
+// ---- kbot_threataim (issue #29): clear-state crosshair placement ----
+// Milton-derived threat-point pre-aim for humanmode kbots. Master cvar
+// k_kbot_threataim: 0 off (bit-identical), 1 static table, 2 +hm-belief
+// weighting, 3 +hold/snap scheduler with staleness and rear checks.
+// Map data is generated (komodobots2 tools/gen_threataim_table.py); dm3 only.
+
+// Once per map, next to HMode_MapInit(): reset per-bot state, key threat
+// cells to their nearest tracked major item edicts (fixed map facts).
+void KBot_ThreatAimMapInit(void);
+
+// Per-frame, from BotSetCommand BEFORE the desired_angle makevectors: in the
+// CLEAR state (no visible enemy, no view-owning movement/combat logic) owns
+// fb.desired_angle; otherwise does nothing. Also emits the [ta-contact]
+// first-sight KPI line on the enemy_visible rising edge (k_hm_debug).
+void KBot_ThreatAimFrame(gedict_t *self);
+
 #endif // BOT_SUPPORT
 
 #endif // KTX_KBOT_H

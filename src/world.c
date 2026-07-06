@@ -26,6 +26,7 @@
 #include "g_local.h"
 #ifdef BOT_SUPPORT
 #include "hm.h"
+#include "kbot.h"
 #endif
 
 #ifdef BOT_SUPPORT
@@ -1331,6 +1332,7 @@ void SecondFrame(void)
 
 #ifdef BOT_SUPPORT
 	HMode_MapInit(); // mm2humanmode: item edicts are new each map
+	KBot_ThreatAimMapInit(); // threat cells re-key to the fresh item edicts
 #endif
 }
 
