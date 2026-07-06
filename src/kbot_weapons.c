@@ -131,13 +131,15 @@ int KBot_WeaponOverride(gedict_t *self)
 			rule = 2;
 		}
 	}
-	// rule 3: no engagement -> the SG is the carried weapon
+	// rule 3: no engagement -> the SG is the carried weapon. Owner: this is
+	// cl_weaponhide semantics -- SG out ALWAYS outside the actual firing
+	// action, including while camping/holding an angle; the real gun comes
+	// out in the firing moment at no extra cost (the bot switches and fires
+	// in the same think). No WAIT/hold exemptions.
 	else if (KHW_Cvar("k_kbot_weap_sgdown", &khw_sgdown, &khw_sgdown_next)
 			&& !enemy_seen && !self->fb.firing
 			&& (KHW_Since(khw_last_fire[idx]) > 0.7f)
 			&& (KHW_Since(self->fb.last_hurt) > 2.0f)
-			&& !(self->fb.state & WAIT)
-			&& !KBot_HarvestHolding(self)
 			&& (self->s.v.ammo_shells > 0))
 	{
 		rule = 3;
