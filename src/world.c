@@ -1224,8 +1224,11 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_gj_mchain_exit", "380");
 	RegisterCvarEx("k_kbot_gj_mchain_back", "240");
 	// SNG mega jumps, lanes 5/6 (ticket #24, branch dm3-jumps): yard -> the
-	// 120-step across the void band, and plateau -> mega perch straight north.
+	// 120-step across the void band, and west ledge -> mega perch.
 	RegisterCvarEx("k_kbot_gj_sng", "1");
+	// E14: launch speed-floor multiplier for lanes 5/6 (floor = vreq * mul,
+	// gated on the ALONG-axis velocity component, not total vh).
+	RegisterCvarEx("k_kbot_gj_sng_mul", "0"); // 0 = per-lane defaults (5: 1.0, 6: 1.08)
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
