@@ -177,6 +177,11 @@ qbool VisibleEntity(gedict_t *ent)
 	return false;
 }
 
+qbool SameTeam(gedict_t *p1, gedict_t *p2)
+{
+	return false;
+}
+
 void visible_to(gedict_t *viewer, gedict_t *first, int len, byte *visible)
 {
 	memset(visible, 0, len);

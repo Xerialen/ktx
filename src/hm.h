@@ -22,7 +22,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define HMODE_VERSION "hm-0.6.2-roster-defaults"
+#define HMODE_VERSION "hm-0.7.0-comm-consumers"
 
 // Knowledge sources, in rising order of directness. Kept on every snapshot
 // so the trust/merge policy (told vs seen) stays explicit.
@@ -132,8 +132,24 @@ float HMode_ItemRespawnTime(gedict_t *bot, gedict_t *item);
 void HMode_Killfeed(gedict_t *victim, gedict_t *attacker);
 
 // Incoming teamsay for a humanmode bot receiver: parse (multi-clan grammar)
-// and update teammate snapshots / item beliefs (S5).
+// and update teammate snapshots / item beliefs / enemy sightings / orders (S5+S7).
 void HMode_ParseTeamsay(gedict_t *receiver, gedict_t *sender, const char *text);
+
+// ---- comm-driven decision bias (S7: the brain acts on comms) ----
+// Called from the goal machinery (bot_botgoals.c). Identity/no-ops for
+// non-humanmode bots, so the stock path stays bit-identical.
+
+// Clear the per-refresh comm-bias record (UpdateGoal start).
+void HMode_GoalRefreshBegin(gedict_t *self);
+
+// Adjust one goal's desire from comm-derived beliefs (told-of enemies,
+// pack reports, orders, need-yields, help calls, teammate coverage).
+// Emits [hm-act] telemetry under k_hm_debug.
+float HMode_GoalDesireBias(gedict_t *self, gedict_t *goal, float desire);
+
+// Commit-time telemetry: log the chosen goal and whether comms biased it
+// ([hm-goal], on-change, k_hm_debug only).
+void HMode_LogGoalChoice(gedict_t *self, gedict_t *goal);
 
 #endif // BOT_SUPPORT
 

@@ -35,6 +35,33 @@ typedef struct hm_item_belief_s
 	float respawn_at;	// when the bot believes it comes back (0 = assume up)
 } hm_item_belief_t;
 
+// ---- comm-consumption types (S7: the brain acts on comms) ----
+
+// A believed enemy sighting, sourced from teamsay reports (enemy_seen /
+// enemy_powerup / enemy_at_nick / lost-with-count / slipped). Ring buffer:
+// old sightings age out via HMODE_SIGHT_TTL, overwrite via the head.
+#define HMODE_MAX_SIGHT 8
+
+typedef struct hm_sight_s
+{
+	float time;			// when the report arrived (0 = empty/invalidated)
+	qbool org_known;	// org below is meaningful
+	vec3_t org;			// believed enemy position
+	int count;			// enemies reported (>= 1)
+	qbool powerup;		// a quaded/pented/ringed enemy
+	int source;			// HM_SRC_*
+} hm_sight_t;
+
+// One comm-influenced goal evaluation this refresh (for the [hm-goal]
+// commit log: was the chosen goal comm-biased, and how).
+#define HMODE_MAX_ACT 16
+
+typedef struct hm_act_s
+{
+	gedict_t *goal;
+	int kinds;			// HMODE_ACT_* bitmask
+} hm_act_t;
+
 // Global registry: stable index per major-item entity for the per-bot
 // belief arrays. Item edicts persist for the whole map, so registration is
 // lazy and never invalidated.
@@ -59,6 +86,31 @@ typedef struct hm_bot_s
 	float next_periodic;			// next periodic status-class report
 	float spawn_report_at;			// pending fresh-spawn report (0 = none)
 	float coming_at;				// pending post-spawn "coming" (0 = none)
+
+	// Comm-derived world model (S7): what teammates SAID, consumed by the
+	// goal-desire bias. All of it ages out on its own TTL.
+	hm_sight_t sights[HMODE_MAX_SIGHT];	// believed enemy sightings (ring)
+	int sight_head;
+	float pack_time;				// "pack/dropped at {loc}" report
+	vec3_t pack_org;
+	qbool pack_valid;
+	float req_time;					// "get/take/camp {loc|item}" order
+	vec3_t req_org;
+	qbool req_valid;
+	float need_time;				// "need {item}" -> yield to the mate
+	gedict_t *need_item;
+	float help_time;				// "help {loc}" -> assist bias
+	vec3_t help_org;
+	qbool help_valid;
+
+	// Decision telemetry (k_hm_debug): change-throttles for the
+	// [hm-belief-dec] / [hm-goal] log lines + this refresh's comm-biased
+	// goal evals.
+	float dec_log_last[HMODE_MAX_ITEMS];
+	hm_act_t act[HMODE_MAX_ACT];
+	int act_n;
+	gedict_t *goal_logged;
+	int goal_logged_kinds;
 } hm_bot_t;
 
 static hm_bot_t hm_bots[MAX_CLIENTS + 1];
@@ -591,9 +643,119 @@ static int HMode_ItemIndex(gedict_t *item, qbool add)
 	return hm_item_count++;
 }
 
+// ---- debug telemetry helpers (k_hm_debug) ----
+// The [hm-*] console lines form a machine-checkable causality chain:
+// [hm-parse] (message -> category) -> [hm-belief-upd] (category -> world
+// model) -> [hm-belief-dec]/[hm-act] (world model -> decision input) ->
+// [hm-goal] (the committed goal). validate_hm_run.py asserts over them.
+
+static qbool HMode_DebugOn(void)
+{
+	return cvar("k_hm_debug") != 0;
+}
+
+static const char *hm_src_names[] = { "none", "killfeed", "heard", "told", "seen" };
+
+static const char* HMode_ItemShortName(gedict_t *item)
+{
+	const char *cn = item->classname;
+
+	if (streq(cn, "item_armorInv"))
+	{
+		return "ra";
+	}
+
+	if (streq(cn, "item_armor2"))
+	{
+		return "ya";
+	}
+
+	if (streq(cn, "item_armor1"))
+	{
+		return "ga";
+	}
+
+	if (streq(cn, "item_health"))
+	{
+		return ((int)item->s.v.spawnflags & H_MEGA) ? "mega" : "health";
+	}
+
+	if (streq(cn, "item_artifact_super_damage"))
+	{
+		return "quad";
+	}
+
+	if (streq(cn, "item_artifact_invulnerability"))
+	{
+		return "pent";
+	}
+
+	if (streq(cn, "item_artifact_invisibility"))
+	{
+		return "ring";
+	}
+
+	if (streq(cn, "weapon_rocketlauncher"))
+	{
+		return "rl";
+	}
+
+	if (streq(cn, "weapon_lightning"))
+	{
+		return "lg";
+	}
+
+	if (streq(cn, "weapon_grenadelauncher"))
+	{
+		return "gl";
+	}
+
+	if (streq(cn, "weapon_supernailgun"))
+	{
+		return "sng";
+	}
+
+	if (streq(cn, "weapon_supershotgun"))
+	{
+		return "ssg";
+	}
+
+	return cn;
+}
+
+// "ya@-1088,-320": short name + xy disambiguates same-type items (two YAs)
+static const char* HMode_ItemLogName(gedict_t *item)
+{
+	return va("%s@%d,%d", HMode_ItemShortName(item), (int)item->s.v.origin[0],
+				(int)item->s.v.origin[1]);
+}
+
+static const char* HMode_GoalLogName(gedict_t *goal)
+{
+	if (goal->ct == ctPlayer)
+	{
+		return va("player:%s", goal->netname);
+	}
+
+	return HMode_ItemLogName(goal);
+}
+
+static void HMode_LogItemUpd(gedict_t *bot, gedict_t *item, int src, float old_at,
+							 float new_at, const char *from)
+{
+	if (HMode_DebugOn())
+	{
+		G_cprint("[hm-belief-upd] bot=%s kind=item item=%s src=%s old=%.1f new=%.1f "
+					"truth=%.1f from=%s t=%.1f\n",
+					bot->netname, HMode_ItemLogName(item), hm_src_names[src], old_at,
+					new_at, item->fb.goal_respawn_time, from, g_globalvars.time);
+	}
+}
+
 float HMode_ItemRespawnTime(gedict_t *bot, gedict_t *item)
 {
 	hm_bot_t *slot;
+	float believed;
 	int idx;
 
 	if (!bot || !bot->isBot || !HMode_Active(bot) || !HMode_CapItemInfo())
@@ -612,12 +774,27 @@ float HMode_ItemRespawnTime(gedict_t *bot, gedict_t *item)
 
 	slot = HMode_Slot(bot);
 
-	if (!slot || (slot->items[idx].source == HMODE_SRC_NONE))
+	// never witnessed anything: assume it could be up, go look
+	believed = (!slot || (slot->items[idx].source == HMODE_SRC_NONE))
+			? 0 : slot->items[idx].respawn_at;
+
+	// decision-read telemetry, throttled on-change per bot+item
+	if (slot && HMode_DebugOn())
 	{
-		return 0; // never witnessed anything: assume it could be up, go look
+		float d = believed - slot->dec_log_last[idx];
+
+		if ((d > 0.05f) || (d < -0.05f))
+		{
+			slot->dec_log_last[idx] = believed;
+			G_cprint("[hm-belief-dec] bot=%s item=%s believed=%.1f truth=%.1f "
+						"src=%s t=%.1f\n",
+						bot->netname, HMode_ItemLogName(item), believed,
+						item->fb.goal_respawn_time,
+						hm_src_names[slot->items[idx].source], g_globalvars.time);
+		}
 	}
 
-	return slot->items[idx].respawn_at;
+	return believed;
 }
 
 // Distribute an item event over the perception channels: SEEN needs PVS+LOS
@@ -689,6 +866,9 @@ static void HMode_ItemEvent(gedict_t *item, gedict_t *taker, float respawn_at)
 			continue;
 		}
 
+		HMode_LogItemUpd(bot, item, src, slot->items[idx].respawn_at, respawn_at,
+							(bot == taker) ? "self" : (taker ? "event" : "respawn"));
+
 		slot->items[idx].source = src;
 		slot->items[idx].taken_time = g_globalvars.time;
 		slot->items[idx].respawn_at = respawn_at;
@@ -723,6 +903,262 @@ void HMode_ItemRespawned(gedict_t *item)
 
 	// The respawn sound/sight: item is up NOW.
 	HMode_ItemEvent(item, NULL, g_globalvars.time);
+}
+
+// ---- comm-driven decision bias (S7: the brain acts on comms) ----
+// Consumed inside EvalGoal (bot_botgoals.c): every parsed teamsay category
+// with actionable content now influences goal choice. Multiplicative
+// factors keep the stock desire scale intact; k_hm 0 bots never get here.
+
+#define HMODE_SIGHT_TTL 15.0f	// a told enemy position is stale after this
+#define HMODE_PACK_TTL  20.0f
+#define HMODE_REQ_TTL   20.0f
+#define HMODE_NEED_TTL  15.0f
+#define HMODE_HELP_TTL  15.0f
+
+#define HMODE_ACT_AVOID    1	// enemy reported near goal + we are weak
+#define HMODE_ACT_AVOID_PW 2	// quaded/pented enemy reported near goal
+#define HMODE_ACT_PACK     4	// reported pack: boost matching pack goals
+#define HMODE_ACT_OBEY     8	// request order near goal: boost
+#define HMODE_ACT_YIELD    16	// teammate said "need X": stand off X
+#define HMODE_ACT_ASSIST   32	// teammate called help: drift toward them
+#define HMODE_ACT_COVERED  64	// believed teammate already covers this goal
+
+static void HMode_ActKindsStr(int kinds, char *out, int outsize)
+{
+	static const struct { int bit; const char *name; } tab[] =
+	{
+		{ HMODE_ACT_AVOID, "avoid-enemy" },
+		{ HMODE_ACT_AVOID_PW, "avoid-pw" },
+		{ HMODE_ACT_PACK, "boost-pack" },
+		{ HMODE_ACT_OBEY, "obey-req" },
+		{ HMODE_ACT_YIELD, "yield-need" },
+		{ HMODE_ACT_ASSIST, "assist-help" },
+		{ HMODE_ACT_COVERED, "covered" },
+	};
+	int i;
+
+	out[0] = '\0';
+
+	for (i = 0; i < (int)(sizeof(tab) / sizeof(tab[0])); i++)
+	{
+		if (kinds & tab[i].bit)
+		{
+			if (out[0])
+			{
+				strlcat(out, "+", outsize);
+			}
+
+			strlcat(out, tab[i].name, outsize);
+		}
+	}
+
+	if (!out[0])
+	{
+		strlcpy(out, "none", outsize);
+	}
+}
+
+// Clear the per-refresh comm-bias record; called when UpdateGoal starts a
+// fresh evaluation round for this bot.
+void HMode_GoalRefreshBegin(gedict_t *self)
+{
+	hm_bot_t *slot;
+
+	if (!self->isBot || !HMode_Active(self))
+	{
+		return;
+	}
+
+	slot = HMode_Slot(self);
+
+	if (slot)
+	{
+		slot->act_n = 0;
+	}
+}
+
+// The comm consumer: adjust one goal's desire from what teammates said.
+// Returns the (possibly) biased desire; identity for non-hm bots.
+float HMode_GoalDesireBias(gedict_t *self, gedict_t *goal, float desire)
+{
+	hm_bot_t *slot;
+	float now = g_globalvars.time;
+	float d0 = desire;
+	qbool armed, strong;
+	int kinds = 0;
+	int i;
+
+	if (!self->isBot || !HMode_Active(self) || !HMode_CapParse() || !goal
+			|| (desire <= 0))
+	{
+		return desire;
+	}
+
+	slot = HMode_Slot(self);
+
+	if (!slot)
+	{
+		return desire;
+	}
+
+	armed = ((((int)self->s.v.items & IT_ROCKET_LAUNCHER) && (self->s.v.ammo_rockets > 0))
+			|| (((int)self->s.v.items & IT_LIGHTNING) && (self->s.v.ammo_cells > 0)));
+	strong = armed && (self->s.v.health >= 65);
+
+	// danger: fresh told-of enemies near this goal. A reported powerup
+	// carrier scares everyone; a plain sighting only deters weak bots.
+	for (i = 0; i < HMODE_MAX_SIGHT; i++)
+	{
+		hm_sight_t *s = &slot->sights[i];
+		float d;
+
+		if ((s->time <= 0) || (s->time < now - HMODE_SIGHT_TTL) || !s->org_known)
+		{
+			continue;
+		}
+
+		d = VectorDistance(goal->s.v.origin, s->org);
+
+		if (s->powerup && (d < 1024))
+		{
+			desire *= 0.10f;
+			kinds |= HMODE_ACT_AVOID_PW;
+		}
+		else if (!strong && (d < 768))
+		{
+			desire *= 0.25f;
+			kinds |= HMODE_ACT_AVOID;
+		}
+	}
+
+	// reported pack: boost pack-type goals near the reported spot
+	if (slot->pack_valid && (slot->pack_time > now - HMODE_PACK_TTL)
+			&& (streq(goal->classname, "backpack")
+				|| !strncmp(goal->classname, "item_artifact_", 14))
+			&& (VectorDistance(goal->s.v.origin, slot->pack_org) < 320))
+	{
+		desire *= 2.0f;
+		kinds |= HMODE_ACT_PACK;
+	}
+
+	// obey a fresh request order pointing near this goal
+	if (slot->req_valid && (slot->req_time > now - HMODE_REQ_TTL)
+			&& (VectorDistance(goal->s.v.origin, slot->req_org) < 320))
+	{
+		desire *= 1.75f;
+		kinds |= HMODE_ACT_OBEY;
+	}
+
+	// yield the item a teammate said they need (unless we are hurting too)
+	if (slot->need_item && (slot->need_time > now - HMODE_NEED_TTL)
+			&& (goal == slot->need_item) && (self->s.v.health >= 50))
+	{
+		desire *= 0.25f;
+		kinds |= HMODE_ACT_YIELD;
+	}
+
+	// assist: an armed, healthy bot drifts toward a teammate's help call
+	if (slot->help_valid && (slot->help_time > now - HMODE_HELP_TTL) && strong
+			&& (VectorDistance(goal->s.v.origin, slot->help_org) < 512))
+	{
+		desire *= 1.5f;
+		kinds |= HMODE_ACT_ASSIST;
+	}
+
+	// coverage: a believed teammate is at this item and closer than we are
+	if (!strncmp(goal->classname, "item_", 5) || !strncmp(goal->classname, "weapon_", 7))
+	{
+		for (i = 1; i <= MAX_CLIENTS; i++)
+		{
+			hm_tm_t *tm = &slot->tm[i];
+			gedict_t *mate = &g_edicts[i];
+			float d;
+
+			if ((mate == self) || (mate->ct != ctPlayer) || !SameTeam(mate, self))
+			{
+				continue;
+			}
+
+			if ((tm->source == HMODE_SRC_NONE) || !tm->loc_known
+					|| (tm->time < now - 12))
+			{
+				continue;
+			}
+
+			d = VectorDistance(tm->org, goal->s.v.origin);
+
+			if ((d < 320) && (d < VectorDistance(self->s.v.origin, goal->s.v.origin)))
+			{
+				desire *= 0.5f;
+				kinds |= HMODE_ACT_COVERED;
+				break;
+			}
+		}
+	}
+
+	if (kinds)
+	{
+		if (slot->act_n < HMODE_MAX_ACT)
+		{
+			slot->act[slot->act_n].goal = goal;
+			slot->act[slot->act_n].kinds = kinds;
+			slot->act_n++;
+		}
+
+		if (HMode_DebugOn())
+		{
+			char ks[96];
+
+			HMode_ActKindsStr(kinds, ks, sizeof(ks));
+			G_cprint("[hm-act] bot=%s kinds=%s goal=%s d0=%.1f d1=%.1f t=%.1f\n",
+						self->netname, ks, HMode_GoalLogName(goal), d0, desire,
+						g_globalvars.time);
+		}
+	}
+
+	return desire;
+}
+
+// Commit-time telemetry: which goal the brain settled on, and whether comms
+// biased it. Logged on-change only.
+void HMode_LogGoalChoice(gedict_t *self, gedict_t *goal)
+{
+	hm_bot_t *slot;
+	char ks[96];
+	int kinds = 0, i;
+
+	if (!goal || !self->isBot || !HMode_Active(self) || !HMode_DebugOn())
+	{
+		return;
+	}
+
+	slot = HMode_Slot(self);
+
+	if (!slot)
+	{
+		return;
+	}
+
+	for (i = 0; i < slot->act_n; i++)
+	{
+		if (slot->act[i].goal == goal)
+		{
+			kinds |= slot->act[i].kinds;
+		}
+	}
+
+	if ((goal == slot->goal_logged) && (kinds == slot->goal_logged_kinds))
+	{
+		return;
+	}
+
+	slot->goal_logged = goal;
+	slot->goal_logged_kinds = kinds;
+
+	HMode_ActKindsStr(kinds, ks, sizeof(ks));
+	G_cprint("[hm-goal] bot=%s goal=%s commed=%s t=%.1f\n", self->netname,
+				HMode_GoalLogName(goal), ks, g_globalvars.time);
 }
 
 // ---- emit (S4) ----
@@ -2297,20 +2733,14 @@ static const char* HMP_ItemClassname(const char *w, qbool *want_mega)
 	return NULL;
 }
 
-// A teammate said "took {item} [{loc}]": update the receiver's belief for
-// the matching item entity (nearest to the reported loc when the type is
-// ambiguous, e.g. two YAs on dm3).
-static void HMP_ApplyItemTaken(gedict_t *receiver, hmp_tok_t *toks, int n)
+// Find the item entity a report names: the first item word (WORD or LOC
+// token) that resolves wins. Ambiguous types (two YAs on dm3) need a
+// resolvable loc (nearest match); without one they are skipped.
+static gedict_t* HMP_FindReportedItem(hmp_tok_t *toks, int n)
 {
-	hm_bot_t *slot = HMode_Slot(receiver);
 	vec3_t loc;
 	qbool have_loc = HMP_ResolveLoc(toks, n, loc);
 	int i;
-
-	if (!slot)
-	{
-		return;
-	}
 
 	for (i = 0; i < n; i++)
 	{
@@ -2318,7 +2748,6 @@ static void HMP_ApplyItemTaken(gedict_t *receiver, hmp_tok_t *toks, int n)
 		const char *cn;
 		gedict_t *best = NULL, *it;
 		float best_d = 0;
-		int idx;
 
 		if ((toks[i].type != HMP_WORD) && (toks[i].type != HMP_LOC))
 		{
@@ -2332,7 +2761,7 @@ static void HMP_ApplyItemTaken(gedict_t *receiver, hmp_tok_t *toks, int n)
 			continue;
 		}
 
-		for (it = world; (it = find(it, FOFCLSN, cn));)
+		for (it = world; (it = find(it, FOFCLSN, (char *)cn));)
 		{
 			if (want_mega && !((int)it->s.v.spawnflags & H_MEGA))
 			{
@@ -2362,25 +2791,248 @@ static void HMP_ApplyItemTaken(gedict_t *receiver, hmp_tok_t *toks, int n)
 			}
 		}
 
-		if (!best)
+		if (best)
 		{
-			continue;
+			return best; // first resolvable item word wins
+		}
+	}
+
+	return NULL;
+}
+
+// A teammate said "took {item} [{loc}]" (or implied it): the item's belief
+// clock starts now.
+static void HMP_ApplyItemTaken(gedict_t *receiver, gedict_t *sender,
+							   hmp_tok_t *toks, int n)
+{
+	hm_bot_t *slot = HMode_Slot(receiver);
+	gedict_t *best = HMP_FindReportedItem(toks, n);
+	int idx;
+
+	if (!slot || !best)
+	{
+		return;
+	}
+
+	idx = HMode_ItemIndex(best, true);
+
+	if (idx >= 0)
+	{
+		float duration = HMode_ItemDuration(best);
+
+		HMode_LogItemUpd(receiver, best, HMODE_SRC_TOLD, slot->items[idx].respawn_at,
+							g_globalvars.time + duration, sender->netname);
+
+		// A told report never downgrades a same-moment direct sighting;
+		// otherwise the teammate's word is the freshest info we have.
+		slot->items[idx].source = HMODE_SRC_TOLD;
+		slot->items[idx].taken_time = g_globalvars.time;
+		slot->items[idx].respawn_at = g_globalvars.time + duration;
+	}
+}
+
+// A teammate reports an item UP ("ra at raup", "quad up", "mega at 5"):
+// the belief clock collapses to "back at up_at".
+static void HMP_ApplyItemUp(gedict_t *receiver, gedict_t *sender,
+							hmp_tok_t *toks, int n, float up_at)
+{
+	hm_bot_t *slot = HMode_Slot(receiver);
+	gedict_t *best = HMP_FindReportedItem(toks, n);
+	int idx;
+
+	if (!slot || !best)
+	{
+		return;
+	}
+
+	idx = HMode_ItemIndex(best, true);
+
+	if (idx >= 0)
+	{
+		HMode_LogItemUpd(receiver, best, HMODE_SRC_TOLD, slot->items[idx].respawn_at,
+							up_at, sender->netname);
+
+		slot->items[idx].source = HMODE_SRC_TOLD;
+		slot->items[idx].respawn_at = up_at;
+	}
+}
+
+// Record a told-of enemy sighting (org NULL = position unknown).
+static void HMP_AddSighting(gedict_t *receiver, gedict_t *sender, float *org,
+							int count, qbool powerup)
+{
+	hm_bot_t *slot = HMode_Slot(receiver);
+	hm_sight_t *s;
+
+	if (!slot)
+	{
+		return;
+	}
+
+	s = &slot->sights[slot->sight_head];
+	slot->sight_head = (slot->sight_head + 1) % HMODE_MAX_SIGHT;
+
+	memset(s, 0, sizeof(*s));
+	s->time = g_globalvars.time;
+	s->count = (count > 0) ? count : 1;
+	s->powerup = powerup;
+	s->source = HMODE_SRC_TOLD;
+
+	if (org)
+	{
+		VectorCopy(org, s->org);
+		s->org_known = true;
+	}
+
+	if (HMode_DebugOn())
+	{
+		G_cprint("[hm-belief-upd] bot=%s kind=enemy org=%s count=%d pw=%d "
+					"from=%s t=%.1f\n",
+					receiver->netname,
+					org ? va("%d,%d", (int)org[0], (int)org[1]) : "unknown",
+					s->count, (int)s->powerup, sender->netname, g_globalvars.time);
+	}
+}
+
+// "quad over/dead/out": the carried powerup wore off -- stand down the
+// powerup alarm on every held sighting (they stay plain enemy sightings).
+static void HMP_ClearPowerupAlarm(gedict_t *receiver, gedict_t *sender)
+{
+	hm_bot_t *slot = HMode_Slot(receiver);
+	int i, cleared = 0;
+
+	if (!slot)
+	{
+		return;
+	}
+
+	for (i = 0; i < HMODE_MAX_SIGHT; i++)
+	{
+		if ((slot->sights[i].time > 0) && slot->sights[i].powerup)
+		{
+			slot->sights[i].powerup = false;
+			cleared++;
+		}
+	}
+
+	if (cleared && HMode_DebugOn())
+	{
+		G_cprint("[hm-belief-upd] bot=%s kind=pw-over cleared=%d from=%s t=%.1f\n",
+					receiver->netname, cleared, sender->netname, g_globalvars.time);
+	}
+}
+
+// "safe {loc}": drop believed enemy sightings near the called-clear spot.
+static void HMP_ClearSightingsNear(gedict_t *receiver, gedict_t *sender, vec3_t loc)
+{
+	hm_bot_t *slot = HMode_Slot(receiver);
+	int i, cleared = 0;
+
+	if (!slot)
+	{
+		return;
+	}
+
+	for (i = 0; i < HMODE_MAX_SIGHT; i++)
+	{
+		hm_sight_t *s = &slot->sights[i];
+
+		if ((s->time > 0) && s->org_known && (VectorDistance(s->org, loc) < 512))
+		{
+			s->time = 0;
+			cleared++;
+		}
+	}
+
+	if (cleared && HMode_DebugOn())
+	{
+		G_cprint("[hm-belief-upd] bot=%s kind=safe-clear org=%d,%d cleared=%d "
+					"from=%s t=%.1f\n",
+					receiver->netname, (int)loc[0], (int)loc[1], cleared,
+					sender->netname, g_globalvars.time);
+	}
+}
+
+// Where does a report point? An explicit loc wins; else the sender's own
+// fresh believed position (players talk about where they are).
+static qbool HMP_ReportOrg(gedict_t *receiver, gedict_t *sender, hmp_tok_t *toks,
+						   int n, vec3_t out)
+{
+	hm_bot_t *slot = HMode_Slot(receiver);
+	int s = NUM_FOR_EDICT(sender);
+
+	if (HMP_ResolveLoc(toks, n, out))
+	{
+		return true;
+	}
+
+	if (slot && (s >= 1) && (s <= MAX_CLIENTS))
+	{
+		hm_tm_t *tm = &slot->tm[s];
+
+		if ((tm->source != HMODE_SRC_NONE) && tm->loc_known
+				&& (tm->time > g_globalvars.time - 5))
+		{
+			VectorCopy(tm->org, out);
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// does the message name a powerup at all (word or loc-typed token)?
+static qbool HMP_MentionsPowerup(hmp_tok_t *toks, int n)
+{
+	int i;
+
+	for (i = 0; i < n; i++)
+	{
+		const char *t = toks[i].text;
+
+		if (((toks[i].type == HMP_WORD) || (toks[i].type == HMP_LOC))
+				&& (streq(t, "quad") || streq(t, "pent") || streq(t, "penta")
+					|| streq(t, "ring") || streq(t, "eyes")))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static int HMP_EcountOr(hmp_tok_t *toks, int n, int fallback)
+{
+	int i = HMP_FirstType(toks, n, HMP_ECOUNT);
+
+	return (i >= 0) ? toks[i].num : fallback;
+}
+
+// location-bearing sender report: update the sender's last known position
+static void HMP_UpdateSenderLoc(gedict_t *receiver, gedict_t *sender, hm_tm_t *tm,
+								hmp_tok_t *toks, int n)
+{
+	vec3_t loc;
+
+	if (tm && !tm->fresh && HMP_ResolveLoc(toks, n, loc))
+	{
+		VectorCopy(loc, tm->org);
+		tm->loc_known = true;
+		tm->time = g_globalvars.time;
+
+		if (tm->source < HMODE_SRC_TOLD)
+		{
+			tm->source = HMODE_SRC_TOLD;
 		}
 
-		idx = HMode_ItemIndex(best, true);
-
-		if (idx >= 0)
+		if (HMode_DebugOn())
 		{
-			float duration = HMode_ItemDuration(best);
-
-			// A told report never downgrades a same-moment direct sighting;
-			// otherwise the teammate's word is the freshest info we have.
-			slot->items[idx].source = HMODE_SRC_TOLD;
-			slot->items[idx].taken_time = g_globalvars.time;
-			slot->items[idx].respawn_at = g_globalvars.time + duration;
+			G_cprint("[hm-belief-upd] bot=%s kind=tm-loc mate=%s org=%d,%d "
+						"src=told t=%.1f\n",
+						receiver->netname, sender->netname, (int)loc[0],
+						(int)loc[1], g_globalvars.time);
 		}
-
-		return; // first item word wins ("took ya yabox" must not double-fire)
 	}
 }
 
@@ -2477,43 +3129,50 @@ static void HMP_Apply(gedict_t *receiver, gedict_t *sender, int cat,
 				tm->loc_known = true;
 			}
 
+			if (HMode_DebugOn())
+			{
+				G_cprint("[hm-belief-upd] bot=%s kind=tm mate=%s hp=%.0f arm=%.0f "
+							"loc=%s src=told t=%.1f\n",
+							receiver->netname, sender->netname, tm->health,
+							tm->armor,
+							tm->loc_known ? va("%d,%d", (int)tm->org[0],
+												(int)tm->org[1]) : "unknown",
+							g_globalvars.time);
+			}
+
 			break;
 		}
 
 		case HMP_CAT_LOST:
 		case HMP_CAT_DEATH:
 		{
-			// sender died: same collapse as killfeed, but with a location
-			if (!tm)
+			// sender died: same collapse as killfeed, but with a location --
+			// and a death report with an enemy count marks where enemies are
+			if (tm)
 			{
-				break;
+				memset(tm, 0, sizeof(*tm));
+				tm->source = HMODE_SRC_TOLD;
+				tm->time = g_globalvars.time;
+				tm->health = 100;
+				tm->items = IT_SHOTGUN | IT_AXE;
 			}
 
-			memset(tm, 0, sizeof(*tm));
-			tm->source = HMODE_SRC_TOLD;
-			tm->time = g_globalvars.time;
-			tm->health = 100;
-			tm->items = IT_SHOTGUN | IT_AXE;
+			if ((cat == HMP_CAT_LOST) && (HMP_EcountOr(toks, n, 0) > 0)
+					&& HMP_ResolveLoc(toks, n, loc))
+			{
+				HMP_AddSighting(receiver, sender, loc, HMP_EcountOr(toks, n, 1),
+								false);
+			}
 
 			break;
 		}
 
 		case HMP_CAT_TOOK:
 		{
-			HMP_ApplyItemTaken(receiver, toks, n);
+			HMP_ApplyItemTaken(receiver, sender, toks, n);
 
 			// took also implies the sender is at that location
-			if (tm && !tm->fresh && HMP_ResolveLoc(toks, n, loc))
-			{
-				VectorCopy(loc, tm->org);
-				tm->loc_known = true;
-				tm->time = g_globalvars.time;
-
-				if (tm->source < HMODE_SRC_TOLD)
-				{
-					tm->source = HMODE_SRC_TOLD;
-				}
-			}
+			HMP_UpdateSenderLoc(receiver, sender, tm, toks, n);
 
 			break;
 		}
@@ -2521,37 +3180,214 @@ static void HMP_Apply(gedict_t *receiver, gedict_t *sender, int cat,
 		case HMP_CAT_TEAM_POWERUP:
 		{
 			// "team quad": some teammate holds it -> the item was taken now
-			HMP_ApplyItemTaken(receiver, toks, n);
+			HMP_ApplyItemTaken(receiver, sender, toks, n);
 
 			break;
 		}
 
-		case HMP_CAT_COMING:
-		case HMP_CAT_SAFE:
-		case HMP_CAT_WAITING:
-		case HMP_CAT_LOCATION_PING:
-		case HMP_CAT_HELP:
+		case HMP_CAT_ENEMY_POWERUP:
 		{
-			// location-bearing sender reports: update last known position
-			if (tm && !tm->fresh && HMP_ResolveLoc(toks, n, loc))
-			{
-				VectorCopy(loc, tm->org);
-				tm->loc_known = true;
-				tm->time = g_globalvars.time;
+			// "enemy quad [at {loc}]": the powerup is down (clock starts) and
+			// a powered enemy is about, maybe with a known position
+			qbool has = HMP_ResolveLoc(toks, n, loc);
 
-				if (tm->source < HMODE_SRC_TOLD)
+			HMP_ApplyItemTaken(receiver, sender, toks, n);
+			HMP_AddSighting(receiver, sender, has ? loc : NULL,
+							HMP_EcountOr(toks, n, 1), true);
+
+			break;
+		}
+
+		case HMP_CAT_ENEMY_SEEN:
+		case HMP_CAT_ENEMY_AT_NICK:
+		{
+			// "## 2 mega" / "carn at ra": enemies at a (maybe known) spot
+			qbool has = HMP_ResolveLoc(toks, n, loc);
+
+			HMP_AddSighting(receiver, sender, has ? loc : NULL,
+							HMP_EcountOr(toks, n, 1), false);
+
+			break;
+		}
+
+		case HMP_CAT_SLIPPED:
+		{
+			// "quad missed": the enemy got it -> clock starts, powered enemy
+			// about (position unknown). Without a powerup word: no-op.
+			if (HMP_MentionsPowerup(toks, n))
+			{
+				HMP_ApplyItemTaken(receiver, sender, toks, n);
+				HMP_AddSighting(receiver, sender, NULL, 1, true);
+			}
+
+			break;
+		}
+
+		case HMP_CAT_DROPPED:
+		case HMP_CAT_PACK:
+		{
+			// "dropped rl" / "pack at ya": a pack opportunity near the
+			// reported (or sender's believed) position
+			hm_bot_t *bslot = HMode_Slot(receiver);
+
+			if (bslot && HMP_ReportOrg(receiver, sender, toks, n, loc))
+			{
+				VectorCopy(loc, bslot->pack_org);
+				bslot->pack_time = g_globalvars.time;
+				bslot->pack_valid = true;
+
+				if (HMode_DebugOn())
 				{
-					tm->source = HMODE_SRC_TOLD;
+					G_cprint("[hm-belief-upd] bot=%s kind=pack org=%d,%d from=%s "
+								"t=%.1f\n",
+								receiver->netname, (int)loc[0], (int)loc[1],
+								sender->netname, g_globalvars.time);
 				}
 			}
 
 			break;
 		}
 
+		case HMP_CAT_ITEM_AT:
+		{
+			// "{item} at {loc}": the item is up right now
+			HMP_ApplyItemUp(receiver, sender, toks, n, g_globalvars.time);
+
+			break;
+		}
+
+		case HMP_CAT_POWERUP_STATUS:
+		{
+			// "quad up/now/spawned" -> up now; "quad soon/spawning" -> up
+			// shortly; "quad over/dead/out" -> the carried powerup wore off
+			if (HMP_HasWord(toks, n, "up") || HMP_HasWord(toks, n, "now")
+					|| HMP_HasWord(toks, n, "spawned"))
+			{
+				HMP_ApplyItemUp(receiver, sender, toks, n, g_globalvars.time);
+			}
+			else if (HMP_HasWord(toks, n, "soon") || HMP_HasWord(toks, n, "spawning"))
+			{
+				HMP_ApplyItemUp(receiver, sender, toks, n, g_globalvars.time + 10);
+			}
+			else if (HMP_HasWord(toks, n, "over") || HMP_HasWord(toks, n, "dead")
+					|| HMP_HasWord(toks, n, "out"))
+			{
+				HMP_ClearPowerupAlarm(receiver, sender);
+			}
+
+			break;
+		}
+
+		case HMP_CAT_NEED:
+		{
+			// "need ra": remember the mate's claim -> yield bias
+			hm_bot_t *bslot = HMode_Slot(receiver);
+			gedict_t *it = HMP_FindReportedItem(toks, n);
+
+			if (bslot && it)
+			{
+				bslot->need_item = it;
+				bslot->need_time = g_globalvars.time;
+
+				if (HMode_DebugOn())
+				{
+					G_cprint("[hm-belief-upd] bot=%s kind=need item=%s from=%s "
+								"t=%.1f\n",
+								receiver->netname, HMode_ItemLogName(it),
+								sender->netname, g_globalvars.time);
+				}
+			}
+
+			break;
+		}
+
+		case HMP_CAT_HELP:
+		{
+			// "help sng": sender position update + assist bias toward them
+			hm_bot_t *bslot = HMode_Slot(receiver);
+
+			HMP_UpdateSenderLoc(receiver, sender, tm, toks, n);
+
+			if (bslot && HMP_ReportOrg(receiver, sender, toks, n, loc))
+			{
+				VectorCopy(loc, bslot->help_org);
+				bslot->help_time = g_globalvars.time;
+				bslot->help_valid = true;
+
+				if (HMode_DebugOn())
+				{
+					G_cprint("[hm-belief-upd] bot=%s kind=help org=%d,%d from=%s "
+								"t=%.1f\n",
+								receiver->netname, (int)loc[0], (int)loc[1],
+								sender->netname, g_globalvars.time);
+				}
+			}
+
+			break;
+		}
+
+		case HMP_CAT_REQUEST:
+		{
+			// "get quad" / "camp ra": an order pointing at a loc or item
+			hm_bot_t *bslot = HMode_Slot(receiver);
+			qbool has = HMP_ResolveLoc(toks, n, loc);
+
+			if (!has)
+			{
+				gedict_t *it = HMP_FindReportedItem(toks, n);
+
+				if (it)
+				{
+					VectorCopy(it->s.v.origin, loc);
+					has = true;
+				}
+			}
+
+			if (bslot && has)
+			{
+				VectorCopy(loc, bslot->req_org);
+				bslot->req_time = g_globalvars.time;
+				bslot->req_valid = true;
+
+				if (HMode_DebugOn())
+				{
+					G_cprint("[hm-belief-upd] bot=%s kind=req org=%d,%d from=%s "
+								"t=%.1f\n",
+								receiver->netname, (int)loc[0], (int)loc[1],
+								sender->netname, g_globalvars.time);
+				}
+			}
+
+			break;
+		}
+
+		case HMP_CAT_SAFE:
+		{
+			// "safe ra": sender position update + stand down sightings there
+			HMP_UpdateSenderLoc(receiver, sender, tm, toks, n);
+
+			if (HMP_ResolveLoc(toks, n, loc))
+			{
+				HMP_ClearSightingsNear(receiver, sender, loc);
+			}
+
+			break;
+		}
+
+		case HMP_CAT_COMING:
+		case HMP_CAT_WAITING:
+		case HMP_CAT_LOCATION_PING:
+		{
+			// location-bearing sender reports: update last known position
+			HMP_UpdateSenderLoc(receiver, sender, tm, toks, n);
+
+			break;
+		}
+
 		default:
-			// enemy_seen / enemy_powerup / pack / item_at / need / request /
-			// slipped: no consumer yet (enemy world-model + obey layer are
-			// later stages); parsing them keeps the category telemetry honest.
+			// unparsed: nothing actionable. Every parsed category above now
+			// has a consumer (S7); [hm-parse] + [hm-belief-upd] keep the
+			// chain auditable.
 			break;
 	}
 }

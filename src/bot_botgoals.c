@@ -89,6 +89,13 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 	{
 		goal_desire = (self->fb.fixed_goal == goal_entity ? 1000 : 0);
 	}
+	else
+	{
+		// Humanmode comm consumer: what teammates SAID (told-of enemies,
+		// pack reports, orders, need/help calls) biases this goal's desire.
+		// Identity for stock bots -- k_hm 0 stays bit-identical.
+		goal_desire = HMode_GoalDesireBias(self, goal_entity, goal_desire);
+	}
 
 	goal_entity->fb.saved_goal_desire = goal_desire;
 	if (goal_desire > 0)
@@ -429,6 +436,8 @@ void UpdateGoal(gedict_t *self)
 	self->fb.best_goal = NULL;
 	self->fb.goal_enemy_repel = self->fb.goal_enemy_desire = 0;
 
+	HMode_GoalRefreshBegin(self);
+
 	BotEvadeLogic(self);
 
 	if (enemy_->fb.touch_marker)
@@ -561,6 +570,9 @@ void UpdateGoal(gedict_t *self)
 
 		self->s.v.goalentity = NUM_FOR_EDICT(self->fb.best_goal2);
 		self->fb.goal_respawn_time = g_globalvars.time + self->fb.best_goal2->fb.saved_respawn_time;
+
+		// Humanmode telemetry: the committed goal + whether comms biased it
+		HMode_LogGoalChoice(self, self->fb.best_goal2);
 	}
 	else
 	{
