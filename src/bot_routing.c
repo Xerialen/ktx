@@ -119,6 +119,10 @@ static float EvalPath(fb_path_eval_t *eval, qbool allowRocketJumps, qbool trace_
 		path_score -= KBot_HarvestWaterPenalty(self);
 	}
 
+	// HARVEST B2 (kbot-only, k_kbot_harvest_threat): death memory x known
+	// enemy weight x carried value. Weak enemies add nothing -- press on.
+	path_score -= KBot_HarvestThreatPenalty(self, eval->test_marker);
+
 	if (self->fb.avoiding)
 	{
 		path_score -= PATH_AVOID_PENALTY;

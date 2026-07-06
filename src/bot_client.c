@@ -102,6 +102,9 @@ void BotPlayerKilledEvent(gedict_t *targ, gedict_t *attacker, gedict_t *inflicto
 	{
 		targ->fb.state |= BACKPACK_IS_UNREACHABLE;
 	}
+
+	// HARVEST B2: kbot deaths feed the per-marker death memory
+	KBot_HarvestDeathEvent(targ);
 }
 
 // Called whenever a player dies

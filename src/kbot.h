@@ -40,6 +40,8 @@ float KBot_ModelScaleHunt(gedict_t *self, gedict_t *en, float desire);
 // docs/specs/2026-07-06-harvest-model-design.md.
 float KBot_CarriedValue(gedict_t *p);        // 0..1, stack x firepower
 float KBot_HarvestWaterPenalty(gedict_t *p); // B1: EvalPath water-marker cost
+float KBot_HarvestThreatPenalty(gedict_t *self, gedict_t *m); // B2: place threat
+void KBot_HarvestDeathEvent(gedict_t *targ); // B2: death-memory feed (Killed)
 
 // ---- KDLOG decision-log emitter (kbot_dlog.c) ----
 // Structured tactical-decision telemetry (G_cprint "KDLOG ..." lines into
