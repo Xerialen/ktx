@@ -1159,7 +1159,7 @@ static qbool GJ_PentRegion(vec3_t org)
 {
 	return (org[0] > 560) && (org[0] < 1250) &&
 		   (org[1] > 560) && (org[1] < 1100) &&
-		   (org[2] > -310) && (org[2] < -88);
+		   (org[2] > -310) && (org[2] < -100);
 }
 
 // E15 (ticket #25): pent-play stage 1 -- drive the measured human route to
@@ -1225,6 +1225,13 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 		return false;
 	}
 
+	// Fallen/knocked off the shelf mid-runway (porg1: a fallen bot kept the
+	// unreachable -104 carrot for the full 12 s): recompute from scratch --
+	// the position rules below re-advance to the right leg immediately.
+	if ((leg >= 3) && (org[2] < -140.0f))
+	{
+		leg = 0;
+	}
 	// Advance legs by POSITION (re-entrant: an engage mid-route starts at the
 	// leg its position proves; a knockback that loses ground falls back on
 	// the next engage, not mid-play).
@@ -1245,12 +1252,23 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 					 org[0], org[1], org[2]);
 		}
 	}
-	// Runway start reached -> run east THROUGH the launch line (the carrot
-	// sits past the shelf edge so the bot never decelerates into it; the
-	// launch gate below fires mid-run).
-	if ((leg == 3) && (org[0] < 622.0f) && (org[1] > 736.0f))
+	// Runway start reached AND settled -> run east THROUGH the launch line
+	// (the carrot sits past the shelf edge so the bot never decelerates
+	// before the gate). The vh < 120 settle gate is the human stop-align-
+	// fire: porg1 shipped ALL launches rolling at 405-416 (the measured
+	// human FAIL band; both failures flew into the wall below the window),
+	// because lift-exit momentum carried straight through the runway start.
+	if ((leg == 3) && (org[0] < 626.0f) && (org[1] > 738.0f))
 	{
-		leg = 4;
+		vec3_t hv1;
+
+		hv1[0] = self->s.v.velocity[0];
+		hv1[1] = self->s.v.velocity[1];
+		hv1[2] = 0;
+		if (VectorLength(hv1) < 120.0f)
+		{
+			leg = 4;
+		}
 	}
 	// Parked east of the launch line without launch speed (psmoke1 try 2:
 	// 9 s at vh 0 on the pad): walk back to the runway start and rerun.
@@ -1271,8 +1289,8 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 	switch (leg)
 	{
 		case 0:  VectorSet(carrot, 770, 700, -264); break;    // ramp top
-		case 1:  VectorSet(carrot, 604, 720, -240); break;    // lift plate
-		case 2:  VectorSet(carrot, 604, 720, org[2]); break;  // hold the plate
+		case 1:  VectorSet(carrot, 604, 690, -240); break;    // SOUTH lift plate
+		case 2:  VectorSet(carrot, 604, 690, org[2]); break;  // hold the plate
 		case 3:  VectorSet(carrot, 612, 750, -104); break;    // runway start
 		default: VectorSet(carrot, 700, 758, -104); break;    // through the edge
 	}
