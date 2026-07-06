@@ -335,7 +335,7 @@ typedef struct
 // swim; waterlevel>=2 logs FAIL_WATER (E11c discharge guard). In-match the
 // approach gate needs BOTH a floor and a CEILING (k_kbot_gj_rl_mul/_max) --
 // too slow clips the sill, too fast clips the upper lip. Gated by k_kbot_gj_rl.
-#define GJ_NUM_LANES 5
+#define GJ_NUM_LANES 7
 static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 	// 0: ring -> quad, northern lips, bow south (-30) around the pillar.
 	{ "ring2quad", { 455, 146, 56 }, { 705, 146, 56 }, -40, -30, { 0, 0, 0 } },
@@ -353,6 +353,28 @@ static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 	//    feet down ON the sill (org -64) inside the slot. wp sits ON the line
 	//    (x1520 -> y156); retune live via k_kbot_gj_rlwp without a rebuild.
 	{ "bridge2rl", { 1454, 0, -24 }, { 1608, 368, -64 }, -150, 0, { 1520, 156, 0 } },
+	// 5/6: SNG MEGA JUMPS (ticket #24, branch dm3-jumps). Cal-traced grids
+	//    2026-07-05 (artifacts/records/e13-mirror-chain + ticket comments);
+	//    all four elite mega takes (Milton/Ihminen/mirage/reppie, fs vs tVS
+	//    2006 CTV) converge on these two crossings. ORIGIN-space: yard floor
+	//    96 = org 120; 120-step org 144; shelf 152 = org 176; plateau/perch
+	//    floor 160 = org 184; the voids below are DRY floor -40 = org -16
+	//    (no water), so fail_z -10 logs FAIL_GAP before touchdown.
+	// 5: yard -> the 120-step across the void band y~355..455 (floor -40).
+	//    Step (x -490..-450, y 260..280) self-chains onto the 152-shelf ->
+	//    160-plateau (plain floor walk). Straight, no pillar.
+	{ "sng2step", { -500, 490, 120 }, { -470, 275, 144 }, -10, 0, { 0, 0, 0 } },
+	// 6: WEST LEDGE -> mega perch (E14 remeasure). The takeoff side is the
+	//    narrow north-south ledge on the west wall (floor 160 = org 184,
+	//    x -838..-866, y 260..460+): Milton's actual runway -- he runs it
+	//    south and jumps at (-819, 261), the measured lip edge (~y 260).
+	//    The old x=-810 axis put the takeoff at the strip/ledge junction,
+	//    which bots could only reach ARRIVING WESTWARD along the strip ->
+	//    diagonal launches (s1: vh 320 at 42 deg off-axis fell 19u short).
+	//    The ledge run gives >=136u of straight south build. Land on the
+	//    perch (floor 160, west edge x~-818 -> org-x >= ~-802): the small
+	//    east diagonal is flown by the launch-aim + air-carve.
+	{ "sng2mega", { -848, 268, 184 }, { -800, 105, 184 }, -10, 0, { 0, 0, 0 } },
 };
 
 // Effective launch-heading offset for a lane: table default + cvar (for sweeps).
@@ -542,6 +564,90 @@ static qbool gj_chain_flew[MAX_CLIENTS]; // E12b hop actually left the ground (t
 										 // killed the chain before flight)
 static qbool gj_stage_on[MAX_CLIENTS];   // E10 stage-transition log latch
 static float gj_route_log[MAX_CLIENTS];  // E10 [gjroute] log throttle
+static qbool gj_sng_deep[MAX_CLIENTS];   // E14 lane-6: reached the deep-runway point
+
+// E13 (dm3-jumps): the E12b chain-hop generalized to the mirror lanes 2/3.
+// Lane 4 keeps k_kbot_gj_chain; the mirror chain adds k_kbot_gj_mchain ON TOP
+// of the mirrorcarve stack (the relocated diagonal chord is the geometry it
+// hops onto). All other lanes: never. Rationale: option-2 (07-04) proved the
+// mirror bindning is the launch LINE, not raw speed -- forcing speed via
+// extra circle-building CURVED the approach and halved land-rate. The chain
+// attacks exactly that: the E1 flight is a straight line (zero net rotation),
+// the trigger fires only when the predicted touchdown sits IN the launch box,
+// and the touchdown frame takes the normal launch gate (launch-aim snap).
+// Speed comes free (K*T ~ +45600 in v^2), line comes straight.
+static qbool GJ_ChainLane(int lane)
+{
+	if (lane == 4)
+	{
+		return cvar("k_kbot_gj_chain") != 0;
+	}
+	if ((lane == 2 || lane == 3) && cvar("k_kbot_gj_mirrorcarve"))
+	{
+		return cvar("k_kbot_gj_mchain") != 0;
+	}
+	// E14/s6: lane 5 is NOT a chain lane. The s4/s5 orbit attempts both
+	// failed on geometry: s4's on-axis deep point sat behind the yard-center
+	// structure (7/7 timeouts grinding at along -200), and s5's hold-boundary
+	// at -(cback-64) is a carrot-flip oscillation trap for bots that walk
+	// (lane 4 never sees it -- its bots reach exit speed before the
+	// boundary; s5: all jams dithering at along -175..-182, vh 0-59, in
+	// OPEN ground). Lane 5 uses scripted L-legs instead (the lane-6
+	// pattern) along the demo-measured corridor -- see the drive-carrot
+	// section.
+	return false;
+}
+
+// E14/s7: lanes that use the airborne chain-hop + its in-flight E1 hold.
+// Superset of GJ_ChainLane: lane 5 hops WITHOUT the build orbit (s6 measured
+// the walking dash capping at 317-351 vs floor 354 -- the same actuation
+// wall the E13 mirror lanes hit, same cure: one flat hop lifts ~335 to ~400.
+// The lone organic 434-launch bunny-hopped the corridor; this is that, aimed).
+static qbool GJ_HopLane(int lane)
+{
+	if (lane == 5)
+	{
+		return cvar("k_kbot_gj_schain") != 0;
+	}
+	return GJ_ChainLane(lane);
+}
+
+// E13: per-lane chain flight/trigger hold-speed target (the E1 hold speed).
+// Lane 4 aims the middle of the slot speed window (the coupled needle); the
+// mirror lanes have NO ceiling -- aim inside the measured in-match LAND band
+// (LANDs peaked 420-491, launch floor vreq*mcarve_mul ~389).
+static float GJ_ChainTargetV(int lane, float vreq)
+{
+	if (lane == 4)
+	{
+		float rm = cvar("k_kbot_gj_rl_mul");
+		float rx = cvar("k_kbot_gj_rl_max");
+
+		return vreq * 0.5f * (((rm > 0) ? rm : 0.99f) + ((rx > 0) ? rx : 1.09f));
+	}
+	{
+		float mt = cvar("k_kbot_gj_mchain_tgt");
+
+		return (mt > 0) ? mt : 450.0f;
+	}
+}
+
+// E13: per-lane orbit exit speed (below it the build-orbit holds the bot on
+// the deep-runway carrot; at/above it the lip carrot pulls a straight dash).
+static float GJ_ChainExitV(int lane)
+{
+	if (lane == 4)
+	{
+		float ce = cvar("k_kbot_gj_chain_exit");
+
+		return (ce > 0) ? ce : 430;
+	}
+	{
+		float me = cvar("k_kbot_gj_mchain_exit");
+
+		return (me > 0) ? me : 380;
+	}
+}
 
 // Resolve the active lane geometry, honouring cvar overrides (retune without a
 // rebuild). k_kbot_gj_to / _land are "x y z" strings; empty -> table value.
@@ -928,7 +1034,8 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	// movement. k_kbot_gj_aimlaunch (default on) can disable it for A/B isolation.
 	if (press && speed > 1 && cvar("k_kbot_gj_aimlaunch") >= 0 &&
 		((cvar("k_kbot_gj_mirrorcarve") && (lane == 2 || lane == 3)) ||
-		 (lane == 4 && cvar("k_kbot_gj_rl"))))
+		 (lane == 4 && cvar("k_kbot_gj_rl")) ||
+		 ((lane == 5 || lane == 6) && cvar("k_kbot_gj_sng"))))
 	{
 		vec3_t la;
 		la[0] = 0;
@@ -1260,6 +1367,10 @@ static int GJ_PickLaneWithin(gedict_t *self, float back, float pmax, float zband
 		{
 			continue; // E12 RL lane disabled -> invisible to intent/route
 		}
+		if ((i == 5 || i == 6) && !cvar("k_kbot_gj_sng"))
+		{
+			continue; // SNG lanes disabled -> invisible to intent/route
+		}
 		// Use GJ_Geometry (not raw table) so the E10c mirror-carve relocation of
 		// lanes 2/3 is honoured by the active-path intent/route lane picker too.
 		GJ_Geometry(i, take, land, &fz);
@@ -1285,9 +1396,24 @@ static int GJ_PickLaneWithin(gedict_t *self, float back, float pmax, float zband
 		{
 			continue;
 		}
-		if (fabs(lat) > pmax)              // within the approach corridor
 		{
-			continue;
+			// E14 lane 6: the L-approach legs cover the whole plateau level
+			// (shelf -> walkway -> strip -> ledge, lat up to ~350 from the
+			// diagonal axis), so the engage corridor matches the legs' reach
+			// instead of the straight-dash default. The zband still excludes
+			// the yard below (org 120 vs take 184).
+			float pm = pmax;
+
+			if (i == 6)
+			{
+				float rl6 = cvar("k_kbot_gj_route_lat");
+
+				pm = (rl6 > 0) ? rl6 : 352;
+			}
+			if (fabs(lat) > pm)            // within the approach corridor
+			{
+				continue;
+			}
 		}
 		if (fabs(org[2] - take[2]) > zband) // on the takeoff ledge
 		{
@@ -1382,6 +1508,10 @@ float KBot_GJ_RouteShim(gedict_t *self, gedict_t *goal_entity, float goal_time)
 		{
 			continue; // E12 RL lane disabled -> not priced as a route edge
 		}
+		if ((i == 5 || i == 6) && !cvar("k_kbot_gj_sng"))
+		{
+			continue; // SNG lanes disabled -> not priced as route edges
+		}
 		GJ_Geometry(i, take, land, &fail_z);
 		u[0] = land[0] - take[0];
 		u[1] = land[1] - take[1];
@@ -1431,6 +1561,66 @@ float KBot_GJ_RouteShim(gedict_t *self, gedict_t *goal_entity, float goal_time)
 	}
 
 	return goal_time;
+}
+
+// E14 (kbot-only, ticket #24): offer dm3's SNG mega as a goal CANDIDATE to a
+// kbot standing in the lane-6 intent region. Root cause measured 07-05: the
+// shipped dm3.bot gives mh_1 (-720 80 160) no SetGoal slot -- the perch is
+// walk-isolated (solid wall y 140..180, void west; 36 matches, 0 pickups by
+// ANY bot incl. frogs) -- so it is never enumerated in any marker's goals[]
+// and no bot can ever WANT it; the route shim can only reprice a goal it is
+// handed. POSITION-GATED to the lane-6 intent box: everywhere else the
+// unreachable travel price (~1e6) never enters goal selection, so no bot
+// beelines at an unpathable goal. Baseline frogbots never see the candidate.
+void KBot_GJ_OfferSngMega(gedict_t *self)
+{
+	gedict_t *p;
+
+	if (!cvar("k_kbot_gapjump") || !cvar("k_kbot_gj_active")
+		|| !cvar("k_kbot_gj_sng") || !cvar("k_kbot_gj_route"))
+	{
+		return;
+	}
+	// No position gate needed: EvalGoal only accepts a goal when
+	// goal_time < skill.lookahead_time (a few seconds), so the unreachable
+	// travel price (~1e6) buries the candidate everywhere EXCEPT where the
+	// route shim reprices it via a lane edge (t_gj a few seconds, inside the
+	// lane 5/6 route regions). The two jumps then CHAIN toward the mega (the
+	// owner's route): lane 5 lifts the bot yard -> 120-step -> shelf, lane 6
+	// crosses ledge -> perch; the shelf landing sits inside lane 6's widened
+	// region, so the goal is re-acquired for jump 2.
+	{
+		static float offer_log = 0;
+		int slot = NUM_FOR_EDICT(self) - 1;
+		qbool logit = cvar("k_kbot_gj_gatelog")
+				&& ((g_globalvars.time - offer_log) >= 5.0f || offer_log > g_globalvars.time);
+
+		for (p = world; (p = ez_find(p, "item_health"));)
+		{
+			if ((fabs(p->s.v.origin[0] - (-720)) < 2) && (fabs(p->s.v.origin[1] - 80) < 2))
+			{
+				extern void EvalGoal(gedict_t *s, gedict_t *goal_entity);
+
+				EvalGoal(self, p);
+				if (logit)
+				{
+					offer_log = g_globalvars.time;
+					G_cprint("[sngoffer] slot=%d desire=%.0f gtime=%.1f tm=%d dfn=%d "
+							 "dmh=%.0f hp=%.0f idx=%d isgoal=%d\n",
+							 slot, p->fb.saved_goal_desire, p->fb.saved_goal_time,
+							 p->fb.touch_marker ? 1 : 0, p->fb.desire ? 1 : 0,
+							 self->fb.desire_mega_health, self->s.v.health,
+							 p->fb.index, ((int)self->s.v.goalentity == NUM_FOR_EDICT(p)) ? 1 : 0);
+				}
+				return;
+			}
+		}
+		if (logit)
+		{
+			offer_log = g_globalvars.time;
+			G_cprint("[sngoffer] slot=%d ITEM_NOT_FOUND\n", slot);
+		}
+	}
 }
 
 // E12b owner rule: only attempt the RL jump while UNSEEN. If any live enemy
@@ -1526,7 +1716,10 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// E12 RL lane: no central pillar, and the lane axis has a large +Y component
 	// so raw world-Y offset mixes along and lateral. Use the TRUE perpendicular
 	// (the asymmetric north gate below then acts as a plain +- band).
-	if (lane == 4)
+	// E14: same for the SNG lanes -- their axes run mostly along -Y, so the
+	// world-Y "lat" was really the along-distance and the true lateral was
+	// UNGATED at launch (s1 confirmed launches at any x).
+	if (lane >= 4)
 	{
 		lat_n = rel[0] * (-u[1]) + rel[1] * u[0];
 	}
@@ -1551,6 +1744,26 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		// E12's 6s otherwise. Timeout is a safe decline either way.
 		apptime = cvar("k_kbot_gj_chain") ? 8.0f : 6.0f;
 	}
+	// E14 lane 6: the scripted L-approach (walkway -> strip -> ledge north ->
+	// south run) is up to ~450u of walking before the build leg. s4: chain
+	// arrivals start ~380u further east on the shelf -- 12s covers the full
+	// route; the timeout is a safe decline either way.
+	if (lane == 6)
+	{
+		apptime = 12.0f;
+	}
+	// E14/s6 lane 5: the L-leg route (corridor mouth at along -312, then a
+	// ~310u dash) needs more than the 3.5s default.
+	if ((lane == 5) && cvar("k_kbot_gj_schain"))
+	{
+		apptime = 8.0f;
+	}
+	// E13 mirror chain: the dash + hop needs more than the 3.5s default (same
+	// rationale as lane 4, shorter runway); timeout stays a safe decline.
+	if ((lane == 2 || lane == 3) && GJ_ChainLane(lane) && (apptime < 6.0f))
+	{
+		apptime = 6.0f;
+	}
 	launch_win = cvar("k_kbot_gj_launch_win");
 	if (launch_win <= 0) { launch_win = 48; }
 	// E12 RL lane: a +-48u along-window shifts the path-to-slot by +-48u of
@@ -1562,6 +1775,12 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		float rw = cvar("k_kbot_gj_rl_win");
 
 		launch_win = (rw > 0) ? rw : 24;
+	}
+	// E14 lane 6: a launch 48u early adds 48u of flight over a lane whose
+	// speed floor only carries ~15u of range margin. Tight along-window.
+	if (lane == 6)
+	{
+		launch_win = 20;
 	}
 	launch_perp = cvar("k_kbot_gj_launch_perp");
 	if (launch_perp <= 0) { launch_perp = 28; }
@@ -1614,9 +1833,42 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 
 			mul = (rm > 0) ? rm : 0.99f;
 		}
+		// E14 SNG lanes: the default 1.2 put lane 5's floor at 425 while
+		// in-match arrivals carry 408-416 (s1: 31 DECLINE_SLOW, 0 launches;
+		// s2 at 1.08: veff declines at 373-385). The gate below is the ALONG
+		// component, and seeded v0 320 lands lane 5 100%, so lane 5 takes the
+		// bare vreq (354); lane 6 keeps a 1.08 margin under its 1.38 ceiling.
+		if (lane == 5 || lane == 6)
+		{
+			float sm = cvar("k_kbot_gj_sng_mul");
+
+			mul = (lane == 5) ? 1.0f : 1.08f;
+			if (sm > 0)
+			{
+				mul = sm;
+			}
+		}
 		floor = vreq * mul;
 	}
 	fast = vh >= floor;
+	// E14 SNG lanes: the flights are ~0.7s -- too short for the air-carve to
+	// recover a diagonal launch (s1: vh 320 at 42 deg off-axis corrected the
+	// lateral but still fell 19u short). Gate on the ALONG-axis velocity
+	// component, the quantity the ballistic range actually uses.
+	if (lane == 5 || lane == 6)
+	{
+		float va = self->s.v.velocity[0] * u[0] + self->s.v.velocity[1] * u[1];
+
+		fast = (va >= floor);
+		// E14 lane 6: the perch is shallow along the flight axis (usable
+		// depth ~150u), so the lane has a speed WINDOW like the RL slot --
+		// seeded v0 360 overflew it 26/27, 340 landed 29/34, 280-320 landed
+		// 72/72. Ceiling vreq*1.38 (~323) keeps launches inside the window.
+		if ((lane == 6) && (va > (vreq * 1.38f)))
+		{
+			fast = false;
+		}
+	}
 	// E12 RL lane speed CEILING: launching above it overshoots the slot's upper
 	// lip (org > -48 at the wall) -> upper wall face -> pool. Decline instead.
 	if (lane == 4)
@@ -1645,7 +1897,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// re-runs every grounded gate (incl. this timeout), so let it finish
 	// instead of discarding a completed build on a boundary technicality.
 	if (((now - gj_app_t0[slot]) > apptime) &&
-		!((lane == 4) && gj_chain_on[slot] && !onground))
+		!(GJ_HopLane(lane) && gj_chain_on[slot] && !onground))
 	{
 		if (cvar("k_kbot_gj_gatelog"))
 		{
@@ -1654,7 +1906,15 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 gj_lanes[lane].name, along_u, lat_n, vh, floor);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "abort", "app_timeout"); // KDLOG
-			gj_state[slot] = GJ_IDLE;
+		// E14: a stalled approach that re-engages every apptime pinned a bot
+		// in place for minutes (s1: 138 lane-6 timeouts at vh 0, same spot).
+		// A stalled timeout gets a LONG suppression so vanilla nav really
+		// carries the bot away before the lane is offered again.
+		if ((lane == 5 || lane == 6) && (vh < 30))
+		{
+			gj_app_supp[slot] = now + 6.0f;
+		}
+		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
 	// Enemy showed up mid-setup -> yield. EXCEPTION: mid-air in the chain hop
@@ -1663,8 +1923,17 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// frame is grounded, so BOTH this yield and the unseen rule below still
 	// gate the actual launch.
 	if (self->fb.enemy_visible &&
-		!((lane == 4) && gj_chain_on[slot] && !onground))
+		!(GJ_HopLane(lane) && gj_chain_on[slot] && !onground))
 	{
+		// E14: log the yield for the SNG lanes -- s2 could not distinguish
+		// "yielded to combat" from "never progressed" (both were silent),
+		// which hid where the lane-6 attempts actually died.
+		if ((lane == 5 || lane == 6) && cvar("k_kbot_gj_gatelog"))
+		{
+			G_cprint("[gapjump] lane=%s result=APP_YIELD_ENEMY along=%.0f "
+					 "lat=%.0f vh=%.0f\n",
+					 gj_lanes[lane].name, along_u, lat_n, vh);
+		}
 		gj_state[slot] = GJ_IDLE;
 		return false;
 	}
@@ -1694,12 +1963,9 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// through to the launch gate below (launch-aim snap + GJ_Cross), which is
 	// the proven in-match launch path. Timeout/enemy yields above still apply
 	// mid-flight (bot is over the deck the whole hop -- bailing is safe).
-	if ((lane == 4) && gj_chain_on[slot] && !onground && cvar("k_kbot_gj_chain"))
+	if (GJ_HopLane(lane) && gj_chain_on[slot] && !onground)
 	{
-		float rm = cvar("k_kbot_gj_rl_mul");
-		float rx = cvar("k_kbot_gj_rl_max");
-		float tgt_v = vreq * 0.5f * (((rm > 0) ? rm : 0.99f)
-									 + ((rx > 0) ? rx : 1.09f));
+		float tgt_v = GJ_ChainTargetV(lane, vreq);
 		vec3_t cur, cwish, cang;
 		float cyaw;
 
@@ -1764,7 +2030,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		float north_max = cvar("k_kbot_gj_north_max");
 
 		if (north_max <= 0) { north_max = 12; }
-		if (lane == 4) { north_max = launch_perp; } // no pillar: symmetric band
+		if (lane >= 4) { north_max = launch_perp; } // no pillar: symmetric band
 		// E12b: WEST-side launches (positive lat) die in flight -- the cross
 		// air-carve's eastward correction scrubs the speed the slot needs
 		// (b3/b4: all 3 lat>+8 launches peaked ~482 and fell short at y~285;
@@ -1837,10 +2103,23 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// 93-177 and killed every orbit). Suppress both grounded declines inside
 	// the maneuver band; keep a HARD past-limit (along > 64) as the edge/fin
 	// safety -- beyond that the bot really is drifting off the deck plate.
+	// E14/s4 lane 6: chain arrivals touch down EAST of the take (shelf x -468,
+	// along up to ~+104 inside the widened lat window) and the L-legs below
+	// must route them west -- but the grounded lip declines fired first and
+	// killed the approach on frame one (s3: the only shelf landing drew
+	// APP_DECLINE_PAST along=32 lat=104 aerr=153 one second after touchdown,
+	// and lane 6 stayed silent). Until the bot has reached the deep-runway
+	// point every grounded decline is premature; the apptime timeout and the
+	// vh<30 stuck guard remain the safety net. s6: same for lane 5 -- its
+	// engages start AT the lip (s3: 13/13 DECLINE_SLOW at along 0-8) and the
+	// L-leg below must first route them north up the corridor.
+	if ((lane == 6 || (lane == 5 && cvar("k_kbot_gj_schain"))) &&
+		!gj_sng_deep[slot])
 	{
-		qbool orbiting = (lane == 4) && cvar("k_kbot_gj_chain") &&
-						 (vh < ((cvar("k_kbot_gj_chain_exit") > 0)
-								? cvar("k_kbot_gj_chain_exit") : 430));
+		goto gj_app_drive;
+	}
+	{
+		qbool orbiting = GJ_ChainLane(lane) && (vh < GJ_ChainExitV(lane));
 
 		if (orbiting && onground && (along_u > 64))
 		{
@@ -1909,18 +2188,20 @@ gj_app_drive:
 	// ~100u past the lip along u (BSP: floor to y=112/160) -> DECLINE_PAST.
 	// Same-frame hop on the press frame means ground friction never applies
 	// (the E3 motor's documented contact-frame idiom).
-	if ((lane == 4) && onground && cvar("k_kbot_gj_chain") &&
+	if (GJ_HopLane(lane) && onground &&
 		(along_u < -launch_win) && (vh > 1))
 	{
-		float cmin = cvar("k_kbot_gj_chain_min");
-		float rm = cvar("k_kbot_gj_rl_mul");
-		float rx = cvar("k_kbot_gj_rl_max");
-		float tgt_v = vreq * 0.5f * (((rm > 0) ? rm : 0.99f)
-									 + ((rx > 0) ? rx : 1.09f));
+		float cmin = (lane == 4) ? cvar("k_kbot_gj_chain_min")
+								 : cvar("k_kbot_gj_mchain_min");
+		float tgt_v = GJ_ChainTargetV(lane, vreq);
 		float vpred, lhop, pa, pl;
 		vec3_t land, lrel;
 
-		if (cmin <= 0) { cmin = 410; }
+		if (cmin <= 0) { cmin = (lane == 4) ? 410 : 320; }
+		// E14/s7 lane 5: dash speeds pass ~310 around the hop-distance
+		// window (s6 lip arrivals 317-351); mchain's 320 floor misses the
+		// low half of a window the hop itself lifts to ~395+.
+		if (lane == 5) { cmin = 310; }
 		vpred = sqrt(vh * vh + 67593.0f * 0.675f);
 		if (vpred > tgt_v) { vpred = tgt_v; }
 		if ((vh >= cmin) && (vpred >= floor))
@@ -1937,6 +2218,7 @@ gj_app_drive:
 			{
 				float ctol = cvar("k_kbot_gj_chain_tol");
 				float dwall, tw, zpred;
+				qbool hop_ok;
 
 				if (ctol <= 0) { ctol = 20; }
 				// SLOT-CROSSING PREDICTION: the slot tolerance is a COUPLED
@@ -1962,9 +2244,23 @@ gj_app_drive:
 				// ~+4 and passes the gate; capping the PREDICTION at +5
 				// choked trigger frequency 3x (b5: 2 hops vs b4: 6) without
 				// adding safety -- the gate sees the REAL lat either way.
-				if ((pa >= -ctol) && (pa <= launch_win) &&
-					(pl >= -24.0f) && (pl <= 12.0f) &&
-					(zpred >= -72.0f) && (zpred <= -45.0f))
+				hop_ok = ((pa >= -ctol) && (pa <= launch_win) &&
+						  (pl >= -24.0f) && (pl <= 12.0f) &&
+						  (zpred >= -72.0f) && (zpred <= -45.0f));
+				// E13 mirror lanes: no slot needle -- the constraint is the
+				// LINE, and the launch gate re-checks the REAL (along,lat,vh)
+				// on the touchdown frame. Touchdown must sit in the launch
+				// box; pa is capped at +8 because past the lip is the VOID
+				// (lane-4 realized touchdowns land ~6u short of prediction,
+				// so +8 keeps the realized point on solid ground), while the
+				// short side is wide (a short touchdown just re-runs the
+				// grounded gates at speed). pl reuses lane 4's [-24,+12].
+				if (lane != 4)
+				{
+					hop_ok = ((pa >= -2.0f * ctol) && (pa <= 8.0f) &&
+							  (pl >= -24.0f) && (pl <= 12.0f));
+				}
+				if (hop_ok)
 				{
 					if (!gj_chain_on[slot] && cvar("k_kbot_gj_gatelog"))
 					{
@@ -2010,7 +2306,9 @@ gj_app_drive:
 		float south_bias = cvar("k_kbot_gj_south_bias");
 
 		if (south_bias < 0) { south_bias = 0; }
-		if (lane == 4) { south_bias = 0; } // no pillar to bias away from
+		// E14: for lanes >= 4 world-south is along (or partly along) the lane
+		// axis itself -- a south bias drags the carrot past the lip. Zero it.
+		if (lane >= 4) { south_bias = 0; }
 		ca = along_u + lookahead;
 		if (ca > 0) { ca = 0; }
 		tgt[0] = take[0] + u[0] * ca;
@@ -2026,22 +2324,134 @@ gj_app_drive:
 		// heading converges on the launch box, and the chain trigger above fires
 		// at d ~= one hop out. Bots already deeper than the orbit keep the
 		// normal inbound carrot (build happens en route).
-		if ((lane == 4) && cvar("k_kbot_gj_chain"))
+		if (GJ_ChainLane(lane))
 		{
-			float cback = cvar("k_kbot_gj_chain_back");
-			float cexit = cvar("k_kbot_gj_chain_exit");
+			float cback = (lane == 4) ? cvar("k_kbot_gj_chain_back")
+									  : cvar("k_kbot_gj_mchain_back");
+			float cexit = GJ_ChainExitV(lane);
+			// Bias the orbit 40u toward the open (negative-lat) side: a
+			// centered orbit's loops grazed the WEST deck edge x1264
+			// (probe: ABORT_TIMEOUT stuck at vh 27 by the edge). E13: lane-4
+			// deck-specific; the mirror runways are unmeasured -> no bias.
+			float obias = (lane == 4) ? 40 : 0;
 
-			if (cback <= 0) { cback = 340; }
-			if (cexit <= 0) { cexit = 430; }
+			if (cback <= 0) { cback = (lane == 4) ? 340 : 240; }
 			if ((vh < cexit) && (along_u > -(cback - 64)))
 			{
-				// Bias the orbit 40u toward the open (negative-lat) side: a
-				// centered orbit's loops grazed the WEST deck edge x1264
-				// (probe: ABORT_TIMEOUT stuck at vh 27 by the edge).
-				tgt[0] = take[0] + u[0] * (-cback) - (-u[1]) * 40;
-				tgt[1] = take[1] + u[1] * (-cback) - u[0] * 40;
+				tgt[0] = take[0] + u[0] * (-cback) - (-u[1]) * obias;
+				tgt[1] = take[1] + u[1] * (-cback) - u[0] * obias;
 				tgt[2] = org[2];
 			}
+		}
+		// E14/s6 lane-5 L-APPROACH (replaces the s4/s5 orbit attempts). Every
+		// point below is measured from the s3 goldenboy LAND demo track
+		// (mvd-api stream-slice, sng-s3/20260706T072051Z-p28599 t 291-299):
+		// the yard NORTH BAND y~800-870 is walkable x -118..-646, and the
+		// dash corridor x~-530..-545 runs open from y~800 down to the take
+		// (his bunny dash crossed y 687 at x -541 and launched at -515,512
+		// carrying 434). Leg 1: walk to the corridor mouth (-540,800), which
+		// lip-engagers reach by running straight north up the corridor and
+		// NE-band bots reach along the band. Deep flag latches when the bot
+		// is IN the corridor column (along <= -240, lat -60..+30 -- the
+		// mouth sits at along -312 lat ~-15, so the flag trips ~70u before
+		// the carrot is reached, no hover-deadlock); then the default lip
+		// carrot pulls the straight south dash and the circle-build tops up
+		// (goldenboy did it organically at 434 vs floor 354).
+		if ((lane == 5) && cvar("k_kbot_gj_schain"))
+		{
+			// s9 z-guard: the gates and this latch are 2D, and the nav route
+			// toward the offered mega runs WEST DOWN THE YARD SLOPE into the
+			// pit (floor z -16) whose 2D footprint overlaps the whole lane
+			// box. s8 loop: pit bot walks leg 1 north, LATCHES ON THE SLOPE
+			// (e.g. (-559,742) = along -258 lat -24 at z ~50-90), the lip
+			// carrot flips it back south to the 2D lip point INSIDE the pit,
+			// DECLINE_SLOW at "lat -45" -- 19/19 s8 declines were this loop.
+			// Yard floor is z 120 (take[2]); requiring z >= take-30 makes the
+			// slope/pit unlatchable, so a pit bot stays !deep, holds leg 1
+			// north up the slope, and latches for real at the crest (z ~119,
+			// lat ~-54) -- becoming a normal over-the-hill walker.
+			if ((along_u <= -240) && (lat_n >= -60) && (lat_n <= 30) &&
+				(org[2] >= take[2] - 30.0f))
+			{
+				gj_sng_deep[slot] = true;
+			}
+			if (!gj_sng_deep[slot])
+			{
+				VectorSet(tgt, -540, 800, org[2]);
+			}
+			else if (along_u < -160)
+			{
+				// s7 leg 2: mid-corridor gate at goldenboy's own line. The
+				// on-axis lip carrot clips the yard-center hill (west face
+				// x~-527), so s6 dashers slid along it and arrived at lat
+				// -45 -- outside the +-28 launch window. This point sits at
+				// lat -5: the last 112u run in nearly on-axis.
+				VectorSet(tgt, -520, 600, org[2]);
+			}
+			// else: the default lip carrot (south dash) stands
+		}
+		// E14 lane-6 L-APPROACH. The takeoff sits on the narrow west ledge and
+		// the measured floor map (findings 07-05) shows the only walk from the
+		// east is walkway -> strip -> ledge: two 90-degree turns the straight
+		// lip-carrot cannot make (s1: 138 ABORT_TIMEOUT pinned at vh 0 pushing
+		// the void notch). Scripted legs, each a measured straight walkable
+		// line; the final leg is the >=130u south ledge run that builds launch
+		// speed. A bot already carrying south speed (ledge walker) skips the
+		// north leg and dashes directly.
+		if (lane == 6)
+		{
+			float va = self->s.v.velocity[0] * u[0] + self->s.v.velocity[1] * u[1];
+
+			// s4: threshold loosened -140 -> -120. The north L-leg target
+			// (-848,408) sits at along -134; a bot steering AT it hovers just
+			// short of -140 and the flag never set (latent deadlock -- the
+			// va<200 leg then holds the carrot there forever).
+			if (along_u <= -120)
+			{
+				gj_sng_deep[slot] = true; // deep-runway point reached
+			}
+			if (org[0] > -710)
+			{
+				// 152-shelf east of the walkway (y 200..240 solid): aim at
+				// the walkway south entry; the line stays inside the shelf
+				// corridor (measured: (-650,235) solid, void starts y>240
+				// at x<=-690).
+				VectorSet(tgt, -720, 220, org[2]);
+			}
+			else if (org[0] > -770)
+			{
+				// walkway column (floor 160, x -700..-760, y 218..440): from
+				// north OR south, converge on the strip mouth; the strip band
+				// itself (y 265..305) falls through to the westward leg.
+				if ((org[1] < 265) || (org[1] > 305))
+				{
+					VectorSet(tgt, -730, 285, org[2]);
+				}
+				else
+				{
+					VectorSet(tgt, -848, 283, org[2]);
+				}
+			}
+			else if (org[0] > -830)
+			{
+				// on the strip (floor 160, y 260..300): straight west to the
+				// ledge junction. s5: hand over to the north leg already at
+				// x -830 (was -838) -- a strip walker arrives westbound at
+				// speed, and flipping the carrot only 10u before the west
+				// wall turned the 90-degree corner into a wall-brake (s4:
+				// the routed bot reached the lip centered at 385 total but
+				// with ~0 ALONG speed, declined, then jammed in the wall
+				// corner at vh 0 for the full 12s timeout).
+				VectorSet(tgt, -848, 283, org[2]);
+			}
+			else if (!gj_sng_deep[slot] && (va < 200))
+			{
+				// on the ledge without south speed: walk north for runway
+				// (s4: 408 -> 430 so the deep flag at along -120 trips well
+				// before the carrot is reached; ledge floor runs to y~460)
+				VectorSet(tgt, -848, 430, org[2]);
+			}
+			// else: the default lip carrot (south dash at the take) stands
 		}
 	}
 	wish[0] = tgt[0] - org[0];
@@ -2105,8 +2515,19 @@ gj_app_drive:
 			build_hi = vreq * 0.5f * (((rm > 0) ? rm : 0.99f)
 									  + ((rx > 0) ? rx : 1.09f));
 		}
+		// E14 lane 6 opts out: the build rotation would wobble the bot across
+		// the 28u-wide ledge, and the walk-speed dash already meets the floor.
+		// E14/s8 lane 5 opts out too: the 42-deg rotation dragged every walker
+		// off the leg line at the corridor mouth -- west down the yard slope to
+		// the pit floor z -16, where the 2D gates logged nonsense lat -45
+		// declines (s7 trace, sng-s7/20260706T110343Z-p28599 t 17.5-19.7).
+		// Straight steering holds goldenboy's over-the-hill line; the speed
+		// floor is met by the chain-hop (his own crossing IS one flat hop:
+		// launch (-541,786) along -299 -> peak z165 over the hill crown 163 ->
+		// touchdown (-515,512) IN the launch box, T 0.675 -- the trigger's
+		// existing pa/pl windows accept exactly that hop).
 		if (cvar("k_kbot_gj_app_build") && onground && (vh < build_hi) &&
-			along_u < 0)
+			along_u < 0 && (lane != 6) && (lane != 5))
 		{
 			vec3_t cur;
 			cur[0] = self->s.v.velocity[0];
@@ -2128,7 +2549,7 @@ gj_app_drive:
 				// turn arc clear across the lip (probe: declines at lat 70-170,
 				// aerr 93-177). A plain wish gives the tightest friction turn;
 				// the build resumes once roughly heading at the carrot again.
-				if ((lane == 4) && cvar("k_kbot_gj_chain") &&
+				if (GJ_ChainLane(lane) &&
 					((e > 100) || (e < -100)))
 				{
 					// keep wish as-is (plain steer at the carrot)
@@ -2325,6 +2746,40 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 	}
 	if (gj_state[slot] == GJ_COOL)
 	{
+		// E14 lane 6 POST-LAND: the mega perch is orphaned in the marker
+		// graph (its SetMarkerPath targets dangle), so vanilla nav cannot
+		// walk the last ~80u from the landing to the mega item. Short
+		// grounded drive to the pickup point, then release; death, an enemy,
+		// a pit-fall (z guard) or the 2s timer hands back to vanilla.
+		if ((gj_lane_active[slot] == 6) && cvar("k_kbot_gj_sng") && !ISDEAD(self)
+			&& !self->fb.enemy_visible && (self->s.v.origin[2] > 100)
+			&& ((now - gj_cool_t0[slot]) < 2.0f))
+		{
+			vec3_t wish, ang;
+			float d, myaw;
+
+			wish[0] = -720 - self->s.v.origin[0];
+			wish[1] = 80 - self->s.v.origin[1];
+			wish[2] = 0;
+			d = VectorLength(wish);
+			if (d > 20)
+			{
+				VectorNormalize(wish);
+				myaw = vectoyaw(wish);
+				VectorSet(ang, 0, myaw, 0);
+				trap_makevectors(ang);
+				self->fb.desired_angle[PITCH] = 0;
+				self->fb.desired_angle[YAW] = myaw;
+				self->fb.desired_angle[ROLL] = 0;
+				direction[0] = DotProduct(g_globalvars.v_forward, wish) * 800;
+				direction[1] = DotProduct(g_globalvars.v_right, wish) * 800;
+				direction[2] = 0;
+				*jumping = false;
+				*firing = false;
+				*impulse = 0;
+				return true;
+			}
+		}
 		gj_state[slot] = GJ_IDLE; // release movement back to vanilla nav
 		return false;
 	}
@@ -2333,6 +2788,19 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 	// own enemy-visibility state -- if a live enemy is visible, let vanilla nav
 	// and combat run.
 	if (self->fb.enemy_visible || ISDEAD(self))
+	{
+		return false;
+	}
+
+	// E14: no intent during intermission. After the match every client is
+	// teleported to dm3's info_intermission (-736 376 240) -- which sits in
+	// lane 6's engage region (z 240 passes the 56u zband on the 184 takeoff
+	// exactly) -- so the frozen intermission "bot" engage/timeout-looped every
+	// apptime until map change (s1: 138 bogus ABORT_TIMEOUT at vh 0, s2: 66;
+	// both single-handedly dominated the lane-6 telemetry). Gate on the
+	// intermission flag specifically (NOT match_in_progress != 2) so the
+	// goal-driven intent path still works on practice-mode lab servers.
+	if (intermission_running)
 	{
 		return false;
 	}
@@ -2366,6 +2834,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 			gj_app_t0[slot] = now;
 			gj_build_sign[slot] = 0;
 			gj_chain_on[slot] = false;
+			gj_sng_deep[slot] = false;
 			gj_state[slot] = GJ_APPROACH;
 			if (cvar("k_kbot_gj_gatelog"))
 			{
@@ -2388,6 +2857,14 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 
 			// Owner rule: don't stage toward the RL deck while observed either.
 			if ((rlane == 4) && cvar("k_kbot_gj_rl_unseen") && GJ_SeenByEnemy(self))
+			{
+				rlane = -1;
+			}
+			// E14: never straight-line stage toward the lane-6 west-ledge
+			// takeoff -- from the wide route region the line crosses the void
+			// (and the axis staging point is inside the west wall). The
+			// intent-box L-approach handles lane 6 entirely.
+			if (rlane == 6)
 			{
 				rlane = -1;
 			}

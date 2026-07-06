@@ -569,6 +569,18 @@ void UpdateGoal(gedict_t *self)
 		}
 	}
 
+	// E14 (kbot-only): dm3's SNG mega has no SetGoal slot in the shipped .bot
+	// file (the perch is walk-isolated), so it never appears in the goals[]
+	// enumeration above and no bot can ever want it. Offer it to komodobots
+	// standing in the SNG lane-6 intent region; the route shim inside
+	// EvalGoal then prices it via the gap-jump edge. Frogbots untouched.
+	if (self->isBot && self->fb.kbot)
+	{
+		extern void KBot_GJ_OfferSngMega(gedict_t *s);
+
+		KBot_GJ_OfferSngMega(self);
+	}
+
 	// Dropped backpacks
 	for (goal_entity = world; (goal_entity = ez_find(goal_entity, BACKPACK_CLASSNAME));)
 	{

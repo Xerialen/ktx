@@ -1283,6 +1283,25 @@ void FirstFrame(void)
 	// Owner rule (2026-07-05): only attempt the RL jump while no enemy has
 	// line-of-sight to the bot (setup is combat-defenseless).
 	RegisterCvarEx("k_kbot_gj_rl_unseen", "1");
+	// E13 (dm3-jumps): the chain-hop generalized to the mirror lanes 2/3 --
+	// straight-line E1 hop into the launch box (fixes the LINE that option-2's
+	// forced circle-build broke, and tops speed into the LAND band 420-491).
+	RegisterCvarEx("k_kbot_gj_mchain", "1");
+	RegisterCvarEx("k_kbot_gj_mchain_min", "320");
+	RegisterCvarEx("k_kbot_gj_mchain_tgt", "450");
+	RegisterCvarEx("k_kbot_gj_mchain_exit", "380");
+	RegisterCvarEx("k_kbot_gj_mchain_back", "240");
+	// SNG mega jumps, lanes 5/6 (ticket #24, branch dm3-jumps): yard -> the
+	// 120-step across the void band, and west ledge -> mega perch.
+	RegisterCvarEx("k_kbot_gj_sng", "1");
+	// E14: launch speed-floor multiplier for lanes 5/6 (floor = vreq * mul,
+	// gated on the ALONG-axis velocity component, not total vh).
+	RegisterCvarEx("k_kbot_gj_sng_mul", "0"); // 0 = per-lane defaults (5: 1.0, 6: 1.08)
+	// E14/s6: lane-5 scripted L-approach (corridor mouth -> south dash along
+	// the demo-measured x~-540 corridor). Gates the legs + the 8s apptime +
+	// the pre-route decline skip. s4/s5 orbit attempts removed (geometry:
+	// on-axis deep point walled; hold-boundary was an oscillation trap).
+	RegisterCvarEx("k_kbot_gj_schain", "1");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
 	{
