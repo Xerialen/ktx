@@ -548,20 +548,41 @@ void KBot_ThreatAimFrame(gedict_t *self)
 	}
 
 	TA_RefreshCvars();
-	if ((ta_tier < 1) || !HMode_Active(self))
+	if (!HMode_Active(self))
 	{
 		return;
 	}
 
 	ta = &ta_bots[e];
 
-	if (!TA_Clear(self))
+	// The [ta-contact] first-sight KPI is measurement, not behavior: it
+	// logs at every tier (including 0) so a vanilla baseline exists (M-A).
+	if (ISDEAD(self))
 	{
-		if (ta->was_clear && self->fb.enemy_visible && ta_debug)
+		ta->was_clear = false;
+		ta->held = -1;
+		return;
+	}
+	if (self->fb.enemy_visible)
+	{
+		if (ta->was_clear && ta_debug)
 		{
 			TA_LogContact(self, ta);
 		}
 		ta->was_clear = false;
+		ta->held = -1;
+		return;
+	}
+	ta->was_clear = true;
+
+	if (ta_tier < 1)
+	{
+		ta->held = -1;
+		return;
+	}
+
+	if (!TA_Clear(self))
+	{
 		ta->held = -1;
 		return;
 	}
