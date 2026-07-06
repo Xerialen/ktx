@@ -1537,6 +1537,84 @@ char* LocationName(float x, float y, float z)
 	return nodes[best].name;
 }
 
+// mm2humanmode: reverse lookup for parsing teamsay location references.
+// Case-insensitive, high-bit (red text) folded; `name` is matched against
+// each node name with spaces/punctuation-insensitive prefix semantics.
+static int Location_FoldChar(char c)
+{
+	unsigned char u = (unsigned char)c;
+
+	if (u >= 128)
+	{
+		u = (unsigned char)(u - 128);
+	}
+
+	if ((u >= 'A') && (u <= 'Z'))
+	{
+		u = (unsigned char)(u - 'A' + 'a');
+	}
+
+	if ((u < 'a') || (u > 'z'))
+	{
+		if ((u < '0') || (u > '9'))
+		{
+			return 0; // skip separators/markup
+		}
+	}
+
+	return (int)u;
+}
+
+qbool LocationCoordsByName(const char *name, vec3_t out)
+{
+	char want[64];
+	int i, j, w = 0;
+
+	for (i = 0; name[i] && (w < (int)sizeof(want) - 1); i++)
+	{
+		int c = Location_FoldChar(name[i]);
+
+		if (c)
+		{
+			want[w++] = (char)c;
+		}
+	}
+
+	want[w] = '\0';
+
+	if (!w)
+	{
+		return false;
+	}
+
+	for (i = 0; i < node_count; i++)
+	{
+		char have[64];
+		int h = 0;
+
+		for (j = 0; nodes[i].name[j] && (h < (int)sizeof(have) - 1); j++)
+		{
+			int c = Location_FoldChar(nodes[i].name[j]);
+
+			if (c)
+			{
+				have[h++] = (char)c;
+			}
+		}
+
+		have[h] = '\0';
+
+		if (h && streq(have, want))
+		{
+			VectorCopy(nodes[i].point, out);
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void LocationInitialise(void)
 {
 	fileHandle_t file = -1;

@@ -22,7 +22,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define HMODE_VERSION "hm-0.4.0-emit"
+#define HMODE_VERSION "hm-0.5.0-parse"
 
 // Knowledge sources, in rising order of directness. Kept on every snapshot
 // so the trust/merge policy (told vs seen) stays explicit.

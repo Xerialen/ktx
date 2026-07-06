@@ -24,6 +24,9 @@
  */
 
 #include "g_local.h"
+#ifdef BOT_SUPPORT
+#include "hm.h"
+#endif
 
 void cmdinfo(void);
 void cmduinfo(void);
@@ -558,6 +561,16 @@ qbool ClientSay(qbool isTeamSay)
 		result_msg = (isSupport_ColoredText(client) ? str : textuncolored);
 
 		G_sprint_flags(client, PRINT_CHAT, flags, "%s %s\n", prefix, result_msg);
+
+#ifdef BOT_SUPPORT
+		// mm2humanmode: humanmode bot teammates READ team chat -- this is
+		// their sanctioned channel for second-hand item/teammate knowledge.
+		// The loop above already filtered receivers to the sender's team.
+		if (isTeamSay && (self->ct == ctPlayer) && client->isBot && (client != self))
+		{
+			HMode_ParseTeamsay(client, self, textuncolored);
+		}
+#endif
 	}
 
 // } MVDSV

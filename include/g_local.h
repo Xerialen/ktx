@@ -1217,6 +1217,7 @@ void TeamplayMessage(void);
 qbool TeamplayMessageByName(gedict_t *client, const char *message);
 void TeamplayGameTick(void);
 void LocationInitialise(void);
+qbool LocationCoordsByName(const char *name, vec3_t out); // mm2humanmode reverse loc lookup
 qbool SameTeam(gedict_t *p1, gedict_t *p2);
 
 #ifndef BOT_SUPPORT
