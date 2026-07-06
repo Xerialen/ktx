@@ -12,6 +12,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 // FIXME: globals, this is just setting
 void DM6SelectWeaponToOpenDoor(gedict_t *self);
