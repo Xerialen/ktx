@@ -154,6 +154,8 @@ void BotClientEntersEvent(gedict_t *self, gedict_t *spawn_pos)
 	self->fb.weapon_refresh_time = 0;
 	self->blocked = (func_t) BotBlocked;
 	self->fb.random_desired_weapon_impulse = tot_mode_enabled() && !FrogbotWeapon() ? i_rnd(2, 8) : 0;
+
+	HM_ClientEnters(self);
 }
 
 qbool BotUsingCorrectWeapon(gedict_t *self)

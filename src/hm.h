@@ -22,7 +22,39 @@
 
 #ifdef BOT_SUPPORT
 
-#define HM_VERSION "hm-0.1.0-skeleton"
+#define HM_VERSION "hm-0.2.0-tmmodel"
+
+// Knowledge sources, in rising order of directness. Kept on every snapshot
+// so the trust/merge policy (told vs seen) stays explicit.
+#define HM_SRC_NONE     0
+#define HM_SRC_KILLFEED 1	// read in the frag feed (respawned somewhere)
+#define HM_SRC_TOLD     2	// teamsay report (S5)
+#define HM_SRC_SEEN     3	// direct line of sight
+
+// What a humanmode bot believes about one teammate. While the teammate is
+// in view the snapshot is refreshed every scan (fresh=true, the live
+// team-overlay equivalence); once out of view it is HELD AS-IS until a
+// teamsay report, a killfeed death, or re-sighting replaces it (owner
+// decision 2026-07-06, komodobots docs/notes/humanmode-teammate-model.md).
+typedef struct hm_tm_s
+{
+	int source;			// HM_SRC_*; NONE = no information at all
+	qbool fresh;		// teammate in view right now
+	qbool loc_known;	// org below is meaningful
+	float time;			// when this info was captured
+	float health;
+	float armor;
+	int items;			// IT_* flags at capture time (weapons + powerups)
+	float rockets;
+	float cells;
+	vec3_t org;			// last known position
+} hm_tm_t;
+
+// Read-only view of what `bot` currently believes about `mate`.
+// NULL when there is no information (or humanmode inactive). This is THE
+// sanctioned way for decision code to ask about teammates when
+// HM_Active(bot) && HM_CapTmInfo() -- direct entity reads are omniscience.
+const hm_tm_t* HM_TeammateInfo(gedict_t *bot, gedict_t *mate);
 
 // States for fb.hm (per-bot override; memset-0 default = inherit global)
 #define HM_INHERIT 0	// follow cvar k_hm

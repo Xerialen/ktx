@@ -23,6 +23,8 @@ typedef struct hm_bot_s
 {
 	qbool active_logged;			// one-time activation done (tag + log)
 	char tag[4];					// 3-letter lowercase self-prefix
+	float next_tm_scan;				// visibility-scan throttle (engine trap)
+	hm_tm_t tm[MAX_CLIENTS + 1];	// beliefs about teammates, by entity num
 } hm_bot_t;
 
 static hm_bot_t hm_bots[MAX_CLIENTS + 1];
@@ -197,7 +199,132 @@ static void HM_Activate(gedict_t *self)
 				(int)HM_CapItemInfo());
 }
 
-// ---- hooks (inert in S1 beyond activation) ----
+// ---- teammate-state model (S2) ----
+
+// LOS check with an explicit viewer (VisibleEntity() relies on the global
+// self). Same three-trace shape as bot_bothelp.c PointVisible/VisibleEntity,
+// which is also the perception definition the stock enemypwr spotting uses:
+// PVS filter first (visible_to), then eye-to-body tracelines. No view cone,
+// consistent with the enemy-perception model.
+static qbool HM_TraceVisible(gedict_t *viewer, vec3_t point)
+{
+	traceline(PASSVEC3(viewer->s.v.origin), PASSVEC3(point), true, viewer);
+
+	return (g_globalvars.trace_fraction == 1)
+			&& !(g_globalvars.trace_inopen && g_globalvars.trace_inwater);
+}
+
+static qbool HM_EntityVisibleTo(gedict_t *viewer, gedict_t *ent)
+{
+	vec3_t vec;
+
+	if (HM_TraceVisible(viewer, ent->s.v.origin))
+	{
+		return true;
+	}
+
+	VectorCopy(ent->s.v.origin, vec);
+	vec[2] = ent->s.v.absmin[2];
+
+	if (HM_TraceVisible(viewer, vec))
+	{
+		return true;
+	}
+
+	vec[2] = ent->s.v.absmax[2];
+
+	return HM_TraceVisible(viewer, vec);
+}
+
+// Refresh a snapshot from the live entity. Only ever called when the bot
+// can actually see the teammate -- this is the single place where humanmode
+// touches another player's real state, and sight is the license for it.
+static void HM_TmRefresh(hm_tm_t *tm, gedict_t *mate)
+{
+	tm->source = HM_SRC_SEEN;
+	tm->fresh = true;
+	tm->loc_known = true;
+	tm->time = g_globalvars.time;
+	tm->health = mate->s.v.health;
+	tm->armor = mate->s.v.armorvalue;
+	tm->items = (int)mate->s.v.items;
+	tm->rockets = mate->s.v.ammo_rockets;
+	tm->cells = mate->s.v.ammo_cells;
+	VectorCopy(mate->s.v.origin, tm->org);
+}
+
+// Periodic teammate visibility scan. Visible teammates get a fresh snapshot;
+// everyone else keeps their held snapshot untouched (fresh drops to false).
+// Throttled like the stock powerup spotting to keep trap_VisibleTo cheap.
+static void HM_TmScan(gedict_t *self)
+{
+	byte visible[MAX_CLIENTS];
+	hm_bot_t *slot = HM_Slot(self);
+	gedict_t *mate;
+	int j;
+
+	if (!slot || !teamplay)
+	{
+		return;
+	}
+
+	if (slot->next_tm_scan > g_globalvars.time)
+	{
+		return;
+	}
+
+	slot->next_tm_scan = g_globalvars.time + 0.3f;
+
+	visible_to(self, g_edicts + 1, MAX_CLIENTS, visible);
+
+	for (j = 1, mate = g_edicts + 1; j <= MAX_CLIENTS; j++, mate++)
+	{
+		hm_tm_t *tm = &slot->tm[j];
+
+		if ((mate == self) || (mate->ct != ctPlayer)
+				|| (mate->k_teamnum != self->k_teamnum))
+		{
+			continue;
+		}
+
+		if (ISLIVE(mate) && visible[j - 1] && HM_EntityVisibleTo(self, mate))
+		{
+			HM_TmRefresh(tm, mate);
+		}
+		else
+		{
+			tm->fresh = false; // hold the snapshot as-is
+		}
+	}
+}
+
+const hm_tm_t* HM_TeammateInfo(gedict_t *bot, gedict_t *mate)
+{
+	hm_bot_t *slot;
+	int m;
+
+	if (!HM_Active(bot) || !mate)
+	{
+		return NULL;
+	}
+
+	slot = HM_Slot(bot);
+	m = NUM_FOR_EDICT(mate);
+
+	if (!slot || (m < 1) || (m > MAX_CLIENTS))
+	{
+		return NULL;
+	}
+
+	if (slot->tm[m].source == HM_SRC_NONE)
+	{
+		return NULL;
+	}
+
+	return &slot->tm[m];
+}
+
+// ---- hooks ----
 
 void HM_Frame(gedict_t *self)
 {
@@ -207,16 +334,33 @@ void HM_Frame(gedict_t *self)
 	}
 
 	HM_Activate(self);
+
+	if (HM_CapTmInfo())
+	{
+		HM_TmScan(self);
+	}
 }
 
 void HM_ClientEnters(gedict_t *self)
 {
+	hm_bot_t *slot;
+
 	if (!HM_Active(self))
 	{
 		return;
 	}
 
-	// S2: reset perception state; S4: queue fresh-spawn report.
+	slot = HM_Slot(self);
+
+	if (slot && (match_in_progress != 2))
+	{
+		// Pre-match (re)spawn: clean knowledge baseline for the match.
+		// Mid-match respawns keep the bot's memory -- humans do.
+		memset(slot->tm, 0, sizeof(slot->tm));
+		slot->next_tm_scan = 0;
+	}
+
+	// S4: queue the fresh-spawn report ("0/100 sg {loc}") here.
 }
 
 void HM_ItemTaken(gedict_t *item, gedict_t *player)
@@ -224,9 +368,59 @@ void HM_ItemTaken(gedict_t *item, gedict_t *player)
 	// S3: taker + PVS witnesses update item beliefs.
 }
 
+// Every player reads the frag feed, so a teammate's death is public
+// knowledge: the held snapshot collapses to "respawned: 0/100 sg, location
+// unknown". The gap usually closes within seconds -- the fresh-spawn report
+// ("0/100 sg {loc}") is a real, frequent template (1,082 in the Book corpus).
 void HM_Killfeed(gedict_t *victim, gedict_t *attacker)
 {
-	// S2: teammates in humanmode invalidate their snapshot of the victim.
+	int j, v;
+	gedict_t *bot;
+
+	if (!victim || (victim->ct != ctPlayer))
+	{
+		return;
+	}
+
+	v = NUM_FOR_EDICT(victim);
+
+	if ((v < 1) || (v > MAX_CLIENTS))
+	{
+		return;
+	}
+
+	for (j = 1, bot = g_edicts + 1; j <= MAX_CLIENTS; j++, bot++)
+	{
+		hm_bot_t *slot;
+		hm_tm_t *tm;
+
+		if (!bot->isBot || (bot == victim) || (bot->ct != ctPlayer)
+				|| (bot->k_teamnum != victim->k_teamnum))
+		{
+			continue;
+		}
+
+		if (!HM_Active(bot) || !HM_CapTmInfo())
+		{
+			continue;
+		}
+
+		slot = HM_Slot(bot);
+
+		if (!slot)
+		{
+			continue;
+		}
+
+		tm = &slot->tm[v];
+		memset(tm, 0, sizeof(*tm));
+		tm->source = HM_SRC_KILLFEED;
+		tm->time = g_globalvars.time;
+		tm->health = 100;
+		tm->armor = 0;
+		tm->items = IT_SHOTGUN | IT_AXE;
+		tm->loc_known = false;
+	}
 }
 
 void HM_ParseTeamsay(gedict_t *receiver, gedict_t *sender, const char *text)

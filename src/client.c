@@ -28,6 +28,9 @@
 //
 //===========================================================================
 #include "g_local.h"
+#ifdef BOT_SUPPORT
+#include "hm.h"
+#endif
 
 vec3_t VEC_ORIGIN =
 	{ 0, 0, 0 };
@@ -5144,6 +5147,12 @@ void ClientObituary(gedict_t *targ, gedict_t *attacker)
 	StatsHandler(targ, attacker);
 
 	ktpro_autotrack_on_death(targ);
+
+#ifdef BOT_SUPPORT
+	// mm2humanmode: the frag feed is on-screen text everyone reads --
+	// humanmode teammates collapse their held snapshot of the victim.
+	HM_Killfeed(targ, attacker);
+#endif
 
 	playerheight = Instagib_Obituary(targ, attacker);
 	if ((targ->deathtype == dtWATER_DMG) || (targ->deathtype == dtEXPLO_BOX)
