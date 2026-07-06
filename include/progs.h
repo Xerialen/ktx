@@ -765,6 +765,7 @@ typedef struct fb_entvars_s {
 	int cmd_msec_last;
 
 	int kbot;									// KomodoBrain state (0 = stock frogbot, see KBOT_STATE_* in kbot.h)
+	int hm;										// mm2humanmode per-bot override (0 = inherit k_hm, see HM_* in hm.h)
 } fb_entvars_t;
 #endif
 

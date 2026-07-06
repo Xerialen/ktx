@@ -79,6 +79,7 @@ set(SRC_COMMON
 	"${DIR_SRC}/g_utils.c"
 	"${DIR_SRC}/g_syscalls_extra.c"
 	"${DIR_SRC}/hiprot.c"
+	"${DIR_SRC}/hm.c"
 	"${DIR_SRC}/hoonymode.c"
 	"${DIR_SRC}/items.c"
 	"${DIR_SRC}/kbot_main.c"

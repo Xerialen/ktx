@@ -12,6 +12,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "hm.h"
 
 #define PERIODIC_MM2_STATUS 4
 
@@ -359,8 +360,12 @@ void BotPreThink(gedict_t *self)
 			PlayerReady(true);
 		}
 
+		HM_Frame(self);
+
 		if (teamplay && (match_in_progress == 2))
 		{
+			// S4 will route hm-active bots to the Book-derived emitter
+			// instead of this stock periodic block.
 			BotPeriodicMessages(self);
 		}
 	}
