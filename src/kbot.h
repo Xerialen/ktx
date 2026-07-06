@@ -30,7 +30,11 @@
 
 // Flag a freshly added bot as a komodobot: sets fb.kbot, stamps identity
 // markers (userinfo "kbot" key + "kb:" name prefix) and logs to server console.
+// Owner-rostered seat names (k_kbot_name1..4) skip the name prefix.
 void KBot_MarkBot(gedict_t *bot);
+
+// True when `name` matches a k_kbot_name1..4 roster seat cvar.
+qbool KBot_IsRosterSeatName(const char *name);
 
 // Per-frame brain entry point, called from BotsThinkTime() for flagged bots.
 // Returns true if the brain fully handled this frame's think (BotsThinkTime

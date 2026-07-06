@@ -47,6 +47,26 @@ static int KBot_ArmedCells(void)
 	return (v <= 0) ? 15 : v;
 }
 
+// True when `name` is one of the owner-rostered seat names (k_kbot_name1..4,
+// see KbotSeatName in bot_commands.c).
+qbool KBot_IsRosterSeatName(const char *name)
+{
+	char buf[32];
+	int n;
+
+	for (n = 1; n <= 4; n++)
+	{
+		trap_cvar_string(va("k_kbot_name%d", n), buf, sizeof(buf));
+
+		if (!strnull(buf) && streq(buf, name))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void KBot_MarkBot(gedict_t *bot)
 {
 	char newname[CLIENT_NAME_LEN];
@@ -64,9 +84,12 @@ void KBot_MarkBot(gedict_t *bot)
 	KBot_StampedVersion(stamped, sizeof(stamped));
 
 	// Identity markers: userinfo key + "kb:" name prefix, so identity shows
-	// up in ktxstats / MVD player names.
+	// up in ktxstats / MVD player names. An owner-rostered seat name
+	// (k_kbot_name1..4) is kept verbatim -- the display name is the point of
+	// the roster (humanmode believability); the userinfo stamp still carries
+	// the identity evidence.
 	trap_SetBotUserInfo(entity, "kbot", stamped, 0);
-	if (strncmp(bot->netname, "kb:", 3))
+	if (strncmp(bot->netname, "kb:", 3) && !KBot_IsRosterSeatName(bot->netname))
 	{
 		snprintf(newname, sizeof(newname), "kb:%s", bot->netname);
 		trap_SetBotUserInfo(entity, "name", newname, 0);

@@ -296,7 +296,21 @@ static const char* KbotSeatName(void)
 
 		for (p = world; (p = find_plr(p));)
 		{
-			if (streq(p->netname, name))
+			// compare past engine dedup "(N)" and identity "kb:" prefixes so
+			// "kb:hib" / "(1)kb:hib" still count as "hib" being taken
+			const char *pn = p->netname;
+
+			if ((pn[0] == '(') && (pn[1] >= '0') && (pn[1] <= '9') && (pn[2] == ')'))
+			{
+				pn += 3;
+			}
+
+			if (!strncmp(pn, "kb:", 3))
+			{
+				pn += 3;
+			}
+
+			if (streq(pn, name))
 			{
 				used = true;
 				break;
