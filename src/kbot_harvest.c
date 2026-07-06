@@ -766,15 +766,17 @@ qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction)
 		return false;	// own window, not guarding: converge, never post
 	}
 
-	// B5 posting: control class with RL+rockets, inside the bound zone,
-	// never during a quad window (converge instead). The zone bindings live
-	// on the B3 blackboard tick -- run it here too so posting works with the
-	// anchor lever off (found inert in the first b5-on arm: zero KDLOG).
-	KHV_AnchorTick();
+	// B5 posting: control class with RL+rockets, standing inside a tactical
+	// zone (never on open transit ground -- Book posts at the armor spots and
+	// chokes of whatever zone he is stacked in, spec 7b), never during a quad
+	// window (converge instead). NOT gated on the B3 binding: the anchor is
+	// force-bound to RA but lives at quad/YA, so requiring bound==current
+	// made posting unreachable (second inert arm, found via KDLOG + the
+	// control-position grid).
 	if (hold_on && !KHV_QuadWindowSoon(10) && (KBot_StackClass(self) == KBM_CONTROL)
 			&& ((int)self->s.v.items & IT_ROCKET_LAUNCHER)
 			&& (self->s.v.ammo_rockets > 0)
-			&& zone && (khv_bound[idx] == zone))
+			&& zone)
 	{
 		gedict_t *goal = &g_edicts[(int)self->s.v.goalentity];
 		qbool timing_watch = false;
