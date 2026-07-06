@@ -86,6 +86,7 @@ set(SRC_COMMON
 	"${DIR_SRC}/kbot_models.c"
 	"${DIR_SRC}/kbot_harvest.c"
 	"${DIR_SRC}/kbot_weapons.c"
+	"${DIR_SRC}/kbot_dials.c"
 	"${DIR_SRC}/logs.c"
 	"${DIR_SRC}/maps.c"
 	"${DIR_SRC}/maps_map_amphi2.c"

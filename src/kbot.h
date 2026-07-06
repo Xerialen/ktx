@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.27.0-weapons"
+#define KBOT_VERSION "kbot-0.28.0-dials"
 
 // ---- tournament decision models (kbot_models.c, 2026-07-06) ----
 // Three cvar-gated models over the frogbot value function, data-filled from
@@ -69,6 +69,28 @@ qbool KBot_HarvestHolding(gedict_t *p);      // true while a B4/B5 hold owns the
 // k_kbot_weap_quadlg / _finish / _sgdown, defaults 0 byte-neutral.
 int KBot_WeaponOverride(gedict_t *self);     // IT_* or 0 (vanilla selection)
 void KBot_WeaponsDeathEvent(gedict_t *targ); // killfeed stamps for rule 2
+
+// enemy-state estimator (kbot_harvest.c) -- THE human_mode swap point
+int KBot_EnemyClassEst(gedict_t *self, gedict_t *en);
+
+// ---- the five tactical dials (kbot_dials.c, owner directive 2026-07-06) ----
+// k_kbot_dial_<engage|hoard|adhere|quad|share> global + _s<1..4> per-bot
+// override (fb.kbot_slot). Default -1 = off (byte-neutral), active 0..1.
+// KDLOG lane=dial on every outcome-changing application.
+#define KDIAL_ENGAGE 0
+#define KDIAL_HOARD  1
+#define KDIAL_ADHERE 2
+#define KDIAL_QUAD   3
+#define KDIAL_SHARE  4
+float KBot_Dial(gedict_t *self, int dial);                    // resolved, -1 off
+float KBot_DialEngageAggr(gedict_t *self);                    // dial + team balance
+float KBot_DialWeakScale(gedict_t *self);                     // retreat threshold x
+int KBot_DialEngageAdjust(gedict_t *self, gedict_t *en, int decision); // KBX step
+float KBot_DialGoalShim(gedict_t *self, gedict_t *goal, float goal_time); // D2/D3/D5
+float KBot_DialHoldScale(gedict_t *self);                     // B5 cadence x
+float KBot_DialQuadLead(gedict_t *self);                      // B4 lead seconds
+float KBot_DialQuadDeflate(gedict_t *self);                   // B4 goal_time x
+int KBot_DialQuadCount(gedict_t *self);                       // B4 convergers
 
 // ---- KDLOG decision-log emitter (kbot_dlog.c) ----
 // Structured tactical-decision telemetry (G_cprint "KDLOG ..." lines into

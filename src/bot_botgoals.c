@@ -183,6 +183,11 @@ void EvalGoal(gedict_t *self, gedict_t *goal_entity)
 		// kbots see the quad goal deflated while the window opens (T-10 s).
 		goal_time = KBot_HarvestQuadShim(self, goal_entity, goal_time);
 
+		// Tactical dials D2/D3/D5 (kbot_dials.c, owner directive): hoarding
+		// vs map control, team adherence, economic sharing -- all perceived
+		// travel time, never desire (R2). Off (-1) is byte-neutral.
+		goal_time = KBot_DialGoalShim(self, goal_entity, goal_time);
+
 		if (self->fb.goal_enemy_repel)
 		{
 			// Time for our enemy to get there

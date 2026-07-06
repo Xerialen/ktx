@@ -161,7 +161,8 @@ void KBot_HarvestDeathEvent(gedict_t *targ)
 
 // Enemy-state reads behind one indirection: human_mode (spec
 // 2026-07-06-human-mode-design.md) swaps truth for belief HERE, nowhere else.
-static int KHV_EnemyClassEst(gedict_t *self, gedict_t *en)
+// Public: the D1 engage dial reads the enemy team balance through it too.
+int KBot_EnemyClassEst(gedict_t *self, gedict_t *en)
 {
 	return KBot_StackClass(en);
 }
@@ -199,7 +200,7 @@ static void KHV_RefreshEnemies(gedict_t *self)
 			continue;
 		}
 		VectorCopy(p->s.v.origin, khv_en[khv_en_count].pos);
-		khv_en[khv_en_count].cls = KHV_EnemyClassEst(self, p);
+		khv_en[khv_en_count].cls = KBot_EnemyClassEst(self, p);
 		khv_en[khv_en_count].quad = (p->super_damage_finished > g_globalvars.time);
 		khv_en_count++;
 	}
@@ -573,14 +574,14 @@ static qbool KHV_QuadWindowSoon(float lead)
 }
 
 // 2 s cadence: rank armed+ kbots by distance to the quad; [0] is the TAKER,
-// [1] the second converger. Everyone else stays on the zone loop.
+// [1]/[2] the convergers (the D4 dial decides whether the third joins).
 static float khv_quad_next = 0;
-static gedict_t *khv_quad_near[2] = { NULL, NULL };
+static gedict_t *khv_quad_near[3] = { NULL, NULL, NULL };
 
 static void KHV_QuadTick(void)
 {
 	gedict_t *p, *q = KHV_QuadItem();
-	float d0 = 999999, d1 = 999999;
+	float dist_near[3] = { 999999, 999999, 999999 };
 
 	if (g_globalvars.time < khv_quad_next)
 	{
@@ -591,7 +592,7 @@ static void KHV_QuadTick(void)
 		khv_quad_next = 0;
 	}
 	khv_quad_next = g_globalvars.time + 2.0f;
-	khv_quad_near[0] = khv_quad_near[1] = NULL;
+	khv_quad_near[0] = khv_quad_near[1] = khv_quad_near[2] = NULL;
 	if (!q)
 	{
 		return;
@@ -600,6 +601,7 @@ static void KHV_QuadTick(void)
 	{
 		vec3_t d;
 		float dist;
+		int i, j;
 
 		if (!p->isBot || !p->fb.kbot || ISDEAD(p) || (KBot_StackClass(p) < KBM_ARMED))
 		{
@@ -607,17 +609,19 @@ static void KHV_QuadTick(void)
 		}
 		VectorSubtract(p->s.v.origin, q->s.v.origin, d);
 		dist = vlen(d);
-		if (dist < d0)
+		for (i = 0; i < 3; i++)
 		{
-			d1 = d0;
-			khv_quad_near[1] = khv_quad_near[0];
-			d0 = dist;
-			khv_quad_near[0] = p;
-		}
-		else if (dist < d1)
-		{
-			d1 = dist;
-			khv_quad_near[1] = p;
+			if (dist < dist_near[i])
+			{
+				for (j = 2; j > i; j--)
+				{
+					dist_near[j] = dist_near[j - 1];
+					khv_quad_near[j] = khv_quad_near[j - 1];
+				}
+				dist_near[i] = dist;
+				khv_quad_near[i] = p;
+				break;
+			}
 		}
 	}
 }
@@ -640,23 +644,31 @@ static float KHV_CvarCached(const char *name, float *val, float *next)
 	return *val;
 }
 
-// B4 convergence seam (same call site as the B3 shim): the two nearest
-// armed+ kbots see the quad goal deflated while the window opens.
+// B4 convergence seam (same call site as the B3 shim): the nearest armed+
+// kbots see the quad goal deflated while the window opens. Lead time,
+// deflation and converger count come from the D4 dial (defaults 10 s /
+// 0.6x / 2 with the dial off).
 float KBot_HarvestQuadShim(gedict_t *self, gedict_t *goal, float goal_time)
 {
+	int i, n;
+
 	if (!KHV_CvarCached("k_kbot_harvest_quad", &khv_quad_f, &khv_quad_f_next)
 			|| !self->isBot || !self->fb.kbot)
 	{
 		return goal_time;
 	}
-	if ((goal != KHV_QuadItem()) || !KHV_QuadWindowSoon(10))
+	if ((goal != KHV_QuadItem()) || !KHV_QuadWindowSoon(KBot_DialQuadLead(self)))
 	{
 		return goal_time;
 	}
 	KHV_QuadTick();
-	if ((self == khv_quad_near[0]) || (self == khv_quad_near[1]))
+	n = KBot_DialQuadCount(self);
+	for (i = 0; i < n; i++)
 	{
-		return goal_time * 0.6f;
+		if (self == khv_quad_near[i])
+		{
+			return goal_time * KBot_DialQuadDeflate(self);
+		}
 	}
 
 	return goal_time;
@@ -771,7 +783,7 @@ qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction)
 	// B4 guard: window live/opening, armed+, in the quad zone, not the taker,
 	// at guard distance -> hold a short watch on the east entry (rolling
 	// 2.5 s holds so the take still releases everyone).
-	if (guard_on && KHV_QuadWindowSoon(10))
+	if (guard_on && KHV_QuadWindowSoon(KBot_DialQuadLead(self)))
 	{
 		gedict_t *q = KHV_QuadItem();
 
@@ -884,7 +896,9 @@ qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction)
 		if (timing_watch || ambush)
 		{
 			h->until = g_globalvars.time + 3.0f + g_random() * 3.0f;	// 3-6 s
-			h->cool = h->until + 8.0f;
+			// D2 hoard dial scales the posting cadence (low hoard = hold
+			// ground more; KBot_DialHoldScale is 1.0 with the dial off)
+			h->cool = h->until + 8.0f * KBot_DialHoldScale(self);
 			h->yaw = yaw;
 			KDLog_Play(self, "harvest", timing_watch ? "hold-timing" : "hold-ambush", "");
 			VectorClear(direction);

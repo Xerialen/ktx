@@ -437,9 +437,11 @@ static int KBot_ExchangeDecision(gedict_t *self, gedict_t *en)
 }
 
 // HUNT-desire multiplier -- the ONLY thing UTBYTE touches. Never s.v.enemy.
+// The D1 engage dial (kbot_dials.c) may step the table decision up or down
+// one notch from the team weapon balance; FINISH is never modulated.
 static float KBot_UtbyteScaleHunt(gedict_t *self, gedict_t *en, float desire)
 {
-	switch (KBot_ExchangeDecision(self, en))
+	switch (KBot_DialEngageAdjust(self, en, KBot_ExchangeDecision(self, en)))
 	{
 		case KBX_FINISH:
 			return desire * 1.6f;

@@ -87,6 +87,7 @@ void KBot_MarkBot(gedict_t *bot)
 				idx++;
 			}
 		}
+		bot->fb.kbot_slot = idx;	// stable per-bot identity for dial overrides
 		snprintf(namecvar, sizeof(namecvar), "k_kbot_name%d", idx);
 		trap_cvar_string(namecvar, newname, sizeof(newname));
 		if (!strnull(newname))
@@ -161,7 +162,9 @@ qbool KBot_AvoidFights(gedict_t *self)
 	{
 		return true;
 	}
-	if ((self->s.v.health + self->s.v.armorvalue) < KBot_WeakStack())
+	// D1 engage dial: low aggression retreats earlier, high fights lower
+	if ((self->s.v.health + self->s.v.armorvalue)
+			< KBot_WeakStack() * KBot_DialWeakScale(self))
 	{
 		return true;
 	}

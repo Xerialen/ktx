@@ -1123,6 +1123,26 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_weap_finish", "0");
 	RegisterCvarEx("k_kbot_weap_sgdown", "0");
 
+	// The five tactical dials (kbot_dials.c, owner directive 2026-07-06):
+	// -1 = off (byte-neutral), 0..1 active. Global value + per-bot override
+	// k_kbot_dial_<name>_s<slot> (slot = kbot join order 1..4).
+	{
+		static const char *dials[] = { "engage", "hoard", "adhere", "quad", "share" };
+		char name[48];
+		int i, s;
+
+		for (i = 0; i < 5; i++)
+		{
+			snprintf(name, sizeof(name), "k_kbot_dial_%s", dials[i]);
+			RegisterCvarEx(name, "-1");
+			for (s = 1; s <= 4; s++)
+			{
+				snprintf(name, sizeof(name), "k_kbot_dial_%s_s%d", dials[i], s);
+				RegisterCvarEx(name, "-1");
+			}
+		}
+	}
+
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).
 	// k_kbot_gj_lane -1 = passive trigger (real feature); 0..3 = trial driver
