@@ -6033,23 +6033,25 @@ static void BotLogMoveProbeCommand(gedict_t *self, int cmd_msec, vec3_t directio
 		moveprobe_s25_out_side[slot] = 0.0f;
 	}
 
+	// QVM: q3asm caps a single call's ARG bytes at 256 (q3asm.c ASMF(ARG)),
+	// and this telemetry line needs ~75 args. Split into three prints; the
+	// output is byte-identical (G_cprint is vsnprintf->trap_conprint with no
+	// per-call additions) and only the last part carries the newline, so the
+	// FBMOVEPROBE_CMD log grammar the Python harness parses is unchanged.
 	G_cprint("FBMOVEPROBE_CMD time=%.3f ed=%d name=%s mode=%d msec=%d "
 			 "angles=%.1f,%.1f,%.1f move=%d,%d,%d buttons=%d impulse=%d "
 			 "diag=%.1f,%.1f,%.1f,%d "
-			 "route=%d,%d,%d,%d,%d,%d,%d,%.3f "
-			 "water=%d,%d,%d,%d,%.1f,%.1f,%.1f,%.1f,%.3f,%.3f,%.3f "
-			 "probe=%d,%d,%.3f,%.3f,%.3f "
-			 "qwd=%d,%d,%d,%.3f,%d,%d,%.3f "
-			 "replay=%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f "
-			 "origin=%.3f,%.3f,%.3f "
-			 "zjump=%d,%.3f,%.3f,%.1f,%.1f,%.1f,%.1f,%d,%d "
-			 "s25=%d,%d,%d,%.1f,%.1f,%.1f,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f\n",
+			 "route=%d,%d,%d,%d,%d,%d,%d,%.3f ",
 			 g_globalvars.time, ednum, self->netname, mode, cmd_msec,
 			 PASSVEC3(self->fb.desired_angle), PASSINTVEC3(direction),
 			 buttons, impulse, route_yaw, view_yaw, yaw_delta, backward,
 			 BotMoveProbeMarkerIndex(self->fb.linked_marker),
 			 BotMoveProbeMarkerIndex(self->fb.touch_marker), goalentity, goal_marker,
-			 self->fb.path_state, self->fb.state, blocked, self->fb.dir_speed,
+			 self->fb.path_state, self->fb.state, blocked, self->fb.dir_speed);
+	G_cprint("water=%d,%d,%d,%d,%.1f,%.1f,%.1f,%.1f,%.3f,%.3f,%.3f "
+			 "probe=%d,%d,%.3f,%.3f,%.3f "
+			 "qwd=%d,%d,%d,%.3f,%d,%d,%.3f "
+			 "replay=%d,%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f ",
 			 (int)self->s.v.waterlevel, (int)self->s.v.watertype, (int)self->s.v.flags,
 			 (int)self->fb.swim_arrow, direction[2],
 			 PASSVEC3(self->s.v.velocity), PASSVEC3(self->fb.dir_move_),
@@ -6063,7 +6065,10 @@ static void BotLogMoveProbeCommand(gedict_t *self, int cmd_msec, vec3_t directio
 			 moveprobe_replay_active[slot], moveprobe_replay_complete[slot],
 			 moveprobe_replay_cursor[slot], BotMoveProbeReplayCountForSlot(slot),
 			 moveprobe_replay_divergence[slot], PASSVEC3(moveprobe_replay_expected[slot]),
-			 moveprobe_replay_divergence_h[slot], moveprobe_replay_divergence_v[slot],
+			 moveprobe_replay_divergence_h[slot], moveprobe_replay_divergence_v[slot]);
+	G_cprint("origin=%.3f,%.3f,%.3f "
+			 "zjump=%d,%.3f,%.3f,%.1f,%.1f,%.1f,%.1f,%d,%d "
+			 "s25=%d,%d,%d,%.1f,%.1f,%.1f,%d,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f\n",
 			 PASSVEC3(self->s.v.origin),
 			 moveprobe_s23_zjump_phase[slot], moveprobe_s23_zjump_d_lip[slot],
 			 moveprobe_s23_zjump_vh[slot], moveprobe_s23_zjump_vel_yaw[slot],
