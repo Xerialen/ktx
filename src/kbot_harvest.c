@@ -767,7 +767,10 @@ qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction)
 	}
 
 	// B5 posting: control class with RL+rockets, inside the bound zone,
-	// never during a quad window (converge instead)
+	// never during a quad window (converge instead). The zone bindings live
+	// on the B3 blackboard tick -- run it here too so posting works with the
+	// anchor lever off (found inert in the first b5-on arm: zero KDLOG).
+	KHV_AnchorTick();
 	if (hold_on && !KHV_QuadWindowSoon(10) && (KBot_StackClass(self) == KBM_CONTROL)
 			&& ((int)self->s.v.items & IT_ROCKET_LAUNCHER)
 			&& (self->s.v.ammo_rockets > 0)
