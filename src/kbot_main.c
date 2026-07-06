@@ -1245,6 +1245,27 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 					 org[0], org[1], org[2]);
 		}
 	}
+	// Runway start reached -> run east THROUGH the launch line (the carrot
+	// sits past the shelf edge so the bot never decelerates into it; the
+	// launch gate below fires mid-run).
+	if ((leg == 3) && (org[0] < 622.0f) && (org[1] > 736.0f))
+	{
+		leg = 4;
+	}
+	// Parked east of the launch line without launch speed (psmoke1 try 2:
+	// 9 s at vh 0 on the pad): walk back to the runway start and rerun.
+	if ((leg == 4) && (org[0] > 646.0f))
+	{
+		vec3_t hv0;
+
+		hv0[0] = self->s.v.velocity[0];
+		hv0[1] = self->s.v.velocity[1];
+		hv0[2] = 0;
+		if (VectorLength(hv0) < 120.0f)
+		{
+			leg = 3;
+		}
+	}
 	gj_pent_leg[slot] = leg;
 
 	switch (leg)
@@ -1252,7 +1273,8 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 		case 0:  VectorSet(carrot, 770, 700, -264); break;    // ramp top
 		case 1:  VectorSet(carrot, 604, 720, -240); break;    // lift plate
 		case 2:  VectorSet(carrot, 604, 720, org[2]); break;  // hold the plate
-		default: VectorSet(carrot, 676, 758, -104); break;    // shelf east edge
+		case 3:  VectorSet(carrot, 612, 750, -104); break;    // runway start
+		default: VectorSet(carrot, 700, 758, -104); break;    // through the edge
 	}
 
 	{
@@ -1267,14 +1289,14 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 	// Launch handoff: grounded on the shelf, east of the run-up start, moving
 	// east inside the heading band. The runway length caps vh inside the
 	// measured success band; minv only rejects a from-standstill first frame.
-	if ((leg == 3) && onground && (org[2] > -116.0f) && (org[0] > 652.0f))
+	if ((leg >= 3) && onground && (org[2] > -116.0f) && (org[0] > 656.0f))
 	{
 		float minv = cvar("k_kbot_gj_pent_minv");
 		float verr = 999;
 
 		if (minv <= 0)
 		{
-			minv = 200;
+			minv = 250;
 		}
 		GJ_Geometry(7, take, land, &fz);
 		if (vh > 1)

@@ -1241,7 +1241,7 @@ void FirstFrame(void)
 	// = minimum pent seconds remaining to start a run.
 	RegisterCvarEx("k_kbot_gj_pent", "1");
 	RegisterCvarEx("k_kbot_gj_pent_pitch", "77");
-	RegisterCvarEx("k_kbot_gj_pent_minv", "200");
+	RegisterCvarEx("k_kbot_gj_pent_minv", "250");
 	RegisterCvarEx("k_kbot_gj_pent_minleft", "8");
 
 	for (i = 0; i < MAX_CLIENTS; i++)
