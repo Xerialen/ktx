@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.26.0-harvest"
+#define KBOT_VERSION "kbot-0.27.0-weapons"
 
 // ---- tournament decision models (kbot_models.c, 2026-07-06) ----
 // Three cvar-gated models over the frogbot value function, data-filled from
@@ -63,6 +63,12 @@ void KBot_HarvestDeathEvent(gedict_t *targ); // B2: death-memory feed (Killed)
 float KBot_HarvestAnchorShim(gedict_t *self, gedict_t *goal, float goal_time); // B3
 float KBot_HarvestQuadShim(gedict_t *self, gedict_t *goal, float goal_time);   // B4
 qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction); // B4/B5
+qbool KBot_HarvestHolding(gedict_t *p);      // true while a B4/B5 hold owns the bot
+
+// ---- weapon discipline (kbot_weapons.c, owner rules 2026-07-06) ----
+// k_kbot_weap_quadlg / _finish / _sgdown, defaults 0 byte-neutral.
+int KBot_WeaponOverride(gedict_t *self);     // IT_* or 0 (vanilla selection)
+void KBot_WeaponsDeathEvent(gedict_t *targ); // killfeed stamps for rule 2
 
 // ---- KDLOG decision-log emitter (kbot_dlog.c) ----
 // Structured tactical-decision telemetry (G_cprint "KDLOG ..." lines into

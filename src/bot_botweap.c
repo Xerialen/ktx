@@ -734,6 +734,18 @@ static int DesiredWeapon(void)
 		return IT_SHOTGUN;
 	}
 
+	// KBOT weapon discipline (kbot_weapons.c, owner rules 2026-07-06):
+	// quad-shaft / cheap finish / sg-down, each behind its own cvar.
+	if (self->isBot && self->fb.kbot)
+	{
+		int w = KBot_WeaponOverride(self);
+
+		if (w)
+		{
+			return w;
+		}
+	}
+
 	// When to always use RL
 	if ((self->fb.skill.rl_preference >= g_random()) || fb_lg_disabled())
 	{

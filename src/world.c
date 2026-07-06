@@ -1116,6 +1116,13 @@ void FirstFrame(void)
 	RegisterCvarEx("k_kbot_harvest_hold", "0");
 	RegisterCvarEx("k_kbot_harvest_debug", "0");
 
+	// Weapon discipline (kbot_weapons.c, owner rules 2026-07-06):
+	// quad-shaft always-in-reach / cheap hitscan finish on clipped fresh
+	// spawns / sg carried outside engagements (pack economy).
+	RegisterCvarEx("k_kbot_weap_quadlg", "0");
+	RegisterCvarEx("k_kbot_weap_finish", "0");
+	RegisterCvarEx("k_kbot_weap_sgdown", "0");
+
 	// E6 gap-crossing strafe-jump play. Neutral-off: k_kbot_gapjump 0 makes
 	// KBot_GapjumpFrame return false immediately (vanilla command unchanged).
 	// k_kbot_gj_lane -1 = passive trigger (real feature); 0..3 = trial driver

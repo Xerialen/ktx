@@ -692,6 +692,14 @@ typedef struct
 
 static khv_hold_state_t khv_hold[MAX_EDICTS];
 
+// accessor for kbot_weapons.c rule 3: a hold wants the real gun out
+qbool KBot_HarvestHolding(gedict_t *p)
+{
+	int idx = NUM_FOR_EDICT(p);
+
+	return (idx > 0) && (idx < MAX_EDICTS) && (g_globalvars.time < khv_hold[idx].until);
+}
+
 static float KHV_YawTo(gedict_t *self, const float *point)
 {
 	vec3_t d;

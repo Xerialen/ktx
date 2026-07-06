@@ -105,6 +105,8 @@ void BotPlayerKilledEvent(gedict_t *targ, gedict_t *attacker, gedict_t *inflicto
 
 	// HARVEST B2: kbot deaths feed the per-marker death memory
 	KBot_HarvestDeathEvent(targ);
+	// weapon discipline rule 2: killfeed death stamps (all players)
+	KBot_WeaponsDeathEvent(targ);
 }
 
 // Called whenever a player dies
