@@ -493,6 +493,20 @@ float KBot_ModelScaleGoal(gedict_t *self, gedict_t *goal, float desire)
 			{
 				return 0;
 			}
+			// ABSORBED from TDM after the qualifying win (tournament rule,
+			// 2026-07-06): weapon-economy urgency -- the corpus' strongest
+			// single lever (team flow -3.6 -> +14.4 frags/min from 0 to 4
+			// team RL/LG). Poor classes on a weapon-starved team prioritize
+			// RL/LG and packs; everything else in UTBYTE stays untouched.
+			if ((KBot_StackClass(self) <= KBM_MID) && (KBot_TeamRLLG(self) < 2))
+			{
+				int cat = KBot_GoalCategory(goal);
+
+				if ((cat == KBC_WBIG) || (cat == KBC_PACK))
+				{
+					return desire * 1.8f;
+				}
+			}
 			return desire;
 	}
 

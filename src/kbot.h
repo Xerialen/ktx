@@ -21,7 +21,7 @@
 
 #ifdef BOT_SUPPORT
 
-#define KBOT_VERSION "kbot-0.25.1-arena"
+#define KBOT_VERSION "kbot-0.25.2-arena"
 
 // ---- tournament decision models (kbot_models.c, 2026-07-06) ----
 // Three cvar-gated models over the frogbot value function, data-filled from
