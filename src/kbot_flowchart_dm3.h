@@ -49,8 +49,11 @@ static const float rp_flow_win_sng_alt_dm3[RP_FLOW_MAX_LEGS] = {
 static const int rp_flow_seq_rl_alt_dm3[RP_FLOW_MAX_LEGS] = {
 	RP_DM3_PENT_MH, RP_DM3_QUAD, -1
 };
+// quad leg horizon 40s: the chart mandates WAITING ("Wait patiently ...
+// prepare for the second quad") -- the quad cycle is 60s, so a 25s window
+// skipped the leg almost every time (series 7: 0/47 done)
 static const float rp_flow_win_rl_alt_dm3[RP_FLOW_MAX_LEGS] = {
-	15.0f, 25.0f, 15.0f
+	15.0f, 40.0f, 15.0f
 };
 
 // RL branch #1 on TEAM QUAD: "window -> quad -> RA" is the movement line,
@@ -60,7 +63,7 @@ static const int rp_flow_seq_rl_teamquad_dm3[RP_FLOW_MAX_LEGS] = {
 	RP_DM3_RA, -1, -1
 };
 static const float rp_flow_win_rl_teamquad_dm3[RP_FLOW_MAX_LEGS] = {
-	25.0f, 15.0f, 15.0f
+	30.0f, 15.0f, 15.0f
 };
 
 #endif // KBOT_FLOWCHART_DM3_H
