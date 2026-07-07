@@ -71,6 +71,7 @@ typedef struct rp_bot_s
 	float win[RP_FLOW_MAX_LEGS];
 	int seq_len;
 	int seq_idx;
+	float leg_hp;           // health+armor snapshot at leg arm (combat detect)
 } rp_bot_t;
 
 static rp_bot_t rp_bots[MAX_CLIENTS + 1];
@@ -233,6 +234,7 @@ static void RP_ArmLeg(gedict_t *self, rp_bot_t *b)
 			b->opening_node = node;
 			b->opening_deadline = ((resp > g_globalvars.time) ? resp : g_globalvars.time)
 					+ win;
+			b->leg_hp = self->s.v.health + self->s.v.armorvalue;
 
 			return;
 		}
@@ -429,9 +431,14 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 	{
 		if (rp_debug)
 		{
-			G_cprint("[kb-route] bot=%s ev=leg-skip idx=%d node=%s t=%.1f\n",
-						self->netname, b->seq_idx, rp_node_name_dm3[b->opening_node],
-						g_globalvars.time);
+			// a leg that timed out while the bot was being shot at is the
+			// flowchart's combat branch, not route disobedience
+			qbool combat = (self->s.v.health + self->s.v.armorvalue)
+					< (b->leg_hp - 10.0f);
+
+			G_cprint("[kb-route] bot=%s ev=leg-skip reason=%s idx=%d node=%s t=%.1f\n",
+						self->netname, combat ? "combat" : "clean", b->seq_idx,
+						rp_node_name_dm3[b->opening_node], g_globalvars.time);
 		}
 		b->seq_idx++;
 		b->opening_node = -1;
