@@ -6,7 +6,7 @@
  resource transitions, 347 spawns -- komodobots
  experiments/route_policy/milton_reference_dm3.json).
 
- Two tiers under master cvar k_kbot_routepolicy:
+ Tiers under master cvar k_kbot_routepolicy:
    0  off (default): bit-identical vanilla, no state, no reads.
    1  transition bias: in EvalGoal, a kbot's desire for a route resource is
       scaled by P(next resource | last visited resource) from the reference
@@ -16,6 +16,12 @@
       reference P(opening | spawn cluster) (conditioned on reaching a resource
       at all) and gets a strong desire boost toward it until reached, timeout
       (RP_OPENING_WINDOW_S), or death.
+   3  tier 1 + FLOWCHART openings (kbot_flowchart_dm3.h, owner spec
+      dm3spawns.png): each spawn cluster gets a deterministic opening
+      SEQUENCE (up to RP_FLOW_MAX_LEGS legs); the active leg dominates goal
+      desire, advances on visit or leg timeout (RP_FLOW_LEG_S), and the
+      SNG.tele pair splits ring+RA / quad between simultaneous spawners.
+      Replaces the tier-2 sampled openings.
 
  Decision-level only: this module biases WHICH goal the vanilla economy
  desires. Movement, routing, markers, combat micro and the gap-jump play are
@@ -41,6 +47,7 @@
 #include "g_local.h"
 #include "kbot.h"
 #include "kbot_routepolicy_dm3.h"
+#include "kbot_flowchart_dm3.h"
 
 static int rp_map_ok;
 static gedict_t *rp_node_ent[RP_DM3_NUM_NODES];
@@ -54,9 +61,14 @@ static qbool rp_debug;
 typedef struct rp_bot_s
 {
 	int last_node;          // last visited resource node, -1 = none since spawn
-	int opening_node;       // sampled opening goal, -1 = none
-	float opening_deadline; // g_globalvars.time limit for the opening boost
+	int opening_node;       // current opening-leg goal, -1 = none
+	float opening_deadline; // g_globalvars.time limit for the current leg
 	int spawn_cluster;      // -1 when unclassified
+	// tier 3 (flowchart): the full opening sequence; opening_node mirrors
+	// seq[seq_idx] so the tier-2 boost/track machinery applies unchanged
+	int seq[RP_FLOW_MAX_LEGS];
+	int seq_len;
+	int seq_idx;
 } rp_bot_t;
 
 static rp_bot_t rp_bots[MAX_CLIENTS + 1];
@@ -145,9 +157,15 @@ void KBot_RoutePolicyMapInit(void)
 	memset(rp_bots, 0, sizeof(rp_bots));
 	for (i = 0; i <= MAX_CLIENTS; i++)
 	{
+		int j;
+
 		rp_bots[i].last_node = -1;
 		rp_bots[i].opening_node = -1;
 		rp_bots[i].spawn_cluster = -1;
+		for (j = 0; j < RP_FLOW_MAX_LEGS; j++)
+		{
+			rp_bots[i].seq[j] = -1;
+		}
 	}
 	memset(rp_node_ent, 0, sizeof(rp_node_ent));
 	rp_cvar_next = 0;
@@ -214,6 +232,12 @@ void KBot_RoutePolicySpawnEvent(gedict_t *self, gedict_t *spawn_pos)
 	b->opening_node = -1;
 	b->opening_deadline = 0;
 	b->spawn_cluster = -1;
+	b->seq_len = 0;
+	b->seq_idx = 0;
+	for (i = 0; i < RP_FLOW_MAX_LEGS; i++)
+	{
+		b->seq[i] = -1;
+	}
 
 	RP_RefreshCvars();
 	if (!RP_Enabled(self) || (rp_tier < 2) || !spawn_pos)
@@ -236,7 +260,64 @@ void KBot_RoutePolicySpawnEvent(gedict_t *self, gedict_t *spawn_pos)
 		}
 	}
 	b->spawn_cluster = cluster;
-	if ((cluster < 0) || (rp_open_total_dm3[cluster] < RP_MIN_ROW_SUPPORT))
+	if (cluster < 0)
+	{
+		return;
+	}
+
+	// tier 3: deterministic flowchart openings (owner spec, dm3spawns.png)
+	if (rp_tier >= 3)
+	{
+		const int *seq = rp_flow_seq_dm3[cluster];
+
+		// SNG.tele split: if a live teammate kbot from the same cluster is
+		// already opening on ring, this spawner takes the quad branch
+		// ("Split ring+RA and quad between the two players").
+		if ((cluster == 0) && (seq[0] == RP_DM3_RING))
+		{
+			for (i = 1; i <= MAX_CLIENTS; i++)
+			{
+				gedict_t *other = &g_edicts[i];
+
+				if ((i == slot) || (rp_bots[i].spawn_cluster != 0)
+						|| (rp_bots[i].seq_len < 1) || (rp_bots[i].seq[0] != RP_DM3_RING)
+						|| (rp_bots[i].opening_node < 0))
+				{
+					continue;
+				}
+				if (!other->isBot || ISDEAD(other) || !SameTeam(other, self))
+				{
+					continue;
+				}
+				seq = rp_flow_seq_sng_alt_dm3;
+				break;
+			}
+		}
+
+		for (i = 0; (i < RP_FLOW_MAX_LEGS) && (seq[i] >= 0); i++)
+		{
+			b->seq[i] = seq[i];
+		}
+		b->seq_len = i;
+		b->seq_idx = 0;
+		b->opening_node = b->seq[0];
+		b->opening_deadline = g_globalvars.time + RP_FLOW_LEG_S;
+		if (rp_debug)
+		{
+			G_cprint("[kb-route] bot=%s ev=open3 spawn=%s seq=%s%s%s%s%s t=%.1f\n",
+						self->netname, rp_spawn_name_dm3[cluster],
+						rp_node_name_dm3[b->seq[0]],
+						(b->seq_len > 1) ? ">" : "",
+						(b->seq_len > 1) ? rp_node_name_dm3[b->seq[1]] : "",
+						(b->seq_len > 2) ? ">" : "",
+						(b->seq_len > 2) ? rp_node_name_dm3[b->seq[2]] : "",
+						g_globalvars.time);
+		}
+
+		return;
+	}
+
+	if (rp_open_total_dm3[cluster] < RP_MIN_ROW_SUPPORT)
 	{
 		return;
 	}
@@ -291,6 +372,29 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 	}
 	b = &rp_bots[slot];
 
+	// tier 3: a stale opening leg is skipped, not abandoned -- the flowchart
+	// chain continues with the next leg (ev=leg-skip marks the miss)
+	if ((rp_tier >= 3) && (b->opening_node >= 0) && (b->seq_len > 0)
+			&& (g_globalvars.time > b->opening_deadline))
+	{
+		if (rp_debug)
+		{
+			G_cprint("[kb-route] bot=%s ev=leg-skip idx=%d node=%s t=%.1f\n",
+						self->netname, b->seq_idx, rp_node_name_dm3[b->opening_node],
+						g_globalvars.time);
+		}
+		b->seq_idx++;
+		if (b->seq_idx < b->seq_len)
+		{
+			b->opening_node = b->seq[b->seq_idx];
+			b->opening_deadline = g_globalvars.time + RP_FLOW_LEG_S;
+		}
+		else
+		{
+			b->opening_node = -1;
+		}
+	}
+
 	best = rp_radius2;
 	for (i = 0; i < RP_DM3_NUM_NODES; i++)
 	{
@@ -316,6 +420,27 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 	b->last_node = node;
 	if ((b->opening_node == node) && (g_globalvars.time <= b->opening_deadline))
 	{
+		if ((rp_tier >= 3) && (b->seq_len > 0))
+		{
+			if (rp_debug)
+			{
+				G_cprint("[kb-route] bot=%s ev=leg-done idx=%d node=%s t=%.1f\n",
+							self->netname, b->seq_idx, rp_node_name_dm3[node],
+							g_globalvars.time);
+			}
+			b->seq_idx++;
+			if (b->seq_idx < b->seq_len)
+			{
+				b->opening_node = b->seq[b->seq_idx];
+				b->opening_deadline = g_globalvars.time + RP_FLOW_LEG_S;
+			}
+			else
+			{
+				b->opening_node = -1;
+			}
+
+			return;
+		}
 		if (rp_debug)
 		{
 			G_cprint("[kb-route] bot=%s ev=open-done pick=%s t=%.1f\n", self->netname,
@@ -361,6 +486,17 @@ float KBot_RoutePolicyDesireBias(gedict_t *self, gedict_t *goal_entity, float de
 		return desire;
 	}
 
+	b = &rp_bots[slot];
+
+	// tier 3: the active flowchart leg dominates everything else -- the
+	// owner's spawn openings are meant to be unmistakable. Leg advance and
+	// timeout live in KBot_RoutePolicyTrack.
+	if ((rp_tier >= 3) && (b->opening_node >= 0) && (to == b->opening_node)
+			&& (g_globalvars.time <= b->opening_deadline))
+	{
+		return desire * rp_open_boost;
+	}
+
 	// A weapon node the bot LACKS is exempt from the Milton conditioning:
 	// the reference matrix is conditioned on Milton's loadout (he holds RL
 	// near-constantly, so his to-weapon rates are low) and would suppress
@@ -378,9 +514,8 @@ float KBot_RoutePolicyDesireBias(gedict_t *self, gedict_t *goal_entity, float de
 			return desire * rp_weapon_boost;
 		}
 	}
-	b = &rp_bots[slot];
 
-	if ((rp_tier >= 2) && (b->opening_node >= 0))
+	if ((rp_tier == 2) && (b->opening_node >= 0))
 	{
 		if (g_globalvars.time > b->opening_deadline)
 		{
