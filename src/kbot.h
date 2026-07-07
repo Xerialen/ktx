@@ -97,6 +97,7 @@ void KBot_RoutePolicyMapInit(void);
 // From BotClientEntersEvent: reset the visit chain; tier 2 samples the
 // spawn-conditioned opening resource.
 void KBot_RoutePolicySpawnEvent(gedict_t *self, gedict_t *spawn_pos);
+void KBot_RoutePolicyDeathEvent(gedict_t *self);
 
 // Per-frame from KBot_Frame: proximity visit tracking + [kb-route] telemetry.
 void KBot_RoutePolicyTrack(gedict_t *self);

@@ -228,9 +228,13 @@ static void RP_ArmLeg(gedict_t *self, rp_bot_t *b)
 
 		if (resp <= g_globalvars.time + RP_FLOW_LEG_S)
 		{
+			// RA is the far "get back and control it" tail of two chains --
+			// the walk from water.LG/quad runs past 15s (F2: 5x leg-skip)
+			float win = (node == RP_DM3_RA) ? RP_FLOW_LEG_RA_S : RP_FLOW_LEG_S;
+
 			b->opening_node = node;
 			b->opening_deadline = ((resp > g_globalvars.time) ? resp : g_globalvars.time)
-					+ RP_FLOW_LEG_S;
+					+ win;
 
 			return;
 		}
@@ -404,20 +408,6 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 	b = &rp_bots[slot];
 	if (ISDEAD(self))
 	{
-		// death aborts the opening -- the flowchart's own RIP branch. Telemetry
-		// lets the checker exclude combat deaths from the engagement rate.
-		if ((rp_tier >= 3) && (b->opening_node >= 0) && (b->seq_len > 0))
-		{
-			if (rp_debug)
-			{
-				G_cprint("[kb-route] bot=%s ev=open-abort reason=death idx=%d node=%s t=%.1f\n",
-							self->netname, b->seq_idx, rp_node_name_dm3[b->opening_node],
-							g_globalvars.time);
-			}
-			b->opening_node = -1;
-			b->seq_len = 0;
-		}
-
 		return;
 	}
 
@@ -483,6 +473,31 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 		}
 		b->opening_node = -1;
 	}
+}
+
+// Death aborts the active opening (the flowchart's RIP branch). Called from
+// BotPlayerDeathEvent -- dead bots never reach KBot_Frame/Track, so the abort
+// must ride the death event itself for the telemetry to see it.
+void KBot_RoutePolicyDeathEvent(gedict_t *self)
+{
+	int slot = NUM_FOR_EDICT(self);
+	rp_bot_t *b;
+
+	RP_RefreshCvars();
+	if ((slot < 1) || (slot > MAX_CLIENTS) || !RP_Enabled(self))
+	{
+		return;
+	}
+	b = &rp_bots[slot];
+	if ((rp_tier >= 3) && (b->opening_node >= 0) && (b->seq_len > 0) && rp_debug)
+	{
+		G_cprint("[kb-route] bot=%s ev=open-abort reason=death idx=%d node=%s t=%.1f\n",
+					self->netname, b->seq_idx, rp_node_name_dm3[b->opening_node],
+					g_globalvars.time);
+	}
+	b->opening_node = -1;
+	b->seq_len = 0;
+	b->last_node = -1;
 }
 
 // Path/look noise scale for the two flat "+ g_random()" terms in route

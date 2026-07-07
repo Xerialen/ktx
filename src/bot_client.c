@@ -111,6 +111,9 @@ void BotPlayerDeathEvent(gedict_t *self)
 	ResetGoalEntity(self);
 	ResetEnemy(self);
 
+	// Milton route policy: death aborts the flowchart opening (no-op at cvar 0)
+	KBot_RoutePolicyDeathEvent(self);
+
 	if (self->isBot && teamplay)
 	{
 		if (HMode_Active(self))

@@ -12,6 +12,7 @@
 
 #define RP_FLOW_MAX_LEGS 3
 #define RP_FLOW_LEG_S    15.0f
+#define RP_FLOW_LEG_RA_S 20.0f
 // desire floor for the active leg BEFORE the open boost: armor/health desire
 // is need-scaled and near zero for a stocked bot, which let nearby megas
 // outbid the mandated leg (F1: RA leg lost to hill mega)
