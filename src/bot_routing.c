@@ -1,6 +1,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 qbool DM6DoorClosed(fb_path_eval_t *eval);
 qbool BotDoorIsClosed(gedict_t *door);
@@ -96,7 +97,9 @@ static float EvalPath(fb_path_eval_t *eval, qbool allowRocketJumps, qbool trace_
 		same_dir = DotProduct(eval->player_direction, direction_to_marker);
 	}
 
-	path_score = same_dir + g_random();
+	// kbots with k_kbot_rp_pathnoise scale this flat exploration noise
+	// (Milton route policy); vanilla bots get the stock full-range roll.
+	path_score = same_dir + g_random() * KBot_RoutePolicyPathNoise(self);
 	self->fb.avoiding = AvoidTeleport(eval)
 			|| DetectIncomingRocket(self, eval->rocket_alert, marker_position);
 

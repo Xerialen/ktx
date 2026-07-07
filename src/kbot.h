@@ -105,6 +105,10 @@ void KBot_RoutePolicyTrack(gedict_t *self);
 // a route resource by P(next | last visited); identity when off/not a node.
 float KBot_RoutePolicyDesireBias(gedict_t *self, gedict_t *goal_entity, float desire);
 
+// Scale (0..1] for the flat "+ g_random()" route/look noise terms; 1.0 for
+// stock bots and cvar 0 (k_kbot_rp_pathnoise).
+float KBot_RoutePolicyPathNoise(gedict_t *self);
+
 #endif // BOT_SUPPORT
 
 #endif // KTX_KBOT_H

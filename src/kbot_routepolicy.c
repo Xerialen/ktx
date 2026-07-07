@@ -48,6 +48,7 @@ static float rp_cvar_next;
 static int rp_tier;
 static float rp_w, rp_cap, rp_open_boost, rp_radius2, rp_weapon_boost;
 static float rp_quad_boost;
+static float rp_pathnoise;
 static qbool rp_debug;
 
 typedef struct rp_bot_s
@@ -84,6 +85,8 @@ static void RP_RefreshCvars(void)
 	rp_weapon_boost = (v > 0) ? v : 1.5f;
 	v = cvar("k_kbot_rp_quad_boost");
 	rp_quad_boost = (v > 0) ? v : 1.0f;
+	v = cvar("k_kbot_rp_pathnoise");
+	rp_pathnoise = (v > 0) ? v : 1.0f;
 	rp_debug = cvar("k_hm_debug") != 0;
 }
 
@@ -320,6 +323,21 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 		}
 		b->opening_node = -1;
 	}
+}
+
+// Path/look noise scale for the two flat "+ g_random()" terms in route
+// scoring (bot_routing.c PathScore, bot_botpath.c EvalLook -- both marked
+// FIXME: Skill upstream). 1.0 = vanilla noise; k_kbot_rp_pathnoise < 1
+// makes kbot route choice greedier/more deliberate (Milton does not wander).
+float KBot_RoutePolicyPathNoise(gedict_t *self)
+{
+	RP_RefreshCvars();
+	if (!RP_Enabled(self))
+	{
+		return 1.0f;
+	}
+
+	return rp_pathnoise;
 }
 
 // EvalGoal consumer: scale a kbot's desire for a route resource by the

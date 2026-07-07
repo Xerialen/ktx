@@ -11,6 +11,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot.h"
 
 void DM3CampLogic(void);
 void DM4CampLogic(void);
@@ -62,7 +63,8 @@ static void EvalLook(gedict_t *self, float *best_score, vec3_t dir_look,
 	VectorNormalize(temp);
 
 	look_score = DotProduct(dir_look, temp);
-	look_score = look_score + g_random();		// FIXME: Skill
+	// FIXME: Skill (kbots scale the noise via k_kbot_rp_pathnoise)
+	look_score = look_score + g_random() * KBot_RoutePolicyPathNoise(self);
 	if (look_score > *best_score)
 	{
 		*best_score = look_score;

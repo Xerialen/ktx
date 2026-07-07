@@ -14,7 +14,10 @@
       (.639) roll: Milton turns on a cold-hit attacker ~2/3 of the time.
 
  Master cvar k_kbot_combatrates: 0 off (default; bit-identical vanilla),
- 1 on for kbots. Non-kbots always vanilla.
+ 1 = pain-switch roll only, 2 = + Milton evade rate. Non-kbots always
+ vanilla. (Split after R12: the 3.6x evade rate made strong bots passive --
+ -31 mean vs the -11.5 plateau -- while the pain-switch replacement is the
+ audit-driven de-omniscience piece worth keeping if margin-neutral.)
 
  Expects g_local.h to have been included first (KTX header convention).
  */
@@ -26,16 +29,16 @@
 #include "kbot_combatrates.h"
 #include "kbot_combatrates_dm3.h"
 
-static qbool CR_Active(gedict_t *self)
+static qbool CR_Active(gedict_t *self, int tier)
 {
-	return self->isBot && self->fb.kbot && (cvar("k_kbot_combatrates") >= 1);
+	return self->isBot && self->fb.kbot && (cvar("k_kbot_combatrates") >= tier);
 }
 
 // BotEvadeLogic consumer: the evade-arming probability. Vanilla constant for
-// stock bots and cvar 0.
+// stock bots and cvar < 2.
 float KBot_CR_EvadeChance(gedict_t *self, float vanilla_chance)
 {
-	if (!CR_Active(self))
+	if (!CR_Active(self, 2))
 	{
 		return vanilla_chance;
 	}
@@ -48,7 +51,7 @@ float KBot_CR_EvadeChance(gedict_t *self, float vanilla_chance)
 // Milton turns on a cold-hit attacker ~64% of the time regardless.
 qbool KBot_CR_PainSwitch(gedict_t *targ, gedict_t *attacker)
 {
-	if (!CR_Active(targ))
+	if (!CR_Active(targ, 1))
 	{
 		return targ->fb.look_object
 				&& (targ->fb.look_object->fb.firepower < attacker->fb.firepower);
