@@ -46,6 +46,7 @@
 
 #include "g_local.h"
 #include "kbot.h"
+#include "hm.h"
 #include "kbot_routepolicy_dm3.h"
 #include "kbot_flowchart_dm3.h"
 
@@ -213,6 +214,37 @@ void KBot_RoutePolicyMapInit(void)
 	}
 }
 
+// Arm the current flowchart leg, skipping legs whose item the bot BELIEVES
+// (HMode_ItemRespawnTime, perception-based) is down beyond the leg window --
+// the flowchart's own conditionals ("Got pent? NO -> steal the mega") say a
+// downed objective is bypassed, not camped. A leg whose item respawns within
+// the window gets deadline = respawn + window (travel there and time it).
+static void RP_ArmLeg(gedict_t *self, rp_bot_t *b)
+{
+	while (b->seq_idx < b->seq_len)
+	{
+		int node = b->seq[b->seq_idx];
+		float resp = HMode_ItemRespawnTime(self, rp_node_ent[node]);
+
+		if (resp <= g_globalvars.time + RP_FLOW_LEG_S)
+		{
+			b->opening_node = node;
+			b->opening_deadline = ((resp > g_globalvars.time) ? resp : g_globalvars.time)
+					+ RP_FLOW_LEG_S;
+
+			return;
+		}
+		if (rp_debug)
+		{
+			G_cprint("[kb-route] bot=%s ev=leg-unavail idx=%d node=%s resp=%.1f t=%.1f\n",
+						self->netname, b->seq_idx, rp_node_name_dm3[node], resp,
+						g_globalvars.time);
+		}
+		b->seq_idx++;
+	}
+	b->opening_node = -1;
+}
+
 // At spawn: reset the route chain; tier 2 samples an opening resource from
 // the reference distribution, conditioned on "reached a resource" (combat /
 // none columns excluded -- outcomes, not intent).
@@ -300,8 +332,7 @@ void KBot_RoutePolicySpawnEvent(gedict_t *self, gedict_t *spawn_pos)
 		}
 		b->seq_len = i;
 		b->seq_idx = 0;
-		b->opening_node = b->seq[0];
-		b->opening_deadline = g_globalvars.time + RP_FLOW_LEG_S;
+		RP_ArmLeg(self, b);
 		if (rp_debug)
 		{
 			G_cprint("[kb-route] bot=%s ev=open3 spawn=%s seq=%s%s%s%s%s t=%.1f\n",
@@ -384,15 +415,8 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 						g_globalvars.time);
 		}
 		b->seq_idx++;
-		if (b->seq_idx < b->seq_len)
-		{
-			b->opening_node = b->seq[b->seq_idx];
-			b->opening_deadline = g_globalvars.time + RP_FLOW_LEG_S;
-		}
-		else
-		{
-			b->opening_node = -1;
-		}
+		b->opening_node = -1;
+		RP_ArmLeg(self, b);
 	}
 
 	best = rp_radius2;
@@ -429,15 +453,8 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 							g_globalvars.time);
 			}
 			b->seq_idx++;
-			if (b->seq_idx < b->seq_len)
-			{
-				b->opening_node = b->seq[b->seq_idx];
-				b->opening_deadline = g_globalvars.time + RP_FLOW_LEG_S;
-			}
-			else
-			{
-				b->opening_node = -1;
-			}
+			b->opening_node = -1;
+			RP_ArmLeg(self, b);
 
 			return;
 		}
