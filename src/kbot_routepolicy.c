@@ -68,6 +68,7 @@ typedef struct rp_bot_s
 	// tier 3 (flowchart): the full opening sequence; opening_node mirrors
 	// seq[seq_idx] so the tier-2 boost/track machinery applies unchanged
 	int seq[RP_FLOW_MAX_LEGS];
+	float win[RP_FLOW_MAX_LEGS];
 	int seq_len;
 	int seq_idx;
 } rp_bot_t;
@@ -224,14 +225,11 @@ static void RP_ArmLeg(gedict_t *self, rp_bot_t *b)
 	while (b->seq_idx < b->seq_len)
 	{
 		int node = b->seq[b->seq_idx];
+		float win = b->win[b->seq_idx];
 		float resp = HMode_ItemRespawnTime(self, rp_node_ent[node]);
 
-		if (resp <= g_globalvars.time + RP_FLOW_LEG_S)
+		if (resp <= g_globalvars.time + win)
 		{
-			// RA is the far "get back and control it" tail of two chains --
-			// the walk from water.LG/quad runs past 15s (F2: 5x leg-skip)
-			float win = (node == RP_DM3_RA) ? RP_FLOW_LEG_RA_S : RP_FLOW_LEG_S;
-
 			b->opening_node = node;
 			b->opening_deadline = ((resp > g_globalvars.time) ? resp : g_globalvars.time)
 					+ win;
@@ -305,6 +303,7 @@ void KBot_RoutePolicySpawnEvent(gedict_t *self, gedict_t *spawn_pos)
 	if (rp_tier >= 3)
 	{
 		const int *seq = rp_flow_seq_dm3[cluster];
+		const float *win = rp_flow_win_dm3[cluster];
 
 		// SNG.tele split: if a live teammate kbot from the same cluster is
 		// already opening on ring, this spawner takes the quad branch
@@ -326,13 +325,25 @@ void KBot_RoutePolicySpawnEvent(gedict_t *self, gedict_t *spawn_pos)
 					continue;
 				}
 				seq = rp_flow_seq_sng_alt_dm3;
+				win = rp_flow_win_sng_alt_dm3;
 				break;
 			}
+		}
+
+		// RL branch #2: quad believed down -> take the pent mega and prepare
+		// for the second quad (do not force the long cross-map RA walk)
+		if ((cluster == 1)
+				&& (HMode_ItemRespawnTime(self, rp_node_ent[RP_DM3_QUAD])
+						> g_globalvars.time + rp_flow_win_dm3[1][0]))
+		{
+			seq = rp_flow_seq_rl_alt_dm3;
+			win = rp_flow_win_rl_alt_dm3;
 		}
 
 		for (i = 0; (i < RP_FLOW_MAX_LEGS) && (seq[i] >= 0); i++)
 		{
 			b->seq[i] = seq[i];
+			b->win[i] = win[i];
 		}
 		b->seq_len = i;
 		b->seq_idx = 0;

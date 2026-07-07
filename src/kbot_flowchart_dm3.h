@@ -12,7 +12,6 @@
 
 #define RP_FLOW_MAX_LEGS 3
 #define RP_FLOW_LEG_S    15.0f
-#define RP_FLOW_LEG_RA_S 20.0f
 // desire floor for the active leg BEFORE the open boost: armor/health desire
 // is need-scaled and near zero for a stocked bot, which let nearby megas
 // outbid the mandated leg (F1: RA leg lost to hill mega)
@@ -27,9 +26,31 @@ static const int rp_flow_seq_dm3[RP_DM3_NUM_SPAWNS][RP_FLOW_MAX_LEGS] = {
 	{ RP_DM3_PENT, RP_DM3_PENT_MH, RP_DM3_WATER_GL },  // lifts: pent fast -> mega -> GL
 };
 
+// per-leg window seconds (travel-length calibrated, F1-F3 bench evidence:
+// tele->ring runs ~3s but water.LG->RA and RL->quad run 15-25s)
+static const float rp_flow_win_dm3[RP_DM3_NUM_SPAWNS][RP_FLOW_MAX_LEGS] = {
+	{ 15.0f, 25.0f, 15.0f },   // SNG.tele
+	{ 20.0f, 25.0f, 15.0f },   // RL
+	{ 12.0f, 15.0f, 25.0f },   // RA.tunnel
+	{ 20.0f, 15.0f, 15.0f },   // YA.box
+	{ 15.0f, 12.0f, 15.0f },   // lifts
+};
+
 // SNG.tele alternative when a teammate already opened on ring (the split)
 static const int rp_flow_seq_sng_alt_dm3[RP_FLOW_MAX_LEGS] = {
 	RP_DM3_QUAD, -1, -1
+};
+static const float rp_flow_win_sng_alt_dm3[RP_FLOW_MAX_LEGS] = {
+	20.0f, 15.0f, 15.0f
+};
+
+// RL alternative when quad is believed down (flowchart branch #2: high
+// bridge -> lifts, take armor/mega, prepare for the second quad)
+static const int rp_flow_seq_rl_alt_dm3[RP_FLOW_MAX_LEGS] = {
+	RP_DM3_PENT_MH, RP_DM3_QUAD, -1
+};
+static const float rp_flow_win_rl_alt_dm3[RP_FLOW_MAX_LEGS] = {
+	15.0f, 25.0f, 15.0f
 };
 
 #endif // KBOT_FLOWCHART_DM3_H
