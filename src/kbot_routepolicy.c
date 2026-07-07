@@ -23,10 +23,15 @@
  omniscient enemy reads.
 
  Tunables (read on demand, TA cvar-refresh pattern):
-   k_kbot_rp_w           bias strength 0..1 (default 0.6)
-   k_kbot_rp_cap         max desire multiplier (default 3.0)
-   k_kbot_rp_open_boost  opening-goal multiplier (default 3.0)
-   k_kbot_rp_radius      visit radius in qu (default 96)
+   k_kbot_rp_w             bias strength 0..1 (default 0.6)
+   k_kbot_rp_cap           max desire multiplier (default 3.0)
+   k_kbot_rp_open_boost    opening-goal multiplier (default 3.0)
+   k_kbot_rp_radius        visit radius in qu (default 96)
+   k_kbot_rp_weapon_boost  desire multiplier for a weapon node the bot lacks
+                           (default 1.5; the transition bias never applies
+                           there -- Milton's matrix is conditioned on his
+                           loadout, so it suppresses re-acquisition for a
+                           bot that has nothing)
 
  Expects g_local.h to have been included first (KTX header convention).
  */
@@ -41,7 +46,7 @@ static int rp_map_ok;
 static gedict_t *rp_node_ent[RP_DM3_NUM_NODES];
 static float rp_cvar_next;
 static int rp_tier;
-static float rp_w, rp_cap, rp_open_boost, rp_radius2;
+static float rp_w, rp_cap, rp_open_boost, rp_radius2, rp_weapon_boost;
 static qbool rp_debug;
 
 typedef struct rp_bot_s
@@ -74,6 +79,8 @@ static void RP_RefreshCvars(void)
 	v = cvar("k_kbot_rp_radius");
 	v = (v > 0) ? v : 96.0f;
 	rp_radius2 = v * v;
+	v = cvar("k_kbot_rp_weapon_boost");
+	rp_weapon_boost = (v > 0) ? v : 1.5f;
 	rp_debug = cvar("k_hm_debug") != 0;
 }
 
@@ -331,6 +338,24 @@ float KBot_RoutePolicyDesireBias(gedict_t *self, gedict_t *goal_entity, float de
 	if (to < 0)
 	{
 		return desire;
+	}
+
+	// A weapon node the bot LACKS is exempt from the Milton conditioning:
+	// the reference matrix is conditioned on Milton's loadout (he holds RL
+	// near-constantly, so his to-weapon rates are low) and would suppress
+	// exactly the pickup a naked bot needs most (R5 diagnosis: komo held RL
+	// 1.8% of player-time vs fbots 25.8%). Boost instead, never scale down.
+	{
+		int held = (int)self->s.v.items;
+		qbool lacks = ((to == RP_DM3_RL) && !(held & IT_ROCKET_LAUNCHER))
+				|| ((to == RP_DM3_WATER_LG) && !(held & IT_LIGHTNING))
+				|| ((to == RP_DM3_SNG) && !(held & IT_SUPER_NAILGUN))
+				|| ((to == RP_DM3_WATER_GL) && !(held & IT_GRENADE_LAUNCHER));
+
+		if (lacks)
+		{
+			return desire * rp_weapon_boost;
+		}
 	}
 	b = &rp_bots[slot];
 
