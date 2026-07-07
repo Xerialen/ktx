@@ -357,7 +357,14 @@ void KBot_RoutePolicySpawnEvent(gedict_t *self, gedict_t *spawn_pos)
 					break;
 				}
 			}
-			if (!team_quad)
+			if (team_quad)
+			{
+				// movement line window->quad->RA; the quad itself is on a
+				// teammate's back, so the objective leg is RA
+				seq = rp_flow_seq_rl_teamquad_dm3;
+				win = rp_flow_win_rl_teamquad_dm3;
+			}
+			else
 			{
 				seq = rp_flow_seq_rl_alt_dm3;
 				win = rp_flow_win_rl_alt_dm3;

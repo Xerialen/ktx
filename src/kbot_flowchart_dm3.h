@@ -53,4 +53,14 @@ static const float rp_flow_win_rl_alt_dm3[RP_FLOW_MAX_LEGS] = {
 	15.0f, 25.0f, 15.0f
 };
 
+// RL branch #1 on TEAM QUAD: "window -> quad -> RA" is the movement line,
+// not a quad pickup -- the teammate is CARRYING the quad, so the item leg
+// can never complete (series 6: fired 3x, quad leg 0 done). The goal is RA.
+static const int rp_flow_seq_rl_teamquad_dm3[RP_FLOW_MAX_LEGS] = {
+	RP_DM3_RA, -1, -1
+};
+static const float rp_flow_win_rl_teamquad_dm3[RP_FLOW_MAX_LEGS] = {
+	25.0f, 15.0f, 15.0f
+};
+
 #endif // KBOT_FLOWCHART_DM3_H
