@@ -453,10 +453,11 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 	{
 		if (rp_debug)
 		{
-			// a leg that timed out while the bot was being shot at is the
-			// flowchart's combat branch, not route disobedience
-			qbool combat = (self->s.v.health + self->s.v.armorvalue)
-					< (b->leg_hp - 10.0f);
+			// a leg that timed out while the bot was being shot at OR was
+			// actively engaging an enemy is the flowchart's combat branch,
+			// not route disobedience (damage-only missed won fights)
+			qbool combat = ((self->s.v.health + self->s.v.armorvalue)
+					< (b->leg_hp - 10.0f)) || (self->s.v.enemy != 0);
 
 			G_cprint("[kb-route] bot=%s ev=leg-skip reason=%s idx=%d node=%s t=%.1f\n",
 						self->netname, combat ? "combat" : "clean", b->seq_idx,
