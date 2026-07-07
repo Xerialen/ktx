@@ -332,43 +332,17 @@ void KBot_RoutePolicySpawnEvent(gedict_t *self, gedict_t *spawn_pos)
 			}
 		}
 
-		// RL spawn: the flowchart marks branch #1 (window -> quad -> RA)
-		// "risky, but can work when it's TEAM QUAD" -- so #1 only fires when
-		// a live teammate is carrying quad (visible team fact); the default
-		// is branch #2: pent mega, then prepare for the second quad.
-		// (Series 2-3 evidence: the #1 direct charge died at the quad fight
-		// 21/28 and the quad carrier died 9/9 before RA.)
+		// RL spawn: always the flowchart's branch #2 (pent mega -> prepare
+		// for the second quad). Branch #1 (window -> quad -> RA) is marked
+		// "risky" by the chart and proved exactly that in bench: the direct
+		// charge died at the quad fight 21/28, the quad carrier died 9/9
+		// before RA, and the team-quad movement variant completed 0/12
+		// (series 2-8). The chart offers two options; the bots run the one
+		// they can survive.
 		if (cluster == 1)
 		{
-			qbool team_quad = false;
-
-			for (i = 1; i <= MAX_CLIENTS; i++)
-			{
-				gedict_t *other = &g_edicts[i];
-
-				if ((i == slot) || !other->isBot || ISDEAD(other)
-						|| !SameTeam(other, self))
-				{
-					continue;
-				}
-				if ((int)other->s.v.items & IT_QUAD)
-				{
-					team_quad = true;
-					break;
-				}
-			}
-			if (team_quad)
-			{
-				// movement line window->quad->RA; the quad itself is on a
-				// teammate's back, so the objective leg is RA
-				seq = rp_flow_seq_rl_teamquad_dm3;
-				win = rp_flow_win_rl_teamquad_dm3;
-			}
-			else
-			{
-				seq = rp_flow_seq_rl_alt_dm3;
-				win = rp_flow_win_rl_alt_dm3;
-			}
+			seq = rp_flow_seq_rl_alt_dm3;
+			win = rp_flow_win_rl_alt_dm3;
 		}
 
 		for (i = 0; (i < RP_FLOW_MAX_LEGS) && (seq[i] >= 0); i++)
