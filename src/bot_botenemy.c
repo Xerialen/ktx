@@ -8,6 +8,7 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#include "kbot_combatrates.h"
 
 // Removes the look object for the given player
 void ClearLookObject(gedict_t *player)
@@ -38,7 +39,9 @@ void BotDamageInflictedEvent(gedict_t *attacker, gedict_t *targ)
 		}
 
 		// if object we're looking at has less firepower than us...
-		if (targ->fb.look_object && (targ->fb.look_object->fb.firepower < attacker->fb.firepower))
+		// (kbots with k_kbot_combatrates roll Milton's P(turn-and-fight)
+		// instead of this omniscient firepower comparison -- audit mini-leak)
+		if (KBot_CR_PainSwitch(targ, attacker))
 		{
 			if (attacker != targ)
 			{

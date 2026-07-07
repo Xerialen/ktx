@@ -11,6 +11,7 @@
 
 #include "g_local.h"
 #include "kbot.h"
+#include "kbot_combatrates.h"
 
 void AMPHI2BotInLava(void);
 
@@ -422,7 +423,9 @@ void BotEvadeLogic(gedict_t *self)
 	self->fb.bot_evade = false;
 	if (deathmatch <= 3 && !isRA())
 	{
-		if (isDuel() && g_random() < CHANCE_EVADE_DUEL)
+		// Milton combat rates (k_kbot_combatrates): kbots use the empirical
+		// disengage rate instead of the flat constants; vanilla otherwise.
+		if (isDuel() && g_random() < KBot_CR_EvadeChance(self, CHANCE_EVADE_DUEL))
 		{
 			if ((self->s.v.origin[2] + 18) > (enemy_->s.v.absmin[2] + enemy_->s.v.view_ofs[2]))
 			{
@@ -436,7 +439,7 @@ void BotEvadeLogic(gedict_t *self)
 				}
 			}
 		}
-		else if (!isDuel() && g_random() < CHANCE_EVADE_NONDUEL)
+		else if (!isDuel() && g_random() < KBot_CR_EvadeChance(self, CHANCE_EVADE_NONDUEL))
 		{
 			if ((self->s.v.origin[2] + 18) > (enemy_->s.v.absmin[2] + enemy_->s.v.view_ofs[2]))
 			{

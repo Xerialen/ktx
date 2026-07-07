@@ -82,6 +82,7 @@ set(SRC_COMMON
 	"${DIR_SRC}/hm.c"
 	"${DIR_SRC}/hoonymode.c"
 	"${DIR_SRC}/items.c"
+	"${DIR_SRC}/kbot_combatrates.c"
 	"${DIR_SRC}/kbot_main.c"
 	"${DIR_SRC}/kbot_routepolicy.c"
 	"${DIR_SRC}/kbot_threataim.c"

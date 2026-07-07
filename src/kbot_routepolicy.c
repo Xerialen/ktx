@@ -47,6 +47,7 @@ static gedict_t *rp_node_ent[RP_DM3_NUM_NODES];
 static float rp_cvar_next;
 static int rp_tier;
 static float rp_w, rp_cap, rp_open_boost, rp_radius2, rp_weapon_boost;
+static float rp_quad_boost;
 static qbool rp_debug;
 
 typedef struct rp_bot_s
@@ -81,6 +82,8 @@ static void RP_RefreshCvars(void)
 	rp_radius2 = v * v;
 	v = cvar("k_kbot_rp_weapon_boost");
 	rp_weapon_boost = (v > 0) ? v : 1.5f;
+	v = cvar("k_kbot_rp_quad_boost");
+	rp_quad_boost = (v > 0) ? v : 1.0f;
 	rp_debug = cvar("k_hm_debug") != 0;
 }
 
@@ -380,6 +383,12 @@ float KBot_RoutePolicyDesireBias(gedict_t *self, gedict_t *goal_entity, float de
 	if (factor > rp_cap)
 	{
 		factor = rp_cap;
+	}
+	// Experimental dial (R5 diagnosis: quad takes 10 vs 20, quad frags 19 vs
+	// 62): extra weight on the quad node on top of the Milton bias. 1.0 = off.
+	if (to == RP_DM3_QUAD)
+	{
+		factor *= rp_quad_boost;
 	}
 
 	return desire * factor;
