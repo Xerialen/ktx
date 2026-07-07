@@ -397,11 +397,29 @@ void KBot_RoutePolicyTrack(gedict_t *self)
 	float best;
 
 	RP_RefreshCvars();
-	if ((slot < 1) || (slot > MAX_CLIENTS) || !RP_Enabled(self) || ISDEAD(self))
+	if ((slot < 1) || (slot > MAX_CLIENTS) || !RP_Enabled(self))
 	{
 		return;
 	}
 	b = &rp_bots[slot];
+	if (ISDEAD(self))
+	{
+		// death aborts the opening -- the flowchart's own RIP branch. Telemetry
+		// lets the checker exclude combat deaths from the engagement rate.
+		if ((rp_tier >= 3) && (b->opening_node >= 0) && (b->seq_len > 0))
+		{
+			if (rp_debug)
+			{
+				G_cprint("[kb-route] bot=%s ev=open-abort reason=death idx=%d node=%s t=%.1f\n",
+							self->netname, b->seq_idx, rp_node_name_dm3[b->opening_node],
+							g_globalvars.time);
+			}
+			b->opening_node = -1;
+			b->seq_len = 0;
+		}
+
+		return;
+	}
 
 	// tier 3: a stale opening leg is skipped, not abandoned -- the flowchart
 	// chain continues with the next leg (ev=leg-skip marks the miss)
@@ -507,10 +525,17 @@ float KBot_RoutePolicyDesireBias(gedict_t *self, gedict_t *goal_entity, float de
 
 	// tier 3: the active flowchart leg dominates everything else -- the
 	// owner's spawn openings are meant to be unmistakable. Leg advance and
-	// timeout live in KBot_RoutePolicyTrack.
+	// timeout live in KBot_RoutePolicyTrack. Need-scaled desires (armor on a
+	// stocked bot) are floored so the mandated leg cannot be outbid by a
+	// nearby snack.
 	if ((rp_tier >= 3) && (b->opening_node >= 0) && (to == b->opening_node)
 			&& (g_globalvars.time <= b->opening_deadline))
 	{
+		if (desire < RP_FLOW_MIN_DESIRE)
+		{
+			desire = RP_FLOW_MIN_DESIRE;
+		}
+
 		return desire * rp_open_boost;
 	}
 

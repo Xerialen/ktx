@@ -11,7 +11,11 @@
 #define KBOT_FLOWCHART_DM3_H
 
 #define RP_FLOW_MAX_LEGS 3
-#define RP_FLOW_LEG_S    12.0f
+#define RP_FLOW_LEG_S    15.0f
+// desire floor for the active leg BEFORE the open boost: armor/health desire
+// is need-scaled and near zero for a stocked bot, which let nearby megas
+// outbid the mandated leg (F1: RA leg lost to hill mega)
+#define RP_FLOW_MIN_DESIRE 150.0f
 
 // primary opening per spawn cluster (-1 pads unused legs)
 static const int rp_flow_seq_dm3[RP_DM3_NUM_SPAWNS][RP_FLOW_MAX_LEGS] = {
