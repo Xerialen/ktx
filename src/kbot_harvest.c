@@ -669,21 +669,6 @@ static float khv_guard_f_next = -1;
 static float khv_hold_f = 0;
 static float khv_hold_f_next = -1;
 
-static float KHV_CvarCached(const char *name, float *val, float *next)
-{
-	if (*next > g_globalvars.time + 3)
-	{
-		*next = -1; // clock rewound (map change/restart)
-	}
-	if (g_globalvars.time > *next)
-	{
-		*val = cvar(name);
-		*next = g_globalvars.time + 1;
-	}
-
-	return *val;
-}
-
 // B4 convergence seam (same call site as the B3 shim): the nearest armed+
 // kbots see the quad goal deflated while the window opens. Lead time,
 // deflation and converger count come from the D4 dial (defaults 10 s /
@@ -692,7 +677,7 @@ float KBot_HarvestQuadShim(gedict_t *self, gedict_t *goal, float goal_time)
 {
 	int i, n;
 
-	if (!KHV_CvarCached("k_kbot_harvest_quad", &khv_quad_f, &khv_quad_f_next)
+	if (!KBot_CvarCached("k_kbot_harvest_quad", &khv_quad_f, &khv_quad_f_next)
 			|| !self->isBot || !self->fb.kbot)
 	{
 		return goal_time;
@@ -776,8 +761,8 @@ static float KHV_YawTo(gedict_t *self, const float *point)
 // this frame's movement: zeroed direction, locked yaw.
 qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction)
 {
-	float guard_on = KHV_CvarCached("k_kbot_harvest_guard", &khv_guard_f, &khv_guard_f_next);
-	float hold_on = KHV_CvarCached("k_kbot_harvest_hold", &khv_hold_f, &khv_hold_f_next);
+	float guard_on = KBot_CvarCached("k_kbot_harvest_guard", &khv_guard_f, &khv_guard_f_next);
+	float hold_on = KBot_CvarCached("k_kbot_harvest_hold", &khv_hold_f, &khv_hold_f_next);
 	khv_hold_state_t *h;
 	int idx, zone;
 	qbool enemy_seen;
@@ -874,7 +859,7 @@ qbool KBot_HarvestHoldFrame(gedict_t *self, qbool *jumping, vec3_t direction)
 		{
 			khv_dbg_next[idx] = 0; // clock rewound (map change/restart)
 		}
-		if (KHV_CvarCached("k_kbot_harvest_debug", &khv_dbg_f, &khv_dbg_f_next)
+		if (KBot_CvarCached("k_kbot_harvest_debug", &khv_dbg_f, &khv_dbg_f_next)
 				&& (g_globalvars.time > khv_dbg_next[idx]))
 		{
 			gedict_t *goal = &g_edicts[(int)self->s.v.goalentity];
