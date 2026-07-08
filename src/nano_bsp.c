@@ -169,6 +169,17 @@ void Nano_BspFree(nano_bsp_t *bsp)
 	free(bsp);
 }
 
+// A lump is usable only if its [offset, offset+size) window lies wholly inside
+// the buffer. Validating before the malloc prevents a malformed BSP (a huge
+// declared size over a tiny file) from triggering a giant allocation that the
+// per-read bounds checks then fail anyway. Overflow-safe: offset <= len is
+// checked first, so (len - offset) is non-negative. (Codex review P2.)
+static qbool nano_lump_fits(const nano_lump_t *lump, int len)
+{
+	return lump->size > 0 && lump->offset <= (unsigned)len &&
+			(unsigned)len - lump->offset >= lump->size;
+}
+
 // Parse planes (lump 1): each 20 bytes -- vec3 normal, f32 dist, i32 kind.
 static qbool nano_parse_planes(const byte *b, int len, const nano_lump_t *lump, nano_bsp_t *out)
 {
@@ -176,7 +187,7 @@ static qbool nano_parse_planes(const byte *b, int len, const nano_lump_t *lump, 
 	int count, i, off;
 	nano_plane_t *planes;
 
-	if (lump->size <= 0 || lump->offset > (unsigned)len)
+	if (!nano_lump_fits(lump, len))
 	{
 		return false;
 	}
@@ -204,7 +215,6 @@ static qbool nano_parse_planes(const byte *b, int len, const nano_lump_t *lump, 
 		}
 	}
 	out->planes = planes;
-
 	out->num_planes = count;
 	return true;
 }
@@ -219,7 +229,7 @@ static qbool nano_parse_clipnodes(
 	int count, i, off;
 	nano_clipnode_t *nodes;
 
-	if (lump->size <= 0 || lump->offset > (unsigned)len)
+	if (!nano_lump_fits(lump, len))
 	{
 		return false;
 	}
@@ -278,7 +288,8 @@ static qbool nano_parse_world_model(const byte *b, int len, const nano_lump_t *l
 	int off;
 	int clip1;
 
-	if (lump->size < 44 || lump->offset > (unsigned)len)
+	// Only models[0] (44 bytes) is read; ensure that record fits in the buffer.
+	if (lump->size < 44 || lump->offset > (unsigned)len || (unsigned)len - lump->offset < 44)
 	{
 		return false;
 	}
@@ -365,7 +376,15 @@ int Nano_HullContents(const nano_bsp_t *bsp, int headnode, const vec3_t p)
 	int num = headnode;
 	int guard = 0;
 
-	// A malformed tree could cycle; bound the walk so we always terminate.
+	if (!bsp)
+	{
+		return NANO_CONTENTS_SOLID;
+	}
+
+	// A malformed tree could cycle; bound the walk so we always terminate. The
+	// bound is num_clipnodes+1 steps (a tree of N nodes has depth < N), so a
+	// valid tree never trips it; a cyclic one stops and falls to the SOLID
+	// fallback below. (Codex review P2.)
 	while (num >= 0 && guard++ < (bsp->num_clipnodes + 1))
 	{
 		nano_clipnode_t *node;
@@ -383,6 +402,9 @@ int Nano_HullContents(const nano_bsp_t *bsp, int headnode, const vec3_t p)
 			return NANO_CONTENTS_SOLID;
 		}
 		plane = &bsp->planes[node->plane];
+		// rtx tests kind < 3 here; we add the lower bound (kind >= 0) as deliberate
+		// malformed-BSP hardening -- a negative kind would be an out-of-range axis
+		// index in the p[k] read. Harmless on a valid BSP. (Codex review P3.)
 		if (plane->kind >= 0 && plane->kind < 3)
 		{
 			k = plane->kind;
@@ -394,16 +416,27 @@ int Nano_HullContents(const nano_bsp_t *bsp, int headnode, const vec3_t p)
 		}
 		num = node->children[d < 0.0f ? 1 : 0];
 	}
-	return num;
+	// Loop exit with num >= 0 means the cycle guard tripped -- resolve conservatively
+	// to SOLID rather than returning a nonnegative node index that callers would
+	// misread as a contents value (non-solid). A normal exit has num < 0 (a leaf).
+	return (num < 0) ? num : NANO_CONTENTS_SOLID;
 }
 
 int Nano_Hull1Contents(const nano_bsp_t *bsp, const vec3_t p)
 {
+	if (!bsp)
+	{
+		return NANO_CONTENTS_SOLID;
+	}
 	return Nano_HullContents(bsp, bsp->hull1_headnode, p);
 }
 
 qbool Nano_IsSolid(const nano_bsp_t *bsp, const vec3_t p)
 {
+	if (!bsp)
+	{
+		return true;
+	}
 	return Nano_Hull1Contents(bsp, p) == NANO_CONTENTS_SOLID;
 }
 
@@ -415,6 +448,24 @@ qbool Nano_IsSolid(const nano_bsp_t *bsp, const vec3_t p)
 // ---------------------------------------------------------------------------
 
 #define NANO_RHC_MAX_DEPTH 256
+
+// Conservative "give up, treat the segment as blocked" outcome for malformed-
+// tree paths (depth cap exceeded, out-of-range node/plane index). Records the
+// trace as stopped at p1f/p1 with start_solid/all_solid, so a degenerate tree
+// can never read as a false "clear" (fraction == 1) -- which would otherwise
+// spawn a bogus walkable navmesh link through geometry. This deliberately
+// diverges from rtx (which sets start_solid and returns true on these), for
+// navmesh safety; on a valid BSP none of these branches are ever reached.
+// (Codex review P2.)
+static qbool nano_trace_block(nano_hulltrace_t *trace, float p1f, const vec3_t p1)
+{
+	trace->all_solid = true;
+	trace->start_solid = true;
+	trace->fraction = p1f;
+	nvec_copy(p1, trace->endpos);
+	VectorClear(trace->plane_normal);
+	return false;
+}
 
 // Returns true while the segment stays out of solid; false once an impact is
 // recorded (matches rtx's convention -- the caller stops on first false).
@@ -431,8 +482,7 @@ static qbool nano_recursive_hull_check(
 
 	if (depth > NANO_RHC_MAX_DEPTH)
 	{
-		trace->start_solid = true;
-		return true;
+		return nano_trace_block(trace, p1f, p1);
 	}
 
 	// Leaf: a negative num is a CONTENTS_* value, not a node index.
@@ -450,16 +500,16 @@ static qbool nano_recursive_hull_check(
 	}
 	if (num >= bsp->num_clipnodes)
 	{
-		trace->start_solid = true;
-		return true;
+		return nano_trace_block(trace, p1f, p1);
 	}
 	node = &bsp->clipnodes[num];
 	if (node->plane < 0 || node->plane >= bsp->num_planes)
 	{
-		trace->start_solid = true;
-		return true;
+		return nano_trace_block(trace, p1f, p1);
 	}
 	plane = &bsp->planes[node->plane];
+	// kind >= 0 && kind < 3: deliberate lower-bound hardening vs rtx's kind < 3
+	// (a negative kind would be an out-of-range p[k] axis index). (Codex review P3.)
 	if (plane->kind >= 0 && plane->kind < 3)
 	{
 		k = plane->kind;
