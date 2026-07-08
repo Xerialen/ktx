@@ -188,6 +188,29 @@ int Nano_NavLinkTarget(const nano_navgraph_t *g, int link);			// dest cell, -1 O
 int Nano_NavLinkKind(const nano_navgraph_t *g, int link);				// NANO_LINK_*, -1 OOB
 float Nano_NavLinkCost(const nano_navgraph_t *g, int link);			// base travel time, -1 OOB
 
+// ---------------------------------------------------------------------------
+// S1c: navmesh build lifecycle (port of rtx nav_build.rs, synchronous).
+//
+// Reads maps/<mapname>.bsp via trap_FS, parses + builds the land mesh, caches
+// it for the map. Built lazily on first need (Nano_Frame), at most once per map
+// (a failed read isn't retried every frame). Synchronous -- rtx builds on a
+// worker thread to avoid a frame hitch, but a map's build runs once at warmup
+// (where a hitch is harmless) and is ~150ms on dm3, so the simpler synchronous
+// build is used.
+// ---------------------------------------------------------------------------
+
+// Free this map's mesh + reset the attempted flag. Call from worldspawn so a
+// new map starts clean. Idempotent; safe on a never-built map.
+void Nano_NavMapReset(void);
+
+// Ensure the map's navmesh is built (read + parse + build + cache + log). No-op
+// if already built or already attempted this map. Returns the graph, or NULL if
+// the map has no buildable navmesh (bots simply stay un-navigated, never fatal).
+const nano_navgraph_t *Nano_NavEnsure(void);
+
+// The cached graph for the current map (NULL until built / if it failed).
+const nano_navgraph_t *Nano_NavGraph(void);
+
 #endif // NANO_SUPPORT
 
 #endif // KTX_NANO_H

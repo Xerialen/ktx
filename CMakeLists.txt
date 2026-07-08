@@ -157,7 +157,8 @@ if(NANO_SUPPORT)
 	list(APPEND SRC_NATIVE
 		"${DIR_SRC}/nano_main.c"
 		"${DIR_SRC}/nano_bsp.c"
-		"${DIR_SRC}/nano_navmesh.c")
+		"${DIR_SRC}/nano_navmesh.c"
+		"${DIR_SRC}/nano_nav_build.c")
 endif()
 
 # Build native library.

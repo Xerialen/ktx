@@ -130,6 +130,10 @@ qbool Nano_Frame(gedict_t *self)
 		return false;
 	}
 
+	// Ensure this map's navmesh is built (lazy, once per map). S2 will route
+	// over it; for now this proves the build at first nano-frame and logs counts.
+	Nano_NavEnsure();
+
 	if (nano_state[entity] == NANO_STATE_MARKED)
 	{
 		char stamped[64];

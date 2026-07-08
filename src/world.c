@@ -24,6 +24,7 @@
  */
 
 #include "g_local.h"
+#include "nano.h"
 
 #ifdef BOT_SUPPORT
 #endif
@@ -191,6 +192,12 @@ void SP_worldspawn(void)
 
 	world->classname = "worldspawn";
 	InitBodyQue();
+
+#ifdef NANO_SUPPORT
+	// nano navmesh is cached per map; free the previous map's mesh + reset the
+	// attempted flag so the new map builds fresh on first nano-bot need.
+	Nano_NavMapReset();
+#endif
 
 	if (!Q_stricmp(self->model, "maps/e1m8.bsp"))
 	{
