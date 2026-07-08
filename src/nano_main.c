@@ -12,8 +12,11 @@
 #include "g_local.h"
 #include "nano.h"
 
-// >= any mvdsv maxclients the bench uses; bound-checked at every use so an
-// out-of-range edict number can never index past the array.
+// KTX has no compile-time MAX_CLIENTS (maxclients is a runtime cvar), so size
+// by a safe fixed cap: 64 exceeds any mvdsv maxclients (the bench uses 8-9),
+// and every access is bounds-checked, so an out-of-range edict number can never
+// index past the array. (Codex review P3: not a magic limit -- justified +
+// guarded.)
 #define NANO_MAX_SLOTS 64
 
 // Per-bot nano flag, indexed by edict number. Lives here (not in gedict_t) so

@@ -354,6 +354,12 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 			// kbot userinfo identity stamp (ktxstats/MVD evidence).
 			g_edicts[entity].fb.kbot = KBOT_STATE_OFF;
 			trap_SetBotUserInfo(entity, "kbot", "", 0);
+#ifdef NANO_SUPPORT
+			// Same evidence-honesty guarantee for nano: a reused slot must never
+			// inherit a nano flag or the "nano"/"nb:" userinfo stamp (Codex P2).
+			Nano_ClearMark(&g_edicts[entity]);
+			trap_SetBotUserInfo(entity, "nano", "", 0);
+#endif
 			g_edicts[entity].fb.skill.skill_level = skill_level;
 			g_edicts[entity].fb.botnumber = i;
 			trap_SetBotUserInfo(entity, "team", teamName, 0);
