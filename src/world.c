@@ -1067,6 +1067,15 @@ void FirstFrame(void)
 	RegisterCvarEx(FB_CVAR_ITEM_PICKUP_BONUS, "0");
 	RegisterCvarEx(FB_CVAR_EASY_SKILL_MODE, "1");
 
+#ifdef NANO_SUPPORT
+	// NANO (rtx-port peer brain): k_nano is the master switch (0 = off,
+	// byte-neutral). With k_nano 0 the dispatch guard in BotsThinkTime()
+	// never calls Nano_Frame(), so stock frogbot behavior stands.
+	RegisterCvarEx("k_nano", "0");
+	RegisterCvarEx("k_nano_skill", "3");
+	RegisterCvarEx("k_nano_version_suffix", "");
+#endif
+
 	// KBOT (WP3.5): discipline tunables + identity-stamp suffix, sweepable
 	// from the server cfg without rebuilds (e.g. "set k_kbot_weak_stack 100").
 	// Defaults reproduce kbot-0.5.0-discipline exactly.

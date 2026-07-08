@@ -11,6 +11,7 @@
 
 #include "g_local.h"
 #include "kbot.h"
+#include "nano.h"
 
 void AMPHI2BotInLava(void);
 
@@ -472,6 +473,18 @@ void BotsThinkTime(gedict_t *self)
 	{
 		return;
 	}
+
+#ifdef NANO_SUPPORT
+	// nano seam: bots flagged nano route through Nano_Frame() (the rtx-port
+	// peer brain). With k_nano 0 or the bot unflagged, Nano_Frame is never
+	// reached -- stock frogbot logic stands unchanged. S0: Nano_Frame only
+	// logs identity then returns false (pure delegation), so zero behavior
+	// change even for a flagged bot.
+	if (self->isBot && Nano_IsMarked(self) && cvar("k_nano") && Nano_Frame(self))
+	{
+		return;
+	}
+#endif
 
 	self->fb.jumping = false; // Don't call SetJumpFlag here
 

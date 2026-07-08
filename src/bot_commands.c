@@ -8,6 +8,7 @@
 
 #include "g_local.h"
 #include "kbot.h"
+#include "nano.h"
 
 // Handles all "botcmd x" commands from the user
 
@@ -422,6 +423,18 @@ static void FrogbotsAddKbot_f(void)
 		KBot_MarkBot(&g_edicts[entity]);
 	}
 }
+
+#ifdef NANO_SUPPORT
+static void FrogbotsAddNano_f(void)
+{
+	int entity = FrogbotsAddbotParsed();
+
+	if (entity)
+	{
+		Nano_MarkBot(&g_edicts[entity]);
+	}
+}
+#endif
 
 static void FrogbotsRemoveBot(bot_t *lastbot)
 {
@@ -2348,6 +2361,9 @@ static frogbot_cmd_t std_commands[] =
 		{ "skill", FrogbotsSetSkill, "Set skill level for next bot added" },
 		{ "addbot", FrogbotsAddbot_f, "Adds a bot. Skill & team optional" },
 		{ "addkbot", FrogbotsAddKbot_f, "Adds a komodobot. Skill & team optional" },
+#ifdef NANO_SUPPORT
+		{ "addnano", FrogbotsAddNano_f, "Adds a nano-bot (rtx port). Skill & team optional" },
+#endif
 		{ "fill", FrogbotsFillServer, "Fills the server (max 8 bots at a time)" },
 		{ "removebot", FrogbotsRemovebot_f, "Removes a single bot" },
 		{ "removeall", FrogbotsRemoveAll, "Removes all bots from server" },
