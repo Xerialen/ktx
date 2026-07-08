@@ -10,6 +10,25 @@
 #include "g_local.h"
 #include "kbot.h"
 
+// Cached cvar read shared across the kbot seams (declared in kbot.h): reads
+// `name` at most ~once per second into *val, gating on *next against the server
+// clock, with a rewind guard for map change / restart. Behaviour-neutral
+// promotion of the former per-file KHW_Cvar / KHV_CvarCached twins.
+float KBot_CvarCached(const char *name, float *val, float *next)
+{
+	if (*next > g_globalvars.time + 3)
+	{
+		*next = -1; // clock rewound (map change/restart)
+	}
+	if (g_globalvars.time > *next)
+	{
+		*val = cvar(name);
+		*next = g_globalvars.time + 1;
+	}
+
+	return *val;
+}
+
 // Effective identity stamp: KBOT_VERSION + k_kbot_version_suffix (set by the
 // bench cfg together with --candidate-version, so the observed-identity gate
 // still matches stamp == roster.candidate_version when sweeping tunables).

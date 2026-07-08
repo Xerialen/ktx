@@ -23,6 +23,14 @@
 
 #define KBOT_VERSION "kbot-0.28.1-pentrj2"
 
+// ---- shared kbot helpers (kbot_main.c) ----
+// Cached cvar read: fetches `name` at most ~once per second into *val, gating
+// on *next against the server clock (with a rewind guard for map change /
+// restart). Lets the weapon-override and harvest seams throttle their cvar
+// reads identically -- a behaviour-neutral promotion of the former per-file
+// KHW_Cvar / KHV_CvarCached twins.
+float KBot_CvarCached(const char *name, float *val, float *next);
+
 // ---- tournament decision models (kbot_models.c, 2026-07-06) ----
 // Three cvar-gated models over the frogbot value function, data-filled from
 // the Book/]sr[ dm3 win corpus (komodobots2 report 2026-07-06):

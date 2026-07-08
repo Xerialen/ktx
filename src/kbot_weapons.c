@@ -58,21 +58,6 @@ static float khw_quadlg = 0, khw_quadlg_next = -1;
 static float khw_finish = 0, khw_finish_next = -1;
 static float khw_sgdown = 0, khw_sgdown_next = -1;
 
-static float KHW_Cvar(const char *name, float *val, float *next)
-{
-	if (*next > g_globalvars.time + 3)
-	{
-		*next = -1; // clock rewound (map change/restart)
-	}
-	if (g_globalvars.time > *next)
-	{
-		*val = cvar(name);
-		*next = g_globalvars.time + 1;
-	}
-
-	return *val;
-}
-
 int KBot_WeaponOverride(gedict_t *self)
 {
 	int items_ = (int)self->s.v.items;
@@ -97,7 +82,7 @@ int KBot_WeaponOverride(gedict_t *self)
 	eidx = NUM_FOR_EDICT(en);
 
 	// rule 1: quad running + shaft in reach -> always the shaft
-	if (KHW_Cvar("k_kbot_weap_quadlg", &khw_quadlg, &khw_quadlg_next)
+	if (KBot_CvarCached("k_kbot_weap_quadlg", &khw_quadlg, &khw_quadlg_next)
 			&& (self->super_damage_finished > g_globalvars.time)
 			&& (items_ & IT_LIGHTNING) && (self->s.v.ammo_cells > 0)
 			&& (self->s.v.waterlevel <= 1)
@@ -107,7 +92,7 @@ int KBot_WeaponOverride(gedict_t *self)
 		w = IT_LIGHTNING;
 	}
 	// rule 2: clipped fresh spawn at close range -> cheap hitscan finish
-	else if (KHW_Cvar("k_kbot_weap_finish", &khw_finish, &khw_finish_next)
+	else if (KBot_CvarCached("k_kbot_weap_finish", &khw_finish, &khw_finish_next)
 			&& enemy_live && (self->fb.enemy_dist <= 450)
 			&& (eidx > 0) && (eidx < MAX_EDICTS)
 			&& (KHW_Since(khw_last_death[eidx]) < 8)
@@ -140,7 +125,7 @@ int KBot_WeaponOverride(gedict_t *self)
 	// action, including while camping/holding an angle; the real gun comes
 	// out in the firing moment at no extra cost (the bot switches and fires
 	// in the same think). No WAIT/hold exemptions.
-	else if (KHW_Cvar("k_kbot_weap_sgdown", &khw_sgdown, &khw_sgdown_next)
+	else if (KBot_CvarCached("k_kbot_weap_sgdown", &khw_sgdown, &khw_sgdown_next)
 			&& !enemy_seen && !self->fb.firing
 			&& (KHW_Since(khw_last_fire[idx]) > 0.7f)
 			&& (KHW_Since(self->fb.last_hurt) > 2.0f)
