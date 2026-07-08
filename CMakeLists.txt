@@ -154,7 +154,9 @@ set(SRC_COMMON
 # nano-bots (rtx port): compiled in only when NANO_SUPPORT is ON, so an OFF
 # build stays byte-identical to the stock frogbot baseline.
 if(NANO_SUPPORT)
-	list(APPEND SRC_NATIVE "${DIR_SRC}/nano_main.c")
+	list(APPEND SRC_NATIVE
+		"${DIR_SRC}/nano_main.c"
+		"${DIR_SRC}/nano_bsp.c")
 endif()
 
 # Build native library.

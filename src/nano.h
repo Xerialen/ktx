@@ -51,6 +51,87 @@ void Nano_ClearMark(gedict_t *bot);
 // (navmesh, perception, combat, movement) arrives in later stages.
 qbool Nano_Frame(gedict_t *self);
 
+// ---------------------------------------------------------------------------
+// S1: navmesh foundation -- BSP clip-hull reader (port of rtx src/bsp.rs).
+//
+// A minimal BSP parser that reads only the three lumps navigation needs from
+// the PLAYER clip hull (hull 1): planes, clipnodes, and models[0]. Hull 1 was
+// beveled to the standing player box at compile time, so a point test against
+// it answers "would the player box collide here?" -- exactly the walkability
+// primitive the navmesh voxelize/classify steps need. Everything else in the
+// BSP (render tree, faces, lightmaps, textures, vis) is irrelevant and unread.
+//
+// Pure over a byte buffer: no engine syscalls, no global state, panic-free
+// (every index/offset bounds-checked; out-of-range resolves conservatively to
+// CONTENTS_SOLID). This is the self-contained, unit-testable kernel rtx's
+// author identified as the portable part of the bot.
+// ---------------------------------------------------------------------------
+
+#define NANO_CONTENTS_SOLID (-2)	// CONTENTS_SOLID -- the only leaf value tested
+#define NANO_CONTENTS_EMPTY (-1)	// CONTENTS_EMPTY (clip hulls are only SOLID/EMPTY)
+
+// A BSP plane (dplane_t): the half-space normal*dist; kind < 3 is axis-aligned
+// (test that single coordinate), >= 3 is a general plane (dot product).
+typedef struct
+{
+	vec3_t normal;
+	float dist;
+	int kind;
+} nano_plane_t;
+
+// A clip-hull BSP node (normalized to the BSP2 shape). children[0] = front
+// (d >= 0), children[1] = back; a negative child is a CONTENTS_* leaf.
+typedef struct
+{
+	int plane;
+	int children[2];
+} nano_clipnode_t;
+
+// The subset of a parsed BSP the navmesh consumes (heap-owned; Nano_BspFree).
+typedef struct
+{
+	nano_plane_t *planes;
+	int num_planes;
+	nano_clipnode_t *clipnodes;
+	int num_clipnodes;
+	int hull1_headnode;		// models[0].headnode[1] -- the world's hull-1 root
+	vec3_t mins;			// world model bbox (the volume the navmesh voxelizes)
+	vec3_t maxs;
+} nano_bsp_t;
+
+// Result of a hull segment trace (Nano_Hull1Trace), port of rtx HullTrace.
+typedef struct
+{
+	float fraction;			// fraction of the segment traversed before impact (1 = clear)
+	vec3_t endpos;			// impact point (or p2 if clear)
+	vec3_t plane_normal;	// surface normal at impact, against the incoming segment
+	qbool start_solid;		// p1 started inside solid
+	qbool all_solid;		// the whole segment was inside solid
+} nano_hulltrace_t;
+
+// Parse the lumps the navmesh needs from a whole-file byte buffer (the engine
+// reads maps/<map>.bsp via trap_FS and hands the bytes here). Returns NULL on
+// an unsupported version or a malformed/truncated lump. Caller frees with
+// Nano_BspFree.
+nano_bsp_t *Nano_BspParse(const byte *bytes, int len);
+void Nano_BspFree(nano_bsp_t *bsp);
+
+// Walk the hull rooted at headnode, returning the CONTENTS_* value at p
+// (SV_HullPointContents). Out-of-range indices resolve to CONTENTS_SOLID.
+int Nano_HullContents(const nano_bsp_t *bsp, int headnode, const vec3_t p);
+
+// CONTENTS_* at p in the world's player hull (hull 1).
+int Nano_Hull1Contents(const nano_bsp_t *bsp, const vec3_t p);
+
+// True iff the player box centered at p would collide with world geometry.
+qbool Nano_IsSolid(const nano_bsp_t *bsp, const vec3_t p);
+
+// Trace the segment p1->p2 through the world's player hull (port of
+// SV_RecursiveHullCheck). fraction==1 means the whole segment is clear;
+// start_solid means p1 was already inside solid. Pure over planes/clipnodes.
+void Nano_Hull1Trace(const nano_bsp_t *bsp, const vec3_t p1, const vec3_t p2,
+						nano_hulltrace_t *out);
+
 #endif // NANO_SUPPORT
 
 #endif // KTX_NANO_H
