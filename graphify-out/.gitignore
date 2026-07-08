@@ -1,0 +1,5 @@
+# Machine-local interpreter marker (absolute path) — not portable
+.graphify_python
+.graphify_root
+.graphify_*.json
+.labels.json
