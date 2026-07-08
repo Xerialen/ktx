@@ -132,6 +132,62 @@ qbool Nano_IsSolid(const nano_bsp_t *bsp, const vec3_t p);
 void Nano_Hull1Trace(const nano_bsp_t *bsp, const vec3_t p1, const vec3_t p2,
 						nano_hulltrace_t *out);
 
+// ---------------------------------------------------------------------------
+// S1: navmesh graph (port of rtx src/navmesh/mod.rs + query.rs).
+//
+// Auto-generated from the parsed BSP clip hull: voxelizes the walkable floor
+// into standable cells (one per grid column per floor), classifies the moves
+// between nearby cells into directed links (walk/step/drop/jumpgap), and
+// answers nearest-cell + A* path queries. Pure over a nano_bsp_t -- no engine
+// calls -- so it builds identically to rtx's offline worker build.
+//
+// S1b ships the land mesh (walk/step/drop/jumpgap). Double/speed/hook/rocket-
+// jump, plat/teleport/gate splices, and the lava/slime hazard surcharge are
+// added in later stages (dm3 needs none of them for a navigable first mesh).
+// ---------------------------------------------------------------------------
+
+// Link traversal kinds (mirror rtx LinkKind). S1b implements the first four;
+// the rest are reserved for later stages so the enum matches rtx's ordering.
+#define NANO_LINK_WALK       0
+#define NANO_LINK_STEP       1
+#define NANO_LINK_DROP       2
+#define NANO_LINK_JUMPGAP    3
+#define NANO_LINK_DJUMP      4	// (reserved, S-later)
+#define NANO_LINK_SJUMP      5	// (reserved, S-later)
+#define NANO_LINK_PLAT       6	// (reserved, S-later)
+#define NANO_LINK_TELEPORT   7	// (reserved, S-later)
+#define NANO_LINK_HOOK       8	// (reserved, S-later)
+#define NANO_LINK_RJUMP      9	// (reserved, S-later)
+
+// Opaque built graph (heap-owned; Nano_NavFree).
+typedef struct nano_navgraph_s nano_navgraph_t;
+
+// Build the land navmesh from a parsed BSP clip hull (pure; no engine calls).
+// Caller frees with Nano_NavFree. Returns NULL on alloc failure or a mesh with
+// no cells (an empty/degenerate map). Mirrors rtx NavGraph::build + link_cells.
+nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp);
+void Nano_NavFree(nano_navgraph_t *g);
+
+// Cell whose standing origin is nearest pos (searches outward a few grid
+// columns from pos's own column). Returns -1 if the graph is empty or nothing
+// is found within range.
+int Nano_NavNearest(const nano_navgraph_t *g, const vec3_t pos);
+
+// A* from start to goal cell over the land mesh. Writes the route as a
+// sequence of link indices into out_route[0..out_cap-1]; returns the link
+// count (>= 0; 0 means start==goal), or -1 if no route exists or the buffer is
+// too small. S1b: static link costs only (gate/jitter/penalty added later).
+int Nano_NavFindPath(const nano_navgraph_t *g, int start, int goal,
+						int *out_route, int out_cap);
+
+// Accessors the brain (S2) reads routes through.
+int Nano_NavNumCells(const nano_navgraph_t *g);
+int Nano_NavNumLinks(const nano_navgraph_t *g);
+const float *Nano_NavCellOrigin(const nano_navgraph_t *g, int cell);	// NULL if OOB
+int Nano_NavLinkTarget(const nano_navgraph_t *g, int link);			// dest cell, -1 OOB
+int Nano_NavLinkKind(const nano_navgraph_t *g, int link);				// NANO_LINK_*, -1 OOB
+float Nano_NavLinkCost(const nano_navgraph_t *g, int link);			// base travel time, -1 OOB
+
 #endif // NANO_SUPPORT
 
 #endif // KTX_NANO_H

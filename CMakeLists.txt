@@ -156,7 +156,8 @@ set(SRC_COMMON
 if(NANO_SUPPORT)
 	list(APPEND SRC_NATIVE
 		"${DIR_SRC}/nano_main.c"
-		"${DIR_SRC}/nano_bsp.c")
+		"${DIR_SRC}/nano_bsp.c"
+		"${DIR_SRC}/nano_navmesh.c")
 endif()
 
 # Build native library.
