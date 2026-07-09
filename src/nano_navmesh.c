@@ -439,7 +439,8 @@ static int nano_jump_grid_radius(void)
 // headroom) push a cell. prev_solid starts true (below the world is solid).
 static qbool nano_column_floors(
 	const nano_bsp_t *bsp, float x, float y, float zmin, float zmax,
-	nano_cell_t **cells, int *num_cells, int *cells_cap)
+	nano_cell_t **cells, int *num_cells, int *cells_cap,
+	int (*point_contents)(const vec3_t p))
 {
 	float z = zmin;
 	qbool prev_solid = true;
@@ -453,11 +454,19 @@ static qbool nano_column_floors(
 		if (prev_solid && !solid)
 		{
 			float oz = nano_bisect_floor(bsp, x, y, z - NANO_SCAN_DZ, z);
+			vec3_t floor_p;
 			nano_cell_t *t = nano_grow(*cells, cells_cap, *num_cells + 1, sizeof(nano_cell_t));
 			nano_cell_t *c;
 			if (!t)
 			{
 				return false;
+			}
+			VectorSet(floor_p, x, y, oz);
+			if (point_contents && Nano_IsLiquidContent(point_contents(floor_p)))
+			{
+				// Water/slime/lava column: do not create a walkable cell.
+				prev_solid = solid;
+				continue;
 			}
 			*cells = t;
 			c = &(*cells)[*num_cells];
@@ -620,7 +629,8 @@ static qbool nano_find_jumps(
 	return true;
 }
 
-nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp)
+nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp,
+							   int (*point_contents)(const vec3_t p))
 {
 	nano_navgraph_t *g;
 	int gx0, gy0, gx1, gy1, gx, gy, cells_cap = 0;
@@ -676,7 +686,7 @@ nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp)
 			float x = (float)gx * NANO_GRID;
 			float y = (float)gy * NANO_GRID;
 			if (!nano_column_floors(bsp, x, y, bsp->mins[2], bsp->maxs[2], &g->cells, &g->num_cells,
-										&cells_cap))
+										&cells_cap, point_contents))
 			{
 				Nano_NavFree(g);
 				return NULL;
