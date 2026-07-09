@@ -510,6 +510,12 @@ static void Nano_EmitCmd(nano_bot_t *bot, const nano_sense_t *s,
 	trap_SetBotCMD(s->client, s->msec,
 				   bot->aim[0], bot->aim[1], bot->aim[2],
 				   forwardmove, sidemove, 0, buttons, 0);
+
+	if (cvar("k_nano_debug"))
+	{
+		G_cprint("[nano] cmd slot=%d yaw=%.1f fwd=%d side=%d buttons=%d\n",
+				 s->client, bot->aim[1], forwardmove, sidemove, buttons);
+	}
 }
 
 // ---------------------------------------------------------------------------

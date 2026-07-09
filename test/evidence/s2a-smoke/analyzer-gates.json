@@ -1,0 +1,71 @@
+{
+  "schema": "komodobots2.analyzer_gates.v1",
+  "bot_idle_stuck_fraction": false,
+  "server_tick_starvation": true,
+  "details": {
+    "bot_idle_stuck_fraction": {
+      "method": "1s-bucket displacement < threshold while alive at both endpoints",
+      "displacement_units": 4.0,
+      "max_fraction": 0.1,
+      "total_intervals": 180,
+      "worst": {
+        "player": "nb:/ grue",
+        "idle_fraction": 0.6722
+      },
+      "players": {
+        "/ daisy": {
+          "idle_intervals": 5,
+          "alive_intervals": 180,
+          "idle_fraction": 0.0278
+        },
+        "/ denzil": {
+          "idle_intervals": 14,
+          "alive_intervals": 180,
+          "idle_fraction": 0.0778
+        },
+        "/ dizzy": {
+          "idle_intervals": 19,
+          "alive_intervals": 179,
+          "idle_fraction": 0.1056
+        },
+        "/ dora": {
+          "idle_intervals": 16,
+          "alive_intervals": 178,
+          "idle_fraction": 0.0889
+        },
+        "nb:/ bro": {
+          "idle_intervals": 106,
+          "alive_intervals": 106,
+          "idle_fraction": 0.5889
+        },
+        "nb:/ goldenboy": {
+          "idle_intervals": 98,
+          "alive_intervals": 98,
+          "idle_fraction": 0.5444
+        },
+        "nb:/ grue": {
+          "idle_intervals": 121,
+          "alive_intervals": 121,
+          "idle_fraction": 0.6722
+        },
+        "nb:/ tincan": {
+          "idle_intervals": 77,
+          "alive_intervals": 77,
+          "idle_fraction": 0.4278
+        }
+      }
+    },
+    "server_tick_starvation": {
+      "method": "union frame-time gaps > gap_factor x median cadence (stream-slice)",
+      "gap_factor": 2.0,
+      "max_fraction": 0.01,
+      "frame_samples": 8009,
+      "nominal_ms": 23.0,
+      "max_delta_ms": 30,
+      "gap_count": 0,
+      "starved_ms": 0,
+      "span_ms": 179983,
+      "starved_fraction": 0.0
+    }
+  }
+}

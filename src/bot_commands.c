@@ -2796,7 +2796,14 @@ void BotStartFrame(void)
 					}
 				}
 
-				BotSetCommand(self);
+				// nano owns its own command emission; skip the vanilla frogbot
+				// command path for nano-marked bots when k_nano is active.
+#ifdef NANO_SUPPORT
+				if (!(cvar("k_nano") && Nano_IsMarked(self)))
+#endif
+				{
+					BotSetCommand(self);
+				}
 
 				if ((lowest_scoring_bot == NULL) || (self->s.v.frags < lowest_scoring_bot->s.v.frags))
 				{

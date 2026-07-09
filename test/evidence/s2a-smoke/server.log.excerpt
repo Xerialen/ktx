@@ -1,0 +1,101 @@
+[2026-07-09 15:28:21] ============= Starting MVDSV 1.20-dev =============
+[2026-07-09 15:28:21] 64.0 megabyte heap
+[2026-07-09 15:28:21] QuakeWorld Initialized
+[2026-07-09 15:28:21] execing server.cfg
+[2026-07-09 15:28:21] execing mvdsv.cfg
+[2026-07-09 15:28:21] Unknown command "sv_enableprofile"
+[2026-07-09 15:28:21] execing ktx.cfg
+[2026-07-09 15:28:21] execing pwd.cfg
+[2026-07-09 15:28:21] execing vip_ip.cfg
+[2026-07-09 15:28:21] execing ban_ip.cfg
+[2026-07-09 15:28:21] Logging players to logs/player_28599_0000.log
+[2026-07-09 15:28:21] Logging rcon to logs/rcon_28599_0000.log
+[2026-07-09 15:28:21] execing kbot_4v4_28599.cfg
+[2026-07-09 15:28:21] Can't find maps/mvdsv-kg.bsp
+[2026-07-09 15:28:21] LoadLibrary (./ktx/qwprogs.so)
+[2026-07-09 15:28:21] 4 on 4 settings enabled
+[2026-07-09 15:28:21] execing configs/usermodes/default.cfg
+[2026-07-09 15:28:21] execing configs/usermodes/4on4/default.cfg
+[2026-07-09 15:28:21] Opening server TCP port 28599
+[2026-07-09 15:28:21] SV_BroadcastUpdateServerList: No master servers configured
+[2026-07-09 15:28:22] LoadLibrary (./ktx/qwprogs.so)
+[2026-07-09 15:28:22] 4 on 4 settings enabled
+[2026-07-09 15:28:22] execing configs/usermodes/default.cfg
+[2026-07-09 15:28:22] execing configs/usermodes/4on4/default.cfg
+[2026-07-09 15:28:32] Not recording a demo.
+[2026-07-09 15:28:32] Server starts recording (memory):
+[2026-07-09 15:28:32] kbot_4v4_20260709t132821z-p28599.mvd
+[2026-07-09 15:28:33] net address                 : 127.0.1.1:28599
+[2026-07-09 15:28:33] cpu utilization (overall)   :   2%
+[2026-07-09 15:28:33] cpu utilization (recording) :   0%
+[2026-07-09 15:28:33] avg response time           : 0 ms
+[2026-07-09 15:28:33] packets/frame               :  0.00 (0)
+[2026-07-09 15:28:33] name             ping frags   id   address                real ip
+[2026-07-09 15:28:33] ---------------- ---- ----- ------ ---------------------- ---------------
+[2026-07-09 15:28:33] Spectator Komodo4v4 connected
+[2026-07-09 15:28:33] Using easy bot skill mode
+[2026-07-09 15:28:33] / bro entered the game
+[2026-07-09 15:28:33] skill &cf0020&r
+[2026-07-09 15:28:33] / bro changed name to nb:/ bro
+[2026-07-09 15:28:33] [nano] slot=2 name=nb:/ bro version=nano-df681334
+[2026-07-09 15:28:33] Using easy bot skill mode
+[2026-07-09 15:28:33] / goldenboy entered the game
+[2026-07-09 15:28:33] skill &cf0020&r
+[2026-07-09 15:28:33] / goldenboy changed name to nb:/ goldenboy
+[2026-07-09 15:28:33] [nano] slot=3 name=nb:/ goldenboy version=nano-df681334
+[2026-07-09 15:28:33] Using easy bot skill mode
+[2026-07-09 15:28:33] / tincan entered the game
+[2026-07-09 15:28:33] skill &cf0020&r
+[2026-07-09 15:28:33] / tincan changed name to nb:/ tincan
+[2026-07-09 15:28:33] [nano] slot=4 name=nb:/ tincan version=nano-df681334
+...
+[2026-07-09 15:31:37] [nano] cmd slot=4 yaw=16.2 fwd=786 side=-144 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=2 yaw=-90.5 fwd=799 side=-6 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=3 yaw=106.2 fwd=799 side=-30 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=4 yaw=16.5 fwd=787 side=-140 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=2 yaw=-90.5 fwd=799 side=-6 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=3 yaw=106.2 fwd=799 side=-30 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=4 yaw=16.7 fwd=788 side=-136 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=2 yaw=-90.5 fwd=799 side=-6 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=3 yaw=106.3 fwd=799 side=-30 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=4 yaw=17.0 fwd=788 side=-132 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=2 yaw=-90.5 fwd=799 side=-6 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=3 yaw=106.3 fwd=799 side=-29 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=4 yaw=17.3 fwd=789 side=-129 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=2 yaw=-90.5 fwd=799 side=-6 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=3 yaw=106.3 fwd=799 side=-29 buttons=0
+[2026-07-09 15:31:37] [nano] cmd slot=4 yaw=17.5 fwd=790 side=-125 buttons=0
+[2026-07-09 15:31:43] Running mvdfinish.qws
+[2026-07-09 15:31:43] Server recording completed
+[2026-07-09 15:33:04] net address                 : 127.0.1.1:28599
+[2026-07-09 15:33:04] cpu utilization (overall)   :   0%
+[2026-07-09 15:33:04] cpu utilization (recording) :   0%
+[2026-07-09 15:33:04] avg response time           : 0 ms
+[2026-07-09 15:33:04] packets/frame               :  0.00 (0)
+[2026-07-09 15:33:04] name             ping frags   id   address                real ip
+[2026-07-09 15:33:04] ---------------- ---- ----- ------ ---------------------- ---------------
+[2026-07-09 15:33:04] nb:/ bro           20    -2      2 0.0.0.0                
+[2026-07-09 15:33:04] nb:/ goldenboy     20    -2      3 0.0.0.0                
+[2026-07-09 15:33:04] nb:/ tincan        20    -4      4 0.0.0.0                
+[2026-07-09 15:33:04] nb:/ grue          20    -6      5 0.0.0.0                
+[2026-07-09 15:33:04] / dizzy            20     9      6 0.0.0.0                
+[2026-07-09 15:33:04] / daisy            20     8      7 0.0.0.0                
+[2026-07-09 15:33:04] / denzil           20     8      8 0.0.0.0                
+[2026-07-09 15:33:04] / dora             20     6      9 0.0.0.0                
+[2026-07-09 15:33:04] Not recording a demo.
+[2026-07-09 15:33:06] net address                 : 127.0.1.1:28599
+[2026-07-09 15:33:06] cpu utilization (overall)   :   0%
+[2026-07-09 15:33:06] cpu utilization (recording) :   0%
+[2026-07-09 15:33:06] avg response time           : 0 ms
+[2026-07-09 15:33:06] packets/frame               :  0.00 (0)
+[2026-07-09 15:33:06] name             ping frags   id   address                real ip
+[2026-07-09 15:33:06] ---------------- ---- ----- ------ ---------------------- ---------------
+[2026-07-09 15:33:06] nb:/ bro           20    -2      2 0.0.0.0                
+[2026-07-09 15:33:06] nb:/ goldenboy     20    -2      3 0.0.0.0                
+[2026-07-09 15:33:06] nb:/ tincan        20    -4      4 0.0.0.0                
+[2026-07-09 15:33:06] nb:/ grue          20    -6      5 0.0.0.0                
+[2026-07-09 15:33:06] / dizzy            20     9      6 0.0.0.0                
+[2026-07-09 15:33:06] / daisy            20     8      7 0.0.0.0                
+[2026-07-09 15:33:06] / denzil           20     8      8 0.0.0.0                
+[2026-07-09 15:33:06] / dora             20     6      9 0.0.0.0                
+[2026-07-09 15:33:07] Server TCP port closed
