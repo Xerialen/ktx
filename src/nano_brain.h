@@ -128,4 +128,8 @@ static inline void Nano_AimSpringStep(nano_bot_t *bot, const vec3_t look, float 
 // Main per-frame brain entry point (lives in nano_brain.c).
 qbool Nano_BrainFrame(gedict_t *self);
 
+// Reset a slot's brain state. Called when a bot is unmarked or before a new
+// bot is marked, so reused edicts never inherit stale goal/route/aim state.
+void Nano_BrainClearSlot(int ent);
+
 #endif // KTX_NANO_BRAIN_H

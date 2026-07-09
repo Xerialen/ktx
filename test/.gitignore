@@ -1,0 +1,3 @@
+# compiled standalone test binaries (no extension on WSL/Git Bash)
+test_navmesh
+test_nano_brain

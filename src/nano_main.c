@@ -66,6 +66,10 @@ void Nano_MarkBot(gedict_t *bot)
 		return;
 	}
 
+	// Reset any stale brain state before marking this slot; the edict may have
+	// been reused since the last nano-bot occupied it.
+	Nano_BrainClearSlot(entity);
+
 	nano_state[entity] = NANO_STATE_MARKED;
 	Nano_StampedVersion(stamped, sizeof(stamped));
 
@@ -112,6 +116,7 @@ void Nano_ClearMark(gedict_t *bot)
 	}
 
 	nano_state[entity] = NANO_STATE_OFF;
+	Nano_BrainClearSlot(entity);
 }
 
 // Per-frame brain entry point. S0: log identity once (MARKED -> ACTIVE), then

@@ -15,6 +15,26 @@
 static nano_bot_t g_nano_bots[NANO_MAX_SLOTS];
 
 // ---------------------------------------------------------------------------
+// Reset a slot's brain state (public so Nano_ClearMark can call it).
+// ---------------------------------------------------------------------------
+void Nano_BrainClearSlot(int ent)
+{
+	nano_bot_t *bot;
+
+	if (ent < 0 || ent >= NANO_MAX_SLOTS)
+	{
+		return;
+	}
+
+	bot = &g_nano_bots[ent];
+	memset(bot, 0, sizeof(*bot));
+	bot->air_leg = -1;
+	bot->goal_cell = -1;
+	bot->goal_ent = -1;
+	bot->initialized = false;
+}
+
+// ---------------------------------------------------------------------------
 // First-frame init for a slot.
 // ---------------------------------------------------------------------------
 static void Nano_BotInit(nano_bot_t *bot, const nano_sense_t *s)
@@ -408,13 +428,18 @@ static void Nano_Steer(nano_bot_t *bot, const nano_sense_t *s,
 		look = waypoint;
 	}
 
-	VectorSubtract(waypoint, s->origin, to_wp);
-	yaw = atan2f(to_wp[1], to_wp[0]) * 180.0f / (float)M_PI;
-	out_look[0] = 0.0f;
-	out_look[1] = yaw;
-	out_look[2] = 0.0f;
+	// Aim toward the look-ahead point for smoother corridor tracking.
+	{
+		vec3_t to_look;
+		VectorSubtract(look, s->origin, to_look);
+		yaw = atan2f(to_look[1], to_look[0]) * 180.0f / (float)M_PI;
+		out_look[0] = 0.0f;
+		out_look[1] = yaw;
+		out_look[2] = 0.0f;
+	}
 
-	// World-space move direction (XY only).
+	// World-space move direction (XY only) uses the immediate waypoint.
+	VectorSubtract(waypoint, s->origin, to_wp);
 	{
 		float len = sqrtf(to_wp[0] * to_wp[0] + to_wp[1] * to_wp[1]);
 		if (len > 1.0f)
