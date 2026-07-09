@@ -1,7 +1,7 @@
 {
   "schema": "komodobots2.run_meta.v1",
-  "run_id": "20260709T132821Z-p28599",
-  "batch_id": "batch-20260709T132821Z",
+  "run_id": "20260709T135638Z-p28599",
+  "batch_id": "batch-20260709T135638Z",
   "port": 28599,
   "map": "dm3",
   "timelimit": 3,
@@ -33,8 +33,8 @@
     },
     "ktx_qwprogs": {
       "path": "/home/xerial/kbot/serverdir/ktx/qwprogs.so",
-      "sha256": "4fd602fb8aef4c9502d1648e7a7842aa25e5fec5be887e0f4a6481542dbf1bec",
-      "git_sha": null
+      "sha256": "1d20f5c06df90e89652c8402c337552e340073425c8a9a8c8987f281af23bcea",
+      "git_sha": "34ba9563ec6fea8434e17f64748afc8640f2d770"
     },
     "analyzer": {
       "path": "/home/xerial/kbot/qw-analyze-v20",
@@ -43,8 +43,8 @@
     },
     "harness_git_sha": null
   },
-  "started_utc": "2026-07-09T13:28:21Z",
-  "ended_utc": "2026-07-09T13:33:07Z",
+  "started_utc": "2026-07-09T13:56:38Z",
+  "ended_utc": "2026-07-09T14:01:24Z",
   "ok": true,
   "error": null
 }
