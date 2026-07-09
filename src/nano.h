@@ -51,6 +51,11 @@ void Nano_ClearMark(gedict_t *bot);
 // (navmesh, perception, combat, movement) arrives in later stages.
 qbool Nano_Frame(gedict_t *self);
 
+// S2a per-frame implementation. Lives in nano_brain.c; Nano_Frame dispatches
+// here and returns its result. Kept separate from the dispatch seam so the
+// brain logic can be unit-tested in isolation where possible.
+qbool Nano_BrainFrame(gedict_t *self);
+
 // ---------------------------------------------------------------------------
 // S1: navmesh foundation -- BSP clip-hull reader (port of rtx src/bsp.rs).
 //

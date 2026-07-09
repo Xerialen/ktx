@@ -10,14 +10,10 @@
 #ifdef NANO_SUPPORT
 
 #include "g_local.h"
-#include "nano.h"
+#include "nano_brain.h"
 
-// KTX has no compile-time MAX_CLIENTS (maxclients is a runtime cvar), so size
-// by a safe fixed cap: 64 exceeds any mvdsv maxclients (the bench uses 8-9),
-// and every access is bounds-checked, so an out-of-range edict number can never
-// index past the array. (Codex review P3: not a magic limit -- justified +
-// guarded.)
-#define NANO_MAX_SLOTS 64
+// NANO_MAX_SLOTS now lives in nano_brain.h so both the flag array and the
+// per-bot brain state share the same safe fixed cap.
 
 // Per-bot nano flag, indexed by edict number. Lives here (not in gedict_t) so
 // the shared bot structs are unchanged and NANO_SUPPORT=OFF stays
@@ -144,7 +140,7 @@ qbool Nano_Frame(gedict_t *self)
 					entity, self->netname, stamped, g_globalvars.time);
 	}
 
-	return false; // S0: not handled -- fall through to stock frogbot think
+	return Nano_BrainFrame(self);
 }
 
 #endif // NANO_SUPPORT
