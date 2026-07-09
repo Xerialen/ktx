@@ -189,6 +189,30 @@ int Nano_NavLinkKind(const nano_navgraph_t *g, int link);				// NANO_LINK_*, -1 
 float Nano_NavLinkCost(const nano_navgraph_t *g, int link);			// base travel time, -1 OOB
 
 // ---------------------------------------------------------------------------
+// S2: navmesh query API (Codex P3).
+//
+// Dijkstra cost-flood and nearest-reachable helpers for the brain's goal
+// selection. One flood per goal-pick cadence replaces many capped A* calls.
+// ---------------------------------------------------------------------------
+
+// Sentinel cost returned for unreachable cells by Nano_NavCostsFrom and by
+// Nano_NavFindPath when no route exists.
+#define NANO_NAV_UNREACHABLE 1.0e30f
+
+// Dijkstra flood from `source` cell. Writes the minimum travel-time cost to
+// reach every cell into out_costs[0..out_cap-1]. Unreachable cells keep
+// NANO_NAV_UNREACHABLE. Returns false if the graph is invalid, source is out of
+// range, or out_cap < num_cells.
+qbool Nano_NavCostsFrom(const nano_navgraph_t *g, int source,
+						float *out_costs, int out_cap);
+
+// Find the cell nearest to `pos` that has a finite cost in the precomputed
+// `costs` array (i.e. is reachable from the source of the flood). Returns -1
+// if no cell is reachable. costs_cap must be >= num_cells.
+int Nano_NavNearestReachable(const nano_navgraph_t *g, const vec3_t pos,
+							const float *costs, int costs_cap);
+
+// ---------------------------------------------------------------------------
 // S1c: navmesh build lifecycle (port of rtx nav_build.rs, synchronous).
 //
 // Reads maps/<mapname>.bsp via trap_FS, parses + builds the land mesh, caches

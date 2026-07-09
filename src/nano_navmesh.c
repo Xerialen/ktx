@@ -41,7 +41,7 @@
 #define NANO_JUMP_VZ         270.0f	// jump impulse (velocity.z)
 #define NANO_GRAVITY         800.0f	// nominal gravity for ballistic fall modeling
 #define NANO_NEIGHBOR_CAP    8192	// scratch cap for neighbors_within (sized for R=7)
-#define NANO_INF             1.0e30f
+#define NANO_INF             NANO_NAV_UNREACHABLE
 #define NANO_MAX_WORLD_SPAN  32768.0f	// per-axis bbox cap; any real QW map is far under this
 
 // ---------------------------------------------------------------------------
@@ -1081,6 +1081,124 @@ int Nano_NavFindPath(const nano_navgraph_t *g, int start, int goal, int *out_rou
 	free(came_from);
 	free(heap);
 	return route_len;
+}
+
+// ---------------------------------------------------------------------------
+// S2 query API (Codex P3): Dijkstra cost-flood + nearest-reachable.
+// ---------------------------------------------------------------------------
+
+// Dijkstra flood from `source` over the land mesh. Writes the minimum cost to
+// reach each cell into out_costs[0..num_cells-1]; unreachable cells keep
+// NANO_NAV_UNREACHABLE. The CSR adjacency and link costs are the same as A*.
+qbool Nano_NavCostsFrom(const nano_navgraph_t *g, int source,
+						float *out_costs, int out_cap)
+{
+	nano_astar_node_t *heap;
+	int heap_n = 0, heap_cap, i;
+
+	if (!g || source < 0 || source >= g->num_cells || !out_costs ||
+		out_cap < g->num_cells)
+	{
+		return false;
+	}
+
+	for (i = 0; i < g->num_cells; i++)
+	{
+		out_costs[i] = NANO_INF;
+	}
+
+	heap_cap = (g->num_links > 0 ? g->num_links : 1) + 1;
+	heap = (nano_astar_node_t *)malloc((size_t)heap_cap * sizeof(nano_astar_node_t));
+	if (!heap)
+	{
+		return false;
+	}
+
+	out_costs[source] = 0.0f;
+	nano_heap_push(heap, &heap_n, 0.0f, source);
+
+	while (heap_n > 0)
+	{
+		int cell = nano_heap_pop(heap, &heap_n);
+		int a = g->adj_offset[cell];
+		int b = g->adj_offset[cell + 1];
+
+		for (i = a; i < b; i++)
+		{
+			int li = g->adj_links[i];
+			nano_link_t link = g->links[li];
+			float nc = out_costs[cell] + link.cost;
+
+			if (nc < out_costs[link.to])
+			{
+				out_costs[link.to] = nc;
+				if (heap_n < heap_cap)
+				{
+					nano_heap_push(heap, &heap_n, nc, link.to);
+				}
+			}
+		}
+	}
+
+	free(heap);
+	return true;
+}
+
+// Find the cell nearest to `pos` that is reachable according to `costs`
+// (i.e. costs[id] < NANO_NAV_UNREACHABLE). Searches the home column and rings
+// outward, same as Nano_NavNearest, but skips unreachable cells.
+int Nano_NavNearestReachable(const nano_navgraph_t *g, const vec3_t pos,
+							const float *costs, int costs_cap)
+{
+	int gx = nano_floor_grid(pos[0]);
+	int gy = nano_floor_grid(pos[1]);
+	int *neigh;
+	int radius, best = -1;
+	float best_xy = 0.0f;
+
+	if (!g || g->num_cells <= 0 || !costs || costs_cap < g->num_cells)
+	{
+		return -1;
+	}
+
+	neigh = (int *)malloc(NANO_NEIGHBOR_CAP * sizeof(int));
+	if (!neigh)
+	{
+		return -1;
+	}
+
+	for (radius = 0; radius <= 4; radius++)
+	{
+		int n = nano_neighbors_within(g, gx, gy, radius, neigh, NANO_NEIGHBOR_CAP);
+		int i;
+
+		for (i = 0; i < n; i++)
+		{
+			int id = neigh[i];
+			const float *o = g->cells[id].origin;
+			float xy;
+
+			if (costs[id] >= NANO_INF)
+			{
+				continue;
+			}
+
+			xy = nvec_len2_xy(o, pos);
+			if (best < 0 || xy < best_xy)
+			{
+				best = id;
+				best_xy = xy;
+			}
+		}
+
+		if (best >= 0 && radius >= 1)
+		{
+			break;
+		}
+	}
+
+	free(neigh);
+	return best;
 }
 
 // ---------------------------------------------------------------------------
