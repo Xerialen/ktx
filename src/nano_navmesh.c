@@ -1169,7 +1169,8 @@ qbool Nano_NavCostsFrom(const nano_navgraph_t *g, int source,
 
 // Find the cell nearest to `pos` that is reachable according to `costs`
 // (i.e. costs[id] < NANO_NAV_UNREACHABLE). Searches the home column and rings
-// outward, same as Nano_NavNearest, but skips unreachable cells.
+// outward (same fast path as Nano_NavNearest), then falls back to a full scan
+// if no reachable cell is found nearby. Returns -1 only if no cell is reachable.
 int Nano_NavNearestReachable(const nano_navgraph_t *g, const vec3_t pos,
 							const float *costs, int costs_cap)
 {
@@ -1179,6 +1180,7 @@ int Nano_NavNearestReachable(const nano_navgraph_t *g, const vec3_t pos,
 	int radius, best = -1;
 	int best_fm = 0;	// 0 = same floor (|dz| <= STEP_HEIGHT), 1 = different floor
 	float best_xy = 0.0f;
+	int i;
 
 	if (!g || g->num_cells <= 0 || !costs || costs_cap < g->num_cells)
 	{
@@ -1194,7 +1196,6 @@ int Nano_NavNearestReachable(const nano_navgraph_t *g, const vec3_t pos,
 	for (radius = 0; radius <= 4; radius++)
 	{
 		int n = nano_neighbors_within(g, gx, gy, radius, neigh, NANO_NEIGHBOR_CAP);
-		int i;
 
 		for (i = 0; i < n; i++)
 		{
@@ -1220,7 +1221,31 @@ int Nano_NavNearestReachable(const nano_navgraph_t *g, const vec3_t pos,
 
 		if (best >= 0 && radius >= 1)
 		{
-			break;
+			free(neigh);
+			return best;
+		}
+	}
+
+	// Fallback: scan every cell to honor the "nearest reachable" contract even
+	// when the query point is far from any reachable cell.
+	for (i = 0; i < g->num_cells; i++)
+	{
+		const float *o = g->cells[i].origin;
+		int fm;
+		float xy;
+
+		if (costs[i] >= NANO_INF)
+		{
+			continue;
+		}
+
+		fm = (fabsf(o[2] - pos[2]) <= NANO_STEP_HEIGHT) ? 0 : 1;
+		xy = nvec_len2_xy(o, pos);
+		if (best < 0 || fm < best_fm || (fm == best_fm && xy < best_xy))
+		{
+			best = i;
+			best_fm = fm;
+			best_xy = xy;
 		}
 	}
 
