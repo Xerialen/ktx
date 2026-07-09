@@ -42,6 +42,7 @@
 #define NANO_GRAVITY         800.0f	// nominal gravity for ballistic fall modeling
 #define NANO_NEIGHBOR_CAP    8192	// scratch cap for neighbors_within (sized for R=7)
 #define NANO_INF             1.0e30f
+#define NANO_MAX_WORLD_SPAN  32768.0f	// per-axis bbox cap; any real QW map is far under this
 
 // ---------------------------------------------------------------------------
 // vec3 helpers (KTX mathlib has DotProduct + Vector*; add scale/len/len2/lerp).
@@ -95,6 +96,7 @@ struct nano_navgraph_s
 	int num_cells;
 	nano_link_t *links;
 	int num_links;
+	int links_cap;		// capacity of links (grows with the mesh; not a fixed per-cell cap)
 	int *adj_offset;	// CSR row offsets, num_cells+1
 	int *adj_links;		// CSR link indices, num_links
 	// 2D grid index: per grid column (gx,gy) the contiguous [start,count) range
@@ -127,6 +129,26 @@ static void *nano_grow(void *p, int *cap, int need, size_t elemsz)
 		*cap = nc;
 	}
 	return np;
+}
+
+// Append a link to g->links, growing the array as needed (rtx uses an unbounded
+// Vec; a fixed per-cell cap would silently drop links on tall/multi-level maps
+// and change reachability). Returns false only on allocation failure (the build
+// then aborts and frees everything).
+static qbool nano_push_link(nano_navgraph_t *g, nano_link_t link)
+{
+	if (g->num_links >= g->links_cap)
+	{
+		nano_link_t *t = (nano_link_t *)nano_grow(
+			g->links, &g->links_cap, g->num_links + 1, sizeof(nano_link_t));
+		if (!t)
+		{
+			return false;
+		}
+		g->links = t;
+	}
+	g->links[g->num_links++] = link;
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -513,10 +535,10 @@ typedef struct
 } nano_jumpslot_t;
 
 // Jump links out of `from`: from a ledge edge, within run-jump reach/apex, with a
-// clear arc; deduped to the nearest target per (octant, elevation band).
-static void nano_find_jumps(
-	const nano_navgraph_t *g, const nano_bsp_t *bsp, int from, nano_link_t *links, int *num_links,
-	int links_cap, int *neigh, int neigh_cap)
+// clear arc; deduped to the nearest target per (octant, elevation band). Pushes
+// each winner onto g->links (grows as needed). Returns false on alloc failure.
+static qbool nano_find_jumps(
+	nano_navgraph_t *g, const nano_bsp_t *bsp, int from, int *neigh, int neigh_cap)
 {
 	nano_cell_t a = g->cells[from];
 	nano_jumpslot_t best[9][NANO_JUMP_ELEV_BANDS];
@@ -586,12 +608,16 @@ static void nano_find_jumps(
 	{
 		for (band = 0; band < NANO_JUMP_ELEV_BANDS; band++)
 		{
-			if (best[oct][band].used && *num_links < links_cap)
+			if (best[oct][band].used)
 			{
-				links[(*num_links)++] = best[oct][band].link;
+				if (!nano_push_link(g, best[oct][band].link))
+				{
+					return false;
+				}
 			}
 		}
 	}
+	return true;
 }
 
 nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp)
@@ -599,11 +625,32 @@ nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp)
 	nano_navgraph_t *g;
 	int gx0, gy0, gx1, gy1, gx, gy, cells_cap = 0;
 	int *neigh = NULL;
-	int links_cap = 0, i, j;
+	int i, j;
 
 	if (!bsp)
 	{
 		return NULL;
+	}
+
+	// Validate the parsed world bbox: a corrupt/malformed BSP can carry NaN/Inf
+	// or disordered/huge bounds that overflow the grid index or invoke UB in the
+	// float->int casts of nano_floor_grid. Refuse rather than mis-navigate or
+	// hang. The span cap also bounds the column z-scan iteration count. (Codex P1.)
+	{
+		int k;
+		for (k = 0; k < 3; k++)
+		{
+			if (!isfinite(bsp->mins[k]) || !isfinite(bsp->maxs[k]) || bsp->mins[k] > bsp->maxs[k])
+			{
+				return NULL;
+			}
+		}
+		if (bsp->maxs[0] - bsp->mins[0] > NANO_MAX_WORLD_SPAN ||
+				bsp->maxs[1] - bsp->mins[1] > NANO_MAX_WORLD_SPAN ||
+				bsp->maxs[2] - bsp->mins[2] > NANO_MAX_WORLD_SPAN)
+		{
+			return NULL;
+		}
 	}
 
 	g = (nano_navgraph_t *)malloc(sizeof(nano_navgraph_t));
@@ -681,23 +728,17 @@ nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp)
 	}
 
 	// --- classify links: grounded moves to the 8 neighbors, then jumps ---
+	// g->links grows on demand (rtx uses an unbounded Vec); a fixed cap would
+	// silently drop valid links on tall/multi-level maps and change reachability.
 	neigh = (int *)malloc(NANO_NEIGHBOR_CAP * sizeof(int));
 	if (!neigh)
 	{
 		Nano_NavFree(g);
 		return NULL;
 	}
-	// Reserve a generous link upper bound (8 grounded + 9 deduped jumps + slack
-	// per cell); overflow just drops the extra links, never corrupts.
-	links_cap = g->num_cells * 24;
-	g->links = (nano_link_t *)malloc((size_t)links_cap * sizeof(nano_link_t));
-	if (!g->links)
-	{
-		free(neigh);
-		Nano_NavFree(g);
-		return NULL;
-	}
+	g->links = NULL;
 	g->num_links = 0;
+	g->links_cap = 0;
 	for (i = 0; i < g->num_cells; i++)
 	{
 		nano_cell_t c = g->cells[i];
@@ -706,12 +747,22 @@ nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp)
 		{
 			int to = neigh[j];
 			nano_link_t link;
-			if (to != i && nano_classify_grounded(g, bsp, i, to, &link) && g->num_links < links_cap)
+			if (to != i && nano_classify_grounded(g, bsp, i, to, &link))
 			{
-				g->links[g->num_links++] = link;
+				if (!nano_push_link(g, link))
+				{
+					free(neigh);
+					Nano_NavFree(g);
+					return NULL;
+				}
 			}
 		}
-		nano_find_jumps(g, bsp, i, g->links, &g->num_links, links_cap, neigh, NANO_NEIGHBOR_CAP);
+		if (!nano_find_jumps(g, bsp, i, neigh, NANO_NEIGHBOR_CAP))
+		{
+			free(neigh);
+			Nano_NavFree(g);
+			return NULL;
+		}
 	}
 	free(neigh);
 
@@ -802,7 +853,8 @@ int Nano_NavNearest(const nano_navgraph_t *g, const vec3_t pos)
 	int gy = nano_floor_grid(pos[1]);
 	int *neigh;
 	int radius, best = -1;
-	float best_d = 0.0f;
+	int best_fm = 0;	// 0 = same floor (|dz|<=STEP), 1 = a different floor
+	float best_xy = 0.0f;
 
 	if (!g || g->num_cells <= 0)
 	{
@@ -813,6 +865,10 @@ int Nano_NavNearest(const nano_navgraph_t *g, const vec3_t pos)
 	{
 		return -1;
 	}
+	// Floor-aware nearest: a same-floor cell (within STEP_HEIGHT of pos.z) always
+	// beats a different-floor one, then nearest by XY. Pure 3D distance (rtx's
+	// metric) can snap to a closer-3D cell on the wrong floor at a ledge and seed
+	// the brain with an unreachable route. (Codex review P2.)
 	for (radius = 0; radius <= 4; radius++)
 	{
 		int n = nano_neighbors_within(g, gx, gy, radius, neigh, NANO_NEIGHBOR_CAP);
@@ -820,11 +876,14 @@ int Nano_NavNearest(const nano_navgraph_t *g, const vec3_t pos)
 		for (i = 0; i < n; i++)
 		{
 			int id = neigh[i];
-			float d = nvec_dist2(g->cells[id].origin, pos);
-			if (best < 0 || d < best_d)
+			const float *o = g->cells[id].origin;
+			int fm = (fabsf(o[2] - pos[2]) <= NANO_STEP_HEIGHT) ? 0 : 1;
+			float xy = nvec_len2_xy(o, pos);
+			if (best < 0 || fm < best_fm || (fm == best_fm && xy < best_xy))
 			{
 				best = id;
-				best_d = d;
+				best_fm = fm;
+				best_xy = xy;
 			}
 		}
 		if (best >= 0 && radius >= 1)
@@ -934,7 +993,12 @@ int Nano_NavFindPath(const nano_navgraph_t *g, int start, int goal, int *out_rou
 	}
 
 	{
-		float h0 = nvec_dist(g->cells[goal].origin, g->cells[start].origin) / NANO_MAX_SPEED;
+		// Heuristic = straight-line XY distance / MAX_SPEED: an admissible lower
+		// bound (any path covers >= the XY distance at <= MAX_SPEED; vertical
+		// drops are ~free, climbs cost via jump links whose cost already exceeds
+		// their XY term). rtx uses 3D distance, which overestimates around deep
+		// drops and is inadmissible -- XY keeps A* optimal. (Codex review P2.)
+		float h0 = nvec_len_xy(g->cells[goal].origin, g->cells[start].origin) / NANO_MAX_SPEED;
 		g_cost[start] = 0.0f;
 		nano_heap_push(heap, &heap_n, h0, start);
 	}
@@ -960,7 +1024,7 @@ int Nano_NavFindPath(const nano_navgraph_t *g, int start, int goal, int *out_rou
 				came_from[link.to] = li;
 				if (heap_n < heap_cap)
 				{
-					float hf = ng + nvec_dist(g->cells[goal].origin, g->cells[link.to].origin) / NANO_MAX_SPEED;
+					float hf = ng + nvec_len_xy(g->cells[goal].origin, g->cells[link.to].origin) / NANO_MAX_SPEED;
 					nano_heap_push(heap, &heap_n, hf, link.to);
 				}
 			}
