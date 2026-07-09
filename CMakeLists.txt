@@ -12,6 +12,13 @@ option(BOT_SUPPORT "Build with bot support" ON)
 # Option for FTE extensions. We also have some basic support for FTE which does not controlled by this setting.
 # This is en example and extensions unused for now, so its turned off by default. Also turning it ON makes binary incompatibe with MVDSV.
 option(FTESV "Build with FTE extensions support" OFF)
+# nano-bots: rtx-port peer brain (qw-ctf/rtx bots). OFF by default; an OFF
+# build is byte-identical to the stock frogbot baseline (no nano source
+# compiled, no dispatch branch, no cvars, no struct change).
+option(NANO_SUPPORT "Build with nano-bot (rtx-port) brain" OFF)
+if(NANO_SUPPORT AND NOT BOT_SUPPORT)
+	message(FATAL_ERROR "NANO_SUPPORT requires BOT_SUPPORT=ON (nano is a peer brain on the frogbot base).")
+endif()
 
 # Set where sources located.
 set(DIR_SRC "src")
@@ -144,6 +151,16 @@ set(SRC_COMMON
 	"${DIR_SRC}/world.c"
 	)
 
+# nano-bots (rtx port): compiled in only when NANO_SUPPORT is ON, so an OFF
+# build stays byte-identical to the stock frogbot baseline.
+if(NANO_SUPPORT)
+	list(APPEND SRC_NATIVE
+		"${DIR_SRC}/nano_main.c"
+		"${DIR_SRC}/nano_bsp.c"
+		"${DIR_SRC}/nano_navmesh.c"
+		"${DIR_SRC}/nano_nav_build.c")
+endif()
+
 # Build native library.
 add_library(${PROJECT_NAME} SHARED ${SRC_COMMON} ${SRC_NATIVE})
 target_include_directories(${PROJECT_NAME} PRIVATE "include")
@@ -153,6 +170,9 @@ set_target_properties(${PROJECT_NAME}
 	)
 if(BOT_SUPPORT)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE BOT_SUPPORT=1)
+endif()
+if(NANO_SUPPORT)
+	target_compile_definitions(${PROJECT_NAME} PRIVATE NANO_SUPPORT=1)
 endif()
 if(FTESV)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE FTESV=1)

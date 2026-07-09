@@ -8,6 +8,7 @@
 
 #include "g_local.h"
 #include "kbot.h"
+#include "nano.h"
 
 // Handles all "botcmd x" commands from the user
 
@@ -353,6 +354,12 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 			// kbot userinfo identity stamp (ktxstats/MVD evidence).
 			g_edicts[entity].fb.kbot = KBOT_STATE_OFF;
 			trap_SetBotUserInfo(entity, "kbot", "", 0);
+#ifdef NANO_SUPPORT
+			// Same evidence-honesty guarantee for nano: a reused slot must never
+			// inherit a nano flag or the "nano"/"nb:" userinfo stamp (Codex P2).
+			Nano_ClearMark(&g_edicts[entity]);
+			trap_SetBotUserInfo(entity, "nano", "", 0);
+#endif
 			g_edicts[entity].fb.skill.skill_level = skill_level;
 			g_edicts[entity].fb.botnumber = i;
 			trap_SetBotUserInfo(entity, "team", teamName, 0);
@@ -422,6 +429,18 @@ static void FrogbotsAddKbot_f(void)
 		KBot_MarkBot(&g_edicts[entity]);
 	}
 }
+
+#ifdef NANO_SUPPORT
+static void FrogbotsAddNano_f(void)
+{
+	int entity = FrogbotsAddbotParsed();
+
+	if (entity)
+	{
+		Nano_MarkBot(&g_edicts[entity]);
+	}
+}
+#endif
 
 static void FrogbotsRemoveBot(bot_t *lastbot)
 {
@@ -2348,6 +2367,9 @@ static frogbot_cmd_t std_commands[] =
 		{ "skill", FrogbotsSetSkill, "Set skill level for next bot added" },
 		{ "addbot", FrogbotsAddbot_f, "Adds a bot. Skill & team optional" },
 		{ "addkbot", FrogbotsAddKbot_f, "Adds a komodobot. Skill & team optional" },
+#ifdef NANO_SUPPORT
+		{ "addnano", FrogbotsAddNano_f, "Adds a nano-bot (rtx port). Skill & team optional" },
+#endif
 		{ "fill", FrogbotsFillServer, "Fills the server (max 8 bots at a time)" },
 		{ "removebot", FrogbotsRemovebot_f, "Removes a single bot" },
 		{ "removeall", FrogbotsRemoveAll, "Removes all bots from server" },

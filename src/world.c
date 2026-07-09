@@ -24,6 +24,7 @@
  */
 
 #include "g_local.h"
+#include "nano.h"
 
 #ifdef BOT_SUPPORT
 #endif
@@ -191,6 +192,12 @@ void SP_worldspawn(void)
 
 	world->classname = "worldspawn";
 	InitBodyQue();
+
+#ifdef NANO_SUPPORT
+	// nano navmesh is cached per map; free the previous map's mesh + reset the
+	// attempted flag so the new map builds fresh on first nano-bot need.
+	Nano_NavMapReset();
+#endif
 
 	if (!Q_stricmp(self->model, "maps/e1m8.bsp"))
 	{
@@ -1066,6 +1073,15 @@ void FirstFrame(void)
 	RegisterCvarEx(FB_CVAR_QUAD_MULTIPLIER, "4");
 	RegisterCvarEx(FB_CVAR_ITEM_PICKUP_BONUS, "0");
 	RegisterCvarEx(FB_CVAR_EASY_SKILL_MODE, "1");
+
+#ifdef NANO_SUPPORT
+	// NANO (rtx-port peer brain): k_nano is the master switch (0 = off,
+	// byte-neutral). With k_nano 0 the dispatch guard in BotsThinkTime()
+	// never calls Nano_Frame(), so stock frogbot behavior stands.
+	RegisterCvarEx("k_nano", "0");
+	RegisterCvarEx("k_nano_skill", "3");
+	RegisterCvarEx("k_nano_version_suffix", "");
+#endif
 
 	// KBOT (WP3.5): discipline tunables + identity-stamp suffix, sweepable
 	// from the server cfg without rebuilds (e.g. "set k_kbot_weak_stack 100").
