@@ -467,6 +467,52 @@ static float KBot_UtbyteScaleHunt(gedict_t *self, gedict_t *en, float desire)
 }
 
 // ---------------------------------------------------------------------------
+// Model-selection registry (#73)
+//
+// One table maps k_kbot_model -> its goal/hunt adapters and whether the
+// class-conditioned dive gate applies to goals. Collapses the twin
+// switch(model)/if(model) dispatch below into a single lookup, and applies the
+// dive gate ONE way (it was previously duplicated across the TDM + UTBYTE goal
+// branches). Adding/retuning a model is one table row.
+// ---------------------------------------------------------------------------
+
+typedef struct {
+	int model;                                          // KBM_TDM / KBM_KAPTEN / KBM_UTBYTE
+	float (*scale_goal)(gedict_t *, gedict_t *, float); // item/backpack/powerup desire
+	float (*scale_hunt)(gedict_t *, gedict_t *, float); // enemy HUNT desire
+	qbool dive_gate;                                    // apply KBot_TdmDiveBlock to goals
+} kbot_model_t;
+
+// No-op adapter for the desire channels a model leaves at vanilla (TDM/KAPTEN
+// hunt, UTBYTE goal): returns the desire unchanged.
+static float KBot_ModelPassthrough(gedict_t *self, gedict_t *goal, float desire)
+{
+	(void)self;
+	(void)goal;
+	return desire;
+}
+
+static const kbot_model_t KBOT_MODELS[] = {
+	{ KBM_TDM,    KBot_TdmScaleGoal,    KBot_ModelPassthrough, true  },
+	{ KBM_KAPTEN, KBot_KaptenScaleGoal, KBot_ModelPassthrough, false },
+	{ KBM_UTBYTE, KBot_ModelPassthrough, KBot_UtbyteScaleHunt, true  },
+};
+
+static const kbot_model_t *KBot_ModelEntry(int model)
+{
+	int i;
+
+	for (i = 0; i < (int)(sizeof(KBOT_MODELS) / sizeof(KBOT_MODELS[0])); i++)
+	{
+		if (KBOT_MODELS[i].model == model)
+		{
+			return &KBOT_MODELS[i];
+		}
+	}
+	return NULL;
+}
+
+// ---------------------------------------------------------------------------
 // public seams (called from bot_botgoals.c)
 // ---------------------------------------------------------------------------
 
@@ -475,49 +521,44 @@ static float KBot_UtbyteScaleHunt(gedict_t *self, gedict_t *en, float desire)
 float KBot_ModelScaleGoal(gedict_t *self, gedict_t *goal, float desire)
 {
 	int model = KBot_ActiveModel(self);
+	const kbot_model_t *m;
 
 	if ((model == KBM_OFF) || (desire <= 0) || (goal->ct == ctPlayer))
 	{
 		return desire;
 	}
-	switch (model)
+	m = KBot_ModelEntry(model);
+	if (m == NULL)
 	{
-		case KBM_TDM:
-			if (KBot_TdmDiveBlock(self, goal))
-			{
-				return 0;
-			}
-			return KBot_TdmScaleGoal(self, goal, desire);
-		case KBM_KAPTEN:
-			return KBot_KaptenScaleGoal(self, goal, desire);
-		case KBM_UTBYTE:
-			// exchange model keeps TDM's proven dive gate (class-conditioned)
-			if (KBot_TdmDiveBlock(self, goal))
-			{
-				return 0;
-			}
-			return desire;
+		return desire;
 	}
-
-	return desire;
+	// Class-conditioned dive gate, applied one way for every model that uses it
+	// (TDM + UTBYTE; KAPTEN opts out via dive_gate=false).
+	if (m->dive_gate && KBot_TdmDiveBlock(self, goal))
+	{
+		return 0;
+	}
+	return m->scale_goal(self, goal, desire);
 }
 
 // Enemy HUNT desire, called where WP3.3 clears goal_enemy_desire.
 float KBot_ModelScaleHunt(gedict_t *self, gedict_t *en, float desire)
 {
 	int model = KBot_ActiveModel(self);
+	const kbot_model_t *m;
 
 	if ((model == KBM_OFF) || (desire <= 0))
 	{
 		return desire;
 	}
-	if (model == KBM_UTBYTE)
+	m = KBot_ModelEntry(model);
+	if (m == NULL)
 	{
-		return KBot_UtbyteScaleHunt(self, en, desire);
+		return desire;
 	}
-	// TDM/KAPTEN keep the WP3.3 discipline via KBot_AvoidFights (caller).
-
-	return desire;
+	// TDM/KAPTEN keep the WP3.3 discipline via KBot_AvoidFights (caller); their
+	// passthrough adapter returns the desire unchanged.
+	return m->scale_hunt(self, en, desire);
 }
 
 #endif // BOT_SUPPORT
