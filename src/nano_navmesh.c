@@ -895,16 +895,32 @@ int Nano_NavNearest(const nano_navgraph_t *g, const vec3_t pos)
 	return best;
 }
 
-// A min-heap node over f = g + h.
+// A min-heap node (used by A* and Dijkstra).
 typedef struct
 {
 	float f;
 	int cell;
-} nano_astar_node_t;
+} nano_heap_node_t;
 
-static void nano_heap_push(nano_astar_node_t *h, int *n, float f, int cell)
+static nano_heap_node_t *nano_heap_push(nano_heap_node_t *h, int *n, int *cap,
+										 float f, int cell)
 {
 	int i = (*n)++;
+	if (*n > *cap)
+	{
+		int nc = *cap ? *cap : 64;
+		while (nc < *n)
+		{
+			nc *= 2;
+		}
+		h = (nano_heap_node_t *)realloc(h, (size_t)nc * sizeof(nano_heap_node_t));
+		if (!h)
+		{
+			(*n)--;
+			return NULL;
+		}
+		*cap = nc;
+	}
 	h[i].f = f;
 	h[i].cell = cell;
 	while (i > 0)
@@ -915,15 +931,16 @@ static void nano_heap_push(nano_astar_node_t *h, int *n, float f, int cell)
 			break;
 		}
 		{
-			nano_astar_node_t t = h[parent];
+			nano_heap_node_t t = h[parent];
 			h[parent] = h[i];
 			h[i] = t;
 		}
 		i = parent;
 	}
+	return h;
 }
 
-static int nano_heap_pop(nano_astar_node_t *h, int *n)
+static int nano_heap_pop(nano_heap_node_t *h, int *n)
 {
 	int top = h[0].cell;
 	int i = 0;
@@ -945,7 +962,7 @@ static int nano_heap_pop(nano_astar_node_t *h, int *n)
 			break;
 		}
 		{
-			nano_astar_node_t t = h[s];
+			nano_heap_node_t t = h[s];
 			h[s] = h[i];
 			h[i] = t;
 		}
@@ -961,8 +978,8 @@ int Nano_NavFindPath(const nano_navgraph_t *g, int start, int goal, int *out_rou
 {
 	float *g_cost;
 	int *came_from;
-	nano_astar_node_t *heap;
-	int heap_n = 0, heap_cap, route_len, i;
+	nano_heap_node_t *heap;
+	int heap_n = 0, heap_cap = 0, route_len, i;
 
 	if (!g || start < 0 || start >= g->num_cells || goal < 0 || goal >= g->num_cells)
 	{
@@ -975,11 +992,8 @@ int Nano_NavFindPath(const nano_navgraph_t *g, int start, int goal, int *out_rou
 
 	g_cost = (float *)malloc((size_t)g->num_cells * sizeof(float));
 	came_from = (int *)malloc((size_t)g->num_cells * sizeof(int));
-	// Heap can hold up to one entry per successful relaxation (<= num_links)
-	// plus the start; cap accordingly.
-	heap_cap = (g->num_links > 0 ? g->num_links : 1) + 1;
-	heap = (nano_astar_node_t *)malloc((size_t)heap_cap * sizeof(nano_astar_node_t));
-	if (!g_cost || !came_from || !heap)
+	heap = NULL;
+	if (!g_cost || !came_from)
 	{
 		free(g_cost);
 		free(came_from);
@@ -1000,7 +1014,13 @@ int Nano_NavFindPath(const nano_navgraph_t *g, int start, int goal, int *out_rou
 		// drops and is inadmissible -- XY keeps A* optimal. (Codex review P2.)
 		float h0 = nvec_len_xy(g->cells[goal].origin, g->cells[start].origin) / NANO_MAX_SPEED;
 		g_cost[start] = 0.0f;
-		nano_heap_push(heap, &heap_n, h0, start);
+		heap = nano_heap_push(heap, &heap_n, &heap_cap, h0, start);
+		if (!heap)
+		{
+			free(g_cost);
+			free(came_from);
+			return -1;
+		}
 	}
 
 	while (heap_n > 0)
@@ -1020,12 +1040,16 @@ int Nano_NavFindPath(const nano_navgraph_t *g, int start, int goal, int *out_rou
 			float ng = g_cost[cell] + link.cost;	// + link_extra (0, static costs)
 			if (ng < g_cost[link.to])
 			{
+				float hf;
 				g_cost[link.to] = ng;
 				came_from[link.to] = li;
-				if (heap_n < heap_cap)
+				hf = ng + nvec_len_xy(g->cells[goal].origin, g->cells[link.to].origin) / NANO_MAX_SPEED;
+				heap = nano_heap_push(heap, &heap_n, &heap_cap, hf, link.to);
+				if (!heap)
 				{
-					float hf = ng + nvec_len_xy(g->cells[goal].origin, g->cells[link.to].origin) / NANO_MAX_SPEED;
-					nano_heap_push(heap, &heap_n, hf, link.to);
+					free(g_cost);
+					free(came_from);
+					return -1;
 				}
 			}
 		}
@@ -1093,8 +1117,8 @@ int Nano_NavFindPath(const nano_navgraph_t *g, int start, int goal, int *out_rou
 qbool Nano_NavCostsFrom(const nano_navgraph_t *g, int source,
 						float *out_costs, int out_cap)
 {
-	nano_astar_node_t *heap;
-	int heap_n = 0, heap_cap, i;
+	nano_heap_node_t *heap;
+	int heap_n = 0, heap_cap = 0, i;
 
 	if (!g || source < 0 || source >= g->num_cells || !out_costs ||
 		out_cap < g->num_cells)
@@ -1107,15 +1131,13 @@ qbool Nano_NavCostsFrom(const nano_navgraph_t *g, int source,
 		out_costs[i] = NANO_INF;
 	}
 
-	heap_cap = (g->num_links > 0 ? g->num_links : 1) + 1;
-	heap = (nano_astar_node_t *)malloc((size_t)heap_cap * sizeof(nano_astar_node_t));
+	heap = NULL;
+	out_costs[source] = 0.0f;
+	heap = nano_heap_push(heap, &heap_n, &heap_cap, 0.0f, source);
 	if (!heap)
 	{
 		return false;
 	}
-
-	out_costs[source] = 0.0f;
-	nano_heap_push(heap, &heap_n, 0.0f, source);
 
 	while (heap_n > 0)
 	{
@@ -1132,9 +1154,10 @@ qbool Nano_NavCostsFrom(const nano_navgraph_t *g, int source,
 			if (nc < out_costs[link.to])
 			{
 				out_costs[link.to] = nc;
-				if (heap_n < heap_cap)
+				heap = nano_heap_push(heap, &heap_n, &heap_cap, nc, link.to);
+				if (!heap)
 				{
-					nano_heap_push(heap, &heap_n, nc, link.to);
+					return false;
 				}
 			}
 		}
@@ -1154,6 +1177,7 @@ int Nano_NavNearestReachable(const nano_navgraph_t *g, const vec3_t pos,
 	int gy = nano_floor_grid(pos[1]);
 	int *neigh;
 	int radius, best = -1;
+	int best_fm = 0;	// 0 = same floor (|dz| <= STEP_HEIGHT), 1 = different floor
 	float best_xy = 0.0f;
 
 	if (!g || g->num_cells <= 0 || !costs || costs_cap < g->num_cells)
@@ -1176,6 +1200,7 @@ int Nano_NavNearestReachable(const nano_navgraph_t *g, const vec3_t pos,
 		{
 			int id = neigh[i];
 			const float *o = g->cells[id].origin;
+			int fm;
 			float xy;
 
 			if (costs[id] >= NANO_INF)
@@ -1183,10 +1208,12 @@ int Nano_NavNearestReachable(const nano_navgraph_t *g, const vec3_t pos,
 				continue;
 			}
 
+			fm = (fabsf(o[2] - pos[2]) <= NANO_STEP_HEIGHT) ? 0 : 1;
 			xy = nvec_len2_xy(o, pos);
-			if (best < 0 || xy < best_xy)
+			if (best < 0 || fm < best_fm || (fm == best_fm && xy < best_xy))
 			{
 				best = id;
+				best_fm = fm;
 				best_xy = xy;
 			}
 		}

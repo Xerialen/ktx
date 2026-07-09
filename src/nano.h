@@ -195,8 +195,7 @@ float Nano_NavLinkCost(const nano_navgraph_t *g, int link);			// base travel tim
 // selection. One flood per goal-pick cadence replaces many capped A* calls.
 // ---------------------------------------------------------------------------
 
-// Sentinel cost returned for unreachable cells by Nano_NavCostsFrom and by
-// Nano_NavFindPath when no route exists.
+// Sentinel cost returned for unreachable cells by Nano_NavCostsFrom.
 #define NANO_NAV_UNREACHABLE 1.0e30f
 
 // Dijkstra flood from `source` cell. Writes the minimum travel-time cost to
