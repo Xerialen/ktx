@@ -1,0 +1,7 @@
+{
+  "schema": "komodobots2.cvar_manifest.v1",
+  "sweepable_cvars": [],
+  "sweepable_patterns": [
+    "k_kbot_dial_*"
+  ]
+}
