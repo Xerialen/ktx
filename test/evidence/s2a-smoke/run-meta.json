@@ -1,0 +1,50 @@
+{
+  "schema": "komodobots2.run_meta.v1",
+  "run_id": "20260709T135638Z-p28599",
+  "batch_id": "batch-20260709T135638Z",
+  "port": 28599,
+  "map": "dm3",
+  "timelimit": 3,
+  "teams": {
+    "candidate": {
+      "name": "red",
+      "brain": "nano",
+      "controller_version": "nano-df681334"
+    },
+    "control": {
+      "name": "blue",
+      "brain": "frog",
+      "controller_version": "frogbot-stock"
+    }
+  },
+  "extra_cfg_sets": {
+    "k_nano_debug": "1"
+  },
+  "cvar_contract": {
+    "registered": 202,
+    "allowed": []
+  },
+  "console_channel": "stdin",
+  "versions": {
+    "mvdsv": {
+      "path": "/home/xerial/kbot/mvdsv/build/linux-amd64/mvdsv",
+      "sha256": "7554a049ce78e9e1ad1cf560cb13e724905b04f56638bc33785cf18fa28bf1a5",
+      "git_sha": "47f8088fd704603d846612263d0fca4643ccc38d"
+    },
+    "ktx_qwprogs": {
+      "path": "/home/xerial/kbot/serverdir/ktx/qwprogs.so",
+      "sha256": "1d20f5c06df90e89652c8402c337552e340073425c8a9a8c8987f281af23bcea",
+      "git_sha": "34ba9563ec6fea8434e17f64748afc8640f2d770"
+    },
+    "analyzer": {
+      "path": "/home/xerial/kbot/qw-analyze-v20",
+      "sha256": "6954ffb689ff39b0466c46489ac168c02b58900711c315a7dc5e868353a5b99a",
+      "git_sha": null
+    },
+    "harness_git_sha": null
+  },
+  "started_utc": "2026-07-09T13:56:38Z",
+  "ended_utc": "2026-07-09T14:01:24Z",
+  "ok": true,
+  "error": null
+}

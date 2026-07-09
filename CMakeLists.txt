@@ -159,7 +159,8 @@ if(NANO_SUPPORT)
 		"${DIR_SRC}/nano_main.c"
 		"${DIR_SRC}/nano_bsp.c"
 		"${DIR_SRC}/nano_navmesh.c"
-		"${DIR_SRC}/nano_nav_build.c")
+		"${DIR_SRC}/nano_nav_build.c"
+		"${DIR_SRC}/nano_brain.c")
 endif()
 
 # Build native library.
