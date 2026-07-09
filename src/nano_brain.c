@@ -31,6 +31,8 @@ void Nano_BrainClearSlot(int ent)
 	bot->air_leg = -1;
 	bot->goal_cell = -1;
 	bot->goal_ent = -1;
+	bot->enemy_ent = -1;
+	bot->enemy_seen_time = -999999.0f;
 	bot->initialized = false;
 }
 
@@ -43,6 +45,8 @@ static void Nano_BotInit(nano_bot_t *bot, const nano_sense_t *s)
 	bot->air_leg = -1;
 	bot->goal_cell = -1;
 	bot->goal_ent = -1;
+	bot->enemy_ent = -1;
+	bot->enemy_seen_time = -999999.0f;
 	VectorCopy(s->v_angle, bot->aim);
 	VectorClear(bot->aim_vel);
 	VectorCopy(s->origin, bot->stuck_origin);
@@ -56,6 +60,8 @@ static void Nano_BotInit(nano_bot_t *bot, const nano_sense_t *s)
 // ---------------------------------------------------------------------------
 static void Nano_BrainSense(gedict_t *self, nano_sense_t *s)
 {
+	char *teamstr;
+
 	s->now = g_globalvars.time;
 	s->frametime = g_globalvars.frametime;
 	s->msec = (int)(s->frametime * 1000.0f);
@@ -83,6 +89,24 @@ static void Nano_BrainSense(gedict_t *self, nano_sense_t *s)
 	s->armortype = self->s.v.armortype;
 	s->armorvalue = self->s.v.armorvalue;
 	s->quad = self->super_damage_finished > s->now;
+
+	// S3a combat fields.
+	s->items = (int)self->s.v.items;
+	s->ammo_shells = (int)self->s.v.ammo_shells;
+	s->ammo_nails = (int)self->s.v.ammo_nails;
+	s->ammo_cells = (int)self->s.v.ammo_cells;
+	s->has_lg = (s->items & IT_LIGHTNING) != 0;
+	s->has_ssg = (s->items & IT_SUPER_SHOTGUN) != 0;
+	s->has_sng = (s->items & IT_SUPER_NAILGUN) != 0;
+	s->has_gl = (s->items & IT_GRENADE_LAUNCHER) != 0;
+	s->view_height = self->s.v.view_ofs[2];
+	if (s->view_height <= 0.0f)
+	{
+		s->view_height = NANO_EYE_HEIGHT;
+	}
+
+	teamstr = getteam(self);
+	s->team = teamstr ? (int)teamstr[0] : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -458,6 +482,461 @@ static void Nano_Steer(nano_bot_t *bot, const nano_sense_t *s,
 }
 
 // ---------------------------------------------------------------------------
+// S3a combat: perception, aim-leading, weapon selection, firing.
+// ---------------------------------------------------------------------------
+
+// Convert a Quake weapon impulse (1..8) to the corresponding IT_* bit.
+static int Nano_ItemBitForImpulse(int impulse)
+{
+	switch (impulse)
+	{
+		case 1: return IT_AXE;
+		case 2: return IT_SHOTGUN;
+		case 3: return IT_SUPER_SHOTGUN;
+		case 4: return IT_NAILGUN;
+		case 5: return IT_SUPER_NAILGUN;
+		case 6: return IT_GRENADE_LAUNCHER;
+		case 7: return IT_ROCKET_LAUNCHER;
+		case 8: return IT_LIGHTNING;
+		default: return 0;
+	}
+}
+
+static float Nano_CombatEffectiveFOV(void)
+{
+	float skill = cvar("k_nano_skill");
+	float base = cvar("k_nano_fov");
+	float fov;
+
+	skill = bound(0, skill, 7);
+	if (base <= 0.0f)
+	{
+		base = NANO_FOV_BASE;
+	}
+	fov = base + skill * 4.0f;
+	if (fov > 360.0f)
+	{
+		fov = 360.0f;
+	}
+	return fov;
+}
+
+static float Nano_CombatReaction(void)
+{
+	float skill = cvar("k_nano_skill");
+	float base = cvar("k_nano_reaction");
+	float r;
+
+	skill = bound(0, skill, 7);
+	if (base <= 0.0f)
+	{
+		base = NANO_REACTION_BASE;
+	}
+	r = base * (1.0f - skill / 8.0f);
+	if (r < 0.05f)
+	{
+		r = 0.05f;
+	}
+	return r;
+}
+
+static qbool Nano_CombatSameTeam(const nano_sense_t *s, gedict_t *other)
+{
+	char *oteam;
+
+	if (!other)
+	{
+		return false;
+	}
+
+	oteam = getteam(other);
+	if (!oteam || !oteam[0])
+	{
+		return false; // no team in non-teamplay: everyone is an enemy
+	}
+
+	return s->team != 0 && s->team == (int)oteam[0];
+}
+
+static qbool Nano_CombatVisible(const nano_sense_t *s, gedict_t *target, vec3_t out_target_pos)
+{
+	vec3_t eye, tgt;
+	int self_num;
+	gedict_t *hit;
+	float dz;
+
+	if (!target || target->s.v.health <= 0)
+	{
+		return false;
+	}
+
+	self_num = s->client;
+
+	VectorCopy(s->origin, eye);
+	eye[2] += s->view_height;
+
+	// Aim at the enemy's mid-body; try head if the first trace hits a non-vital bbox point.
+	VectorCopy(target->s.v.origin, tgt);
+	dz = (target->s.v.maxs[2] - target->s.v.mins[2]) * 0.5f;
+	if (dz < 8.0f)
+	{
+		dz = 16.0f;
+	}
+	tgt[2] += dz;
+
+	trap_traceline(eye[0], eye[1], eye[2], tgt[0], tgt[1], tgt[2], false, self_num);
+	if (g_globalvars.trace_fraction >= 1.0f)
+	{
+		VectorCopy(tgt, out_target_pos);
+		return true;
+	}
+
+	hit = PROG_TO_EDICT(g_globalvars.trace_ent);
+	if (hit == target)
+	{
+		VectorCopy(tgt, out_target_pos);
+		return true;
+	}
+
+	// Retry at head height.
+	tgt[2] = target->s.v.origin[2] + target->s.v.view_ofs[2];
+	trap_traceline(eye[0], eye[1], eye[2], tgt[0], tgt[1], tgt[2], false, self_num);
+	if (g_globalvars.trace_fraction >= 1.0f || PROG_TO_EDICT(g_globalvars.trace_ent) == target)
+	{
+		VectorCopy(tgt, out_target_pos);
+		return true;
+	}
+
+	return false;
+}
+
+static void Nano_CombatUpdate(nano_bot_t *bot, const nano_sense_t *s)
+{
+	gedict_t *ent;
+	gedict_t *best = NULL;
+	float best_score = -1.0f;
+	float fov = Nano_CombatEffectiveFOV();
+	float reaction = Nano_CombatReaction();
+	vec3_t visible_pos;
+	qbool current_visible = false;
+
+	// 1. Update current enemy visibility first so memory decays correctly.
+	if (bot->enemy_ent > 0)
+	{
+		gedict_t *current = &g_edicts[bot->enemy_ent];
+		if (!ISLIVE(current)
+			|| (bot->enemy_seen_time > 0 && (s->now - bot->enemy_seen_time) > NANO_MEMORY_TIME))
+		{
+			bot->enemy_ent = -1;
+			bot->enemy_visible = false;
+		}
+		else
+		{
+			current_visible = Nano_CombatVisible(s, current, visible_pos);
+			if (current_visible)
+			{
+				VectorCopy(visible_pos, bot->enemy_pos);
+				bot->enemy_seen_time = s->now;
+				if (!bot->enemy_visible)
+				{
+					bot->enemy_visible_since = s->now;
+				}
+				bot->enemy_visible = true;
+			}
+			else
+			{
+				bot->enemy_visible = false;
+			}
+		}
+	}
+
+	// 2. Search for a better / first target.
+	for (ent = world; (ent = nextent(ent));)
+	{
+		vec3_t pos;
+		float dist, score;
+		qbool visible;
+
+		if (ent == &g_edicts[s->client])
+		{
+			continue;
+		}
+		if (!ent->isBot && ent->ct != ctPlayer)
+		{
+			continue;
+		}
+		if (!ISLIVE(ent))
+		{
+			continue;
+		}
+		if (Nano_CombatSameTeam(s, ent))
+		{
+			continue;
+		}
+
+		VectorSubtract(ent->s.v.origin, s->origin, pos);
+		dist = VectorLength(pos);
+		if (dist > 3000.0f)
+		{
+			continue;
+		}
+
+		if (!Nano_InFOV(bot->aim, s->origin, ent->s.v.origin, fov))
+		{
+			continue;
+		}
+
+		visible = Nano_CombatVisible(s, ent, pos);
+		if (!visible)
+		{
+			continue;
+		}
+
+		// Prefer the current enemy (hysteresis), then closest visible threat.
+		score = 1.0f / (dist + 1.0f);
+		if (NUM_FOR_EDICT(ent) == bot->enemy_ent)
+		{
+			score *= 1.5f;
+		}
+
+		if (score > best_score)
+		{
+			best_score = score;
+			best = ent;
+			VectorCopy(pos, visible_pos);
+		}
+	}
+
+	// 3. Promote best target through reaction delay.
+	if (best)
+	{
+		int best_num = NUM_FOR_EDICT(best);
+
+		if (bot->enemy_ent != best_num)
+		{
+			// New candidate: start reacting.
+			bot->enemy_ent = best_num;
+			bot->enemy_reacted_time = s->now + reaction;
+			bot->enemy_visible_since = s->now;
+			if (cvar("k_nano_debug") >= 2)
+			{
+				G_cprint("[nano] combat new target slot=%d enemy=%d\n", s->client, best_num);
+			}
+		}
+		else if (s->now >= bot->enemy_reacted_time)
+		{
+			// Fully reacted: refresh state.
+			bot->enemy_visible = true;
+			bot->enemy_seen_time = s->now;
+			VectorCopy(visible_pos, bot->enemy_pos);
+			if (cvar("k_nano_debug") >= 2)
+			{
+				G_cprint("[nano] combat active slot=%d enemy=%d\n", s->client, best_num);
+			}
+		}
+	}
+}
+
+static qbool Nano_CombatActive(const nano_bot_t *bot, const nano_sense_t *s)
+{
+	if (bot->enemy_ent <= 0)
+	{
+		return false;
+	}
+	if (s->now < bot->enemy_reacted_time)
+	{
+		return false;
+	}
+	if (bot->enemy_seen_time > 0 && (s->now - bot->enemy_seen_time) > NANO_MEMORY_TIME)
+	{
+		return false;
+	}
+	return true;
+}
+
+static void Nano_CombatAim(nano_bot_t *bot, const nano_sense_t *s, vec3_t out_look)
+{
+	gedict_t *enemy;
+	vec3_t eye, to, lead;
+	float yaw, pitch;
+	float dist;
+	qbool use_rocket;
+
+	VectorClear(out_look);
+
+	if (!Nano_CombatActive(bot, s))
+	{
+		return;
+	}
+
+	enemy = &g_edicts[bot->enemy_ent];
+	if (!ISLIVE(enemy))
+	{
+		return;
+	}
+
+	VectorCopy(s->origin, eye);
+	eye[2] += s->view_height;
+
+	// Decide whether to lead: rockets and grenades against a moving target.
+	dist = VectorDistance(eye, bot->enemy_pos);
+	use_rocket = (s->has_rl && s->ammo_rockets > 0 && dist <= NANO_ROCKET_RANGE)
+				 || (s->has_gl && s->ammo_rockets > 0);
+
+	if (use_rocket)
+	{
+		Nano_LeadAim(eye, bot->enemy_pos, enemy->s.v.velocity, NANO_ROCKET_SPEED, lead);
+		VectorCopy(lead, to);
+	}
+	else
+	{
+		VectorSubtract(bot->enemy_pos, eye, to);
+	}
+
+	yaw = atan2f(to[1], to[0]) * 180.0f / (float)M_PI;
+	// Quake/KTX pitch convention: positive pitch looks down, so negate atan2(z, xy).
+	pitch = -atan2f(to[2], sqrtf(to[0] * to[0] + to[1] * to[1])) * 180.0f / (float)M_PI;
+
+	out_look[0] = pitch;
+	out_look[1] = yaw;
+	out_look[2] = 0.0f;
+}
+
+static int Nano_CombatWeapon(nano_bot_t *bot, const nano_sense_t *s)
+{
+	gedict_t *enemy;
+	float dist;
+	int desired;
+	int desired_bit;
+
+	if (!Nano_CombatActive(bot, s))
+	{
+		return 0;
+	}
+
+	if (s->now < bot->weapon_switch_time)
+	{
+		return 0;
+	}
+
+	enemy = &g_edicts[bot->enemy_ent];
+	if (!ISLIVE(enemy))
+	{
+		return 0;
+	}
+
+	{
+		vec3_t delta;
+		VectorSubtract(s->origin, enemy->s.v.origin, delta);
+		dist = VectorLength(delta);
+	}
+
+	desired = Nano_WeaponForRange(dist, s->items, s->ammo_shells, s->ammo_nails,
+								s->ammo_rockets, s->ammo_cells);
+	if (desired <= 0)
+	{
+		return 0;
+	}
+
+	desired_bit = Nano_ItemBitForImpulse(desired);
+	if ((s->weapon & desired_bit) == desired_bit)
+	{
+		return 0; // already wielding
+	}
+
+	bot->weapon_switch_time = s->now + NANO_WEAPON_SWITCH_TIME;
+	return desired;
+}
+
+static qbool Nano_CombatShouldFire(nano_bot_t *bot, const nano_sense_t *s)
+{
+	gedict_t *enemy;
+	vec3_t eye, aim_dir, to_enemy;
+	float yaw_diff, pitch_diff, tol;
+	float skill;
+
+	if (!Nano_CombatActive(bot, s) || !bot->enemy_visible)
+	{
+		return false;
+	}
+
+	enemy = &g_edicts[bot->enemy_ent];
+	if (!ISLIVE(enemy))
+	{
+		return false;
+	}
+
+	skill = bound(0, cvar("k_nano_skill"), 7);
+	tol = NANO_FIRE_TOL_BASE + (7.0f - skill) * 2.0f;
+
+	// Horizontal alignment.
+	{
+		vec3_t right, up;
+		AngleVectors(bot->aim, aim_dir, right, up);
+		VectorCopy(s->origin, eye);
+		eye[2] += s->view_height;
+		VectorSubtract(bot->enemy_pos, eye, to_enemy);
+	}
+
+	if (to_enemy[0] != 0.0f || to_enemy[1] != 0.0f)
+	{
+		float yaw_aim, yaw_target;
+		yaw_aim = atan2f(aim_dir[1], aim_dir[0]) * 180.0f / (float)M_PI;
+		yaw_target = atan2f(to_enemy[1], to_enemy[0]) * 180.0f / (float)M_PI;
+		yaw_diff = fabsf(Nano_Wrap180(yaw_target - yaw_aim));
+	}
+	else
+	{
+		yaw_diff = 0.0f;
+	}
+
+	{
+		float target_pitch = -atan2f(to_enemy[2],
+										 sqrtf(to_enemy[0] * to_enemy[0] + to_enemy[1] * to_enemy[1]))
+										 * 180.0f / (float)M_PI;
+		pitch_diff = fabsf(bot->aim[PITCH] - target_pitch);
+	}
+
+	if (yaw_diff > tol || pitch_diff > tol * 1.5f)
+	{
+		if (cvar("k_nano_debug") >= 2)
+		{
+			G_cprint("[nano] combat not aligned slot=%d dy=%.1f dp=%.1f tol=%.1f\n",
+					 s->client, yaw_diff, pitch_diff, tol);
+		}
+		return false;
+	}
+
+	// Line-of-fire trace: don't fire into walls.
+	trap_traceline(eye[0], eye[1], eye[2],
+				   eye[0] + aim_dir[0] * 4096.0f,
+				   eye[1] + aim_dir[1] * 4096.0f,
+				   eye[2] + aim_dir[2] * 4096.0f,
+				   false, s->client);
+	if (g_globalvars.trace_fraction >= 1.0f)
+	{
+		if (cvar("k_nano_debug") >= 2)
+		{
+			G_cprint("[nano] combat fire slot=%d enemy=%d\n", s->client, bot->enemy_ent);
+		}
+		return true;
+	}
+	if (PROG_TO_EDICT(g_globalvars.trace_ent) == enemy)
+	{
+		if (cvar("k_nano_debug") >= 2)
+		{
+			G_cprint("[nano] combat fire slot=%d enemy=%d\n", s->client, bot->enemy_ent);
+		}
+		return true;
+	}
+	if (cvar("k_nano_debug") >= 2)
+	{
+		G_cprint("[nano] combat lof blocked slot=%d\n", s->client);
+	}
+	return false;
+}
+
+// ---------------------------------------------------------------------------
 // Aim spring: smooth view toward the look target.
 // ---------------------------------------------------------------------------
 static void Nano_AimSpring(nano_bot_t *bot, const nano_sense_t *s,
@@ -483,7 +962,7 @@ static void Nano_AimSpring(nano_bot_t *bot, const nano_sense_t *s,
 // Emit the final bot command through KTX's engine syscall.
 // ---------------------------------------------------------------------------
 static void Nano_EmitCmd(nano_bot_t *bot, const nano_sense_t *s,
-						 const vec3_t move_world, int buttons)
+						 const vec3_t move_world, int buttons, int impulse)
 {
 	vec3_t vf, vr, vu;
 	vec3_t dir;
@@ -509,12 +988,12 @@ static void Nano_EmitCmd(nano_bot_t *bot, const nano_sense_t *s,
 
 	trap_SetBotCMD(s->client, s->msec,
 				   bot->aim[0], bot->aim[1], bot->aim[2],
-				   forwardmove, sidemove, 0, buttons, 0);
+				   forwardmove, sidemove, 0, buttons, impulse);
 
 	if (cvar("k_nano_debug"))
 	{
-		G_cprint("[nano] cmd slot=%d yaw=%.1f fwd=%d side=%d buttons=%d\n",
-				 s->client, bot->aim[1], forwardmove, sidemove, buttons);
+		G_cprint("[nano] cmd slot=%d yaw=%.1f fwd=%d side=%d buttons=%d impulse=%d\n",
+				 s->client, bot->aim[1], forwardmove, sidemove, buttons, impulse);
 	}
 }
 
@@ -593,14 +1072,36 @@ qbool Nano_BrainFrame(gedict_t *self)
 	stuck_jump = Nano_StuckCheck(bot, &s);
 	Nano_ProgressCheck(bot, &s, g);
 
+	Nano_CombatUpdate(bot, &s);
+
 	Nano_Steer(bot, &s, g, look, move_world, &buttons);
 	if (stuck_jump)
 	{
 		buttons |= NANO_BUTTON_JUMP;
 	}
 
-	Nano_AimSpring(bot, &s, look);
-	Nano_EmitCmd(bot, &s, move_world, buttons);
+	{
+		vec3_t combat_look;
+		int impulse = 0;
+		qbool combat_active;
+
+		Nano_CombatAim(bot, &s, combat_look);
+		combat_active = Nano_CombatActive(bot, &s);
+		if (combat_active)
+		{
+			VectorCopy(combat_look, look);
+		}
+
+		Nano_AimSpring(bot, &s, look);
+
+		impulse = Nano_CombatWeapon(bot, &s);
+		if (Nano_CombatShouldFire(bot, &s))
+		{
+			buttons |= NANO_BUTTON_ATTACK;
+		}
+
+		Nano_EmitCmd(bot, &s, move_world, buttons, impulse);
+	}
 
 	return true;
 }

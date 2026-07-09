@@ -1082,6 +1082,8 @@ void FirstFrame(void)
 	RegisterCvarEx("k_nano_skill", "3");
 	RegisterCvarEx("k_nano_version_suffix", "");
 	RegisterCvarEx("k_nano_debug", "0");
+	RegisterCvarEx("k_nano_fov", "90");
+	RegisterCvarEx("k_nano_reaction", "0.4");
 #endif
 
 	// KBOT (WP3.5): discipline tunables + identity-stamp suffix, sweepable

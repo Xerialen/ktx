@@ -31,6 +31,19 @@
 #define NANO_BUTTON_ATTACK      1
 #define NANO_BUTTON_JUMP        2
 
+// Combat tuning constants (S3a minimum fight loop).
+#define NANO_EYE_HEIGHT         22.0f
+#define NANO_FOV_BASE           90.0f
+#define NANO_REACTION_BASE      0.4f
+#define NANO_MEMORY_TIME        5.0f
+#define NANO_ROCKET_SPEED       1000.0f
+#define NANO_ROCKET_RANGE       800.0f
+#define NANO_LG_RANGE           600.0f
+#define NANO_SSG_RANGE          500.0f
+#define NANO_SG_RANGE           3000.0f
+#define NANO_FIRE_TOL_BASE      16.0f
+#define NANO_WEAPON_SWITCH_TIME 0.5f
+
 // Snapshot of the bot's edict/engine state for one frame (port of rtx Sense).
 typedef struct
 {
@@ -51,6 +64,18 @@ typedef struct
 	float armortype;
 	float armorvalue;
 	qbool quad;
+
+	// S3a combat additions.
+	int team;           // numeric team token from getteam()
+	int items;
+	int ammo_shells;
+	int ammo_nails;
+	int ammo_cells;
+	qbool has_lg;
+	qbool has_ssg;
+	qbool has_sng;
+	qbool has_gl;
+	float view_height;  // self->s.v.view_ofs[2]
 } nano_sense_t;
 
 // Mutable per-bot brain state (nano-side static array, never in gedict_t).
@@ -73,6 +98,16 @@ typedef struct
 	vec3_t aim;         // smoothed view angles
 	vec3_t aim_vel;     // angular velocity
 	qbool initialized;
+
+	// S3a combat state.
+	int enemy_ent;              // current target edict number, -1 if none
+	vec3_t enemy_pos;           // last known / predicted enemy position
+	float enemy_seen_time;      // when enemy was last visible
+	qbool enemy_visible;        // currently in LOS
+	float enemy_visible_since;  // continuous LOS start
+	float enemy_reacted_time;   // when reaction delay was satisfied
+	int desired_weapon;         // impulse value we want selected
+	float weapon_switch_time;   // cooldown for impulse spam
 } nano_bot_t;
 
 // Pure helper: wrap an angle to (-180, 180].
@@ -125,8 +160,119 @@ static inline void Nano_AimSpringStep(nano_bot_t *bot, const vec3_t look, float 
 	bot->aim[2] = 0.0f;
 }
 
+// Pure helpers exposed for unit tests (S3a combat).
+static inline qbool Nano_InFOV(const vec3_t aim_angles, const vec3_t origin,
+							   const vec3_t target, float fov)
+{
+	vec3_t dir;
+	float yaw, pitch, yaw_to, pitch_to, dy, dp;
+
+	if (fov >= 360.0f)
+	{
+		return true;
+	}
+
+	VectorSubtract(target, origin, dir);
+	if (dir[0] == 0.0f && dir[1] == 0.0f && dir[2] == 0.0f)
+	{
+		return true;
+	}
+
+	yaw = aim_angles[YAW];
+	pitch = aim_angles[PITCH];
+
+	yaw_to = atan2f(dir[1], dir[0]) * 180.0f / (float)M_PI;
+	dy = fabsf(Nano_Wrap180(yaw_to - yaw));
+
+	// Vertical FOV is generous: we only care about horizontal cone for lock-on.
+	// Pitch follows the Quake convention (positive = look down), so negate atan2(z, xy).
+	pitch_to = -atan2f(dir[2], sqrtf(dir[0] * dir[0] + dir[1] * dir[1])) * 180.0f / (float)M_PI;
+	dp = fabsf(pitch_to - pitch);
+
+	return dy <= fov * 0.5f && dp <= fov * 0.5f;
+}
+
+static inline void Nano_LeadAim(const vec3_t eye, const vec3_t target, const vec3_t vel,
+								float proj_speed, vec3_t out_aim)
+{
+	vec3_t to, vel_tmp;
+	float dist, t;
+
+	VectorSubtract(target, eye, to);
+	dist = VectorLength(to);
+	if (proj_speed <= 0.0f || dist <= 0.0f)
+	{
+		VectorCopy(to, out_aim);
+		return;
+	}
+
+	// Cap lead time so low-skill / close shots don't overshoot wildly.
+	t = dist / proj_speed;
+	if (t > 1.0f)
+	{
+		t = 1.0f;
+	}
+
+	VectorCopy(target, out_aim);
+	VectorCopy(vel, vel_tmp);
+	VectorMA(out_aim, t, vel_tmp, out_aim);
+	VectorSubtract(out_aim, eye, out_aim);
+}
+
+static inline int Nano_WeaponForRange(float dist, int items, int ammo_shells, int ammo_nails,
+									  int ammo_rockets, int ammo_cells)
+{
+	qbool has_ssg = (items & IT_SUPER_SHOTGUN) != 0;
+	qbool has_sg = (items & IT_SHOTGUN) != 0;
+	qbool has_lg = (items & IT_LIGHTNING) != 0;
+	qbool has_rl = (items & IT_ROCKET_LAUNCHER) != 0;
+	qbool has_sng = (items & IT_SUPER_NAILGUN) != 0;
+	qbool has_ng = (items & IT_NAILGUN) != 0;
+
+	if (dist <= NANO_SSG_RANGE && has_ssg && ammo_shells >= 2)
+	{
+		return 3;
+	}
+	if (dist <= NANO_LG_RANGE && has_lg && ammo_cells >= 1)
+	{
+		return 8;
+	}
+	if (dist <= NANO_ROCKET_RANGE && has_rl && ammo_rockets >= 1)
+	{
+		return 7;
+	}
+	if (has_ssg && ammo_shells >= 2)
+	{
+		return 3;
+	}
+	if (has_lg && ammo_cells >= 1)
+	{
+		return 8;
+	}
+	if (has_sng && ammo_nails >= 1)
+	{
+		return 5;
+	}
+	if (has_sg && ammo_shells >= 1)
+	{
+		return 2;
+	}
+	if (has_ng && ammo_nails >= 1)
+	{
+		return 4;
+	}
+	return 0;
+}
+
 // Main per-frame brain entry point (lives in nano_brain.c).
 qbool Nano_BrainFrame(gedict_t *self);
+
+// Pure helpers exposed for unit tests.
+qbool Nano_InFOV(const vec3_t aim_angles, const vec3_t origin, const vec3_t target, float fov);
+void Nano_LeadAim(const vec3_t eye, const vec3_t target, const vec3_t vel, float proj_speed,
+				  vec3_t out_aim);
+int Nano_WeaponForRange(float dist, int items, int ammo_shells, int ammo_nails, int ammo_rockets,
+						int ammo_cells);
 
 // Reset a slot's brain state. Called when a bot is unmarked or before a new
 // bot is marked, so reused edicts never inherit stale goal/route/aim state.
