@@ -409,6 +409,29 @@ static const gj_lane_t gj_lanes[GJ_NUM_LANES] = {
 	{ "pent2window", { 668, 758, -104 }, { 1160, 650, 80 }, -150, 0, { 0, 0, 0 } },
 };
 
+// Whether a lane is enabled for the intent/route pickers -- the two identical
+// picker/route gates folded into one predicate (#72). Lanes 0-3 always on;
+// lane 4 needs k_kbot_gj_rl; lanes 5/6 need k_kbot_gj_sng; lane 7 (pent) is
+// engaged only by the pent-state trigger, never picker-selected. NOTE: the
+// passive zone-trigger loop in KBot_GapjumpFrame is deliberately looser (it
+// skips only lane 7) and is intentionally NOT routed through this predicate.
+static qbool GJ_LaneEnabled(int lane)
+{
+	if (lane == 7)
+	{
+		return false; // E15 pent lane: engaged by the pent trigger ONLY
+	}
+	if ((lane == 4) && !cvar("k_kbot_gj_rl"))
+	{
+		return false; // E12 RL lane disabled
+	}
+	if ((lane == 5 || lane == 6) && !cvar("k_kbot_gj_sng"))
+	{
+		return false; // SNG lanes disabled
+	}
+	return true;
+}
+
 // Effective launch-heading offset for a lane: table default + cvar (for sweeps).
 static float GJ_LaneHeadOff(int lane)
 {
@@ -575,33 +598,38 @@ static void GJ_CarveTarget(int lane, vec3_t takeoff, vec3_t landing, vec3_t org,
 #define GJ_APPROACH 4 // E9: deliberate drive-to-lip + align + build, then launch
 #define GJ_PENT     5 // E15: pent-play stage 1 (ramp -> lift -> shelf run-up)
 
-static int   gj_state[MAX_CLIENTS];
-static int   gj_lane_active[MAX_CLIENTS];
-static int   gj_trial[MAX_CLIENTS];
-static float gj_t0[MAX_CLIENTS];
-static float gj_cool_t0[MAX_CLIENTS];
-static float gj_peak[MAX_CLIENTS];
-static float gj_flip[MAX_CLIENTS];
-static qbool gj_jump_latch[MAX_CLIENTS];
-static qbool gj_has_flown[MAX_CLIENTS];
-static float gj_probe_log[MAX_CLIENTS];
-static float gj_build_t0[MAX_CLIENTS];   // E8 build-state start time
-static int   gj_build_sign[MAX_CLIENTS]; // E8 circle-jump strafe sign
-static float gj_app_t0[MAX_CLIENTS];     // E9 approach-state start time
-static float gj_app_supp[MAX_CLIENTS];   // E9 re-engage suppress-until time
-static qbool gj_chain_on[MAX_CLIENTS];   // E12b chain-hop airborne (E1 carve live)
-static int   gj_chain_flip[MAX_CLIENTS]; // E12b c=0 per-frame side alternator
-static qbool gj_chain_flew[MAX_CLIENTS]; // E12b hop actually left the ground (the
-										 // press+1 frame can still be grounded --
-										 // without this latch the grounded clear
-										 // killed the chain before flight)
-static qbool gj_stage_on[MAX_CLIENTS];   // E10 stage-transition log latch
-static float gj_route_log[MAX_CLIENTS];  // E10 [gjroute] log throttle
-static qbool gj_sng_deep[MAX_CLIENTS];   // E14 lane-6: reached the deep-runway point
-static int   gj_pent_leg[MAX_CLIENTS];   // E15 stage-1 leg (0 ramp, 1 plate, 2 ride, 3 exit)
-static int   gj_pent_fire[MAX_CLIENTS];  // E15 rocket armed on the press frame, fired first air frame
-static float gj_pent_id[MAX_CLIENTS];    // E15 invincible_finished of the pent being played
-static int   gj_pent_tries[MAX_CLIENTS]; // E15 engage counter within one pent
+// E6+ per-client gap-jump state, folded from 24 parallel gj_*[] arrays into
+// one array-of-structs (#72 prefactor). Indexed by slot = NUM_FOR_EDICT(self)-1.
+typedef struct {
+	int   state;        // GJ_IDLE/CROSS/COOL/BUILD/APPROACH/PENT
+	int   lane_active;
+	int   trial;
+	float t0;
+	float cool_t0;
+	float peak;
+	float flip;
+	qbool jump_latch;
+	qbool has_flown;
+	float probe_log;
+	float build_t0;     // E8 build-state start time
+	int   build_sign;   // E8 circle-jump strafe sign
+	float app_t0;       // E9 approach-state start time
+	float app_supp;     // E9 re-engage suppress-until time
+	qbool chain_on;     // E12b chain-hop airborne (E1 carve live)
+	int   chain_flip;   // E12b c=0 per-frame side alternator
+	qbool chain_flew;   // E12b hop actually left the ground (the press+1 frame can
+	                    // still be grounded -- without this latch the grounded clear
+	                    // killed the chain before flight)
+	qbool stage_on;     // E10 stage-transition log latch
+	float route_log;    // E10 [gjroute] log throttle
+	qbool sng_deep;     // E14 lane-6: reached the deep-runway point
+	int   pent_leg;     // E15 stage-1 leg (0 ramp, 1 plate, 2 ride, 3 exit)
+	int   pent_fire;    // E15 rocket armed on the press frame, fired first air frame
+	float pent_id;      // E15 invincible_finished of the pent being played
+	int   pent_tries;   // E15 engage counter within one pent
+} gj_bot_t;
+
+static gj_bot_t gj[MAX_CLIENTS];
 
 // E13 (dm3-jumps): the E12b chain-hop generalized to the mirror lanes 2/3.
 // Lane 4 keeps k_kbot_gj_chain; the mirror chain adds k_kbot_gj_mchain ON TOP
@@ -984,9 +1012,9 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	cur[1] = self->s.v.velocity[1];
 	cur[2] = 0;
 	speed = VectorLength(cur);
-	if (speed > gj_peak[slot])
+	if (speed > gj[slot].peak)
 	{
-		gj_peak[slot] = speed;
+		gj[slot].peak = speed;
 	}
 
 	// Air-carve target: the pillar-gap waypoint (bow south) until mid-span, then
@@ -1055,22 +1083,22 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 		else
 		{
 			// on-bearing: alternate for zero net rotation (straight, keep speed)
-			RotatePointAroundVector(wish, up, cur, 90.0f * gj_flip[slot]);
-			gj_flip[slot] = -gj_flip[slot];
+			RotatePointAroundVector(wish, up, cur, 90.0f * gj[slot].flip);
+			gj[slot].flip = -gj[slot].flip;
 		}
 		wish[2] = 0;
 		VectorNormalize(wish);
 	}
 
 	// Frame-perfect hop latch (E1): press only on a grounded, released frame.
-	press = onground && !gj_jump_latch[slot];
+	press = onground && !gj[slot].jump_latch;
 	// E15 lane 7: exactly one rocket launch per trial -- after the flight the
 	// grounded frame is the OUTCOME (window or fail), never a re-hop.
-	if ((lane == 7) && gj_has_flown[slot])
+	if ((lane == 7) && gj[slot].has_flown)
 	{
 		press = false;
 	}
-	gj_jump_latch[slot] = press;
+	gj[slot].jump_latch = press;
 
 	// E10c LAUNCH-AIM (mirror lanes only, gated). On the committed launch frame,
 	// aim the horizontal launch velocity along the lane's bowed launch heading
@@ -1127,14 +1155,14 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	// backward snap is exactly what the humans' views do in the E15 traces.
 	if ((lane == 7) && press)
 	{
-		gj_pent_fire[slot] = 1;
+		gj[slot].pent_fire = 1;
 	}
-	if ((lane == 7) && gj_pent_fire[slot] && !onground)
+	if ((lane == 7) && gj[slot].pent_fire && !onground)
 	{
 		float rjp = cvar("k_kbot_gj_pent_pitch");
 
-		gj_pent_fire[slot] = 0;
-		gj_has_flown[slot] = true;
+		gj[slot].pent_fire = 0;
+		gj[slot].has_flown = true;
 		self->fb.desired_angle[PITCH] = (rjp > 0) ? rjp : 77.0f;
 		self->fb.desired_angle[YAW] = launch_bearing + 180.0f;
 		self->fb.desired_angle[ROLL] = 0;
@@ -1151,7 +1179,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	}
 	if (!onground)
 	{
-		gj_has_flown[slot] = true;
+		gj[slot].has_flown = true;
 	}
 
 	// Projection seam: wishdir -> fmove/smove through the view yaw (cancels).
@@ -1171,7 +1199,7 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	if (cvar("k_kbot_gj_traj"))
 	{
 		G_cprint("[gjtraj] t=%.3f pos=%.0f,%.0f,%.0f vel=%.0f,%.0f,%.0f spd=%.0f og=%d press=%d bear=%.0f\n",
-				 now - gj_t0[slot], org[0], org[1], org[2],
+				 now - gj[slot].t0, org[0], org[1], org[2],
 				 self->s.v.velocity[0], self->s.v.velocity[1], self->s.v.velocity[2],
 				 speed, onground ? 1 : 0, press ? 1 : 0, bearing);
 	}
@@ -1193,29 +1221,29 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	// E15 lane 7: the window is an AREA (outer ledge z 80 + floor z 56 running
 	// south), not a point -- thun-der's reference entry touches 160u south of
 	// the pad center. Any grounded touchdown inside the box converts the play.
-	if ((lane == 7) && gj_has_flown[slot] && onground &&
+	if ((lane == 7) && gj[slot].has_flown && onground &&
 		(org[0] > 1060) && (org[0] < 1260) &&
 		(org[1] > 380) && (org[1] < 730) &&
 		(org[2] > 40) && (org[2] < 150))
 	{
 		G_cprint("[gapjump] lane=%s slot=%d name=%s trial=%d result=LAND land_pos=%.0f,%.0f,%.0f "
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
-				 gj_lanes[lane].name, slot, self->netname, gj_trial[slot], org[0], org[1], org[2],
-				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
-		gj_state[slot] = GJ_COOL;
-		gj_cool_t0[slot] = now;
+				 gj_lanes[lane].name, slot, self->netname, gj[slot].trial, org[0], org[1], org[2],
+				 hdist, gj[slot].peak, now - gj[slot].t0, vreq);
+		gj[slot].state = GJ_COOL;
+		gj[slot].cool_t0 = now;
 		return true;
 	}
-	if (gj_has_flown[slot] && onground && hdist < landrad &&
+	if (gj[slot].has_flown && onground && hdist < landrad &&
 		fabs(org[2] - landing[2]) < 64)
 	{
 		G_cprint("[gapjump] lane=%s slot=%d name=%s trial=%d result=LAND land_pos=%.0f,%.0f,%.0f "
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
-				 gj_lanes[lane].name, slot, self->netname, gj_trial[slot], org[0], org[1], org[2],
-				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+				 gj_lanes[lane].name, slot, self->netname, gj[slot].trial, org[0], org[1], org[2],
+				 hdist, gj[slot].peak, now - gj[slot].t0, vreq);
 		KDLog_Play(self, gj_lanes[lane].name, "land", NULL); // KDLOG
-		gj_state[slot] = GJ_COOL;
-		gj_cool_t0[slot] = now;
+		gj[slot].state = GJ_COOL;
+		gj[slot].cool_t0 = now;
 		return true;
 	}
 	// E12 WATER-OVERSHOOT GUARD (lane 4): the RL pad is flanked by the pent-yard
@@ -1226,33 +1254,33 @@ static qbool GJ_Cross(gedict_t *self, int slot, int lane, qbool *jumping,
 	{
 		G_cprint("[gapjump] lane=%s trial=%d result=FAIL_WATER land_pos=%.0f,%.0f,%.0f "
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
-				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
-				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+				 gj_lanes[lane].name, gj[slot].trial, org[0], org[1], org[2],
+				 hdist, gj[slot].peak, now - gj[slot].t0, vreq);
 		KDLog_Play(self, gj_lanes[lane].name, "fail", "water"); // KDLOG
-		gj_state[slot] = GJ_COOL;
-		gj_cool_t0[slot] = now;
+		gj[slot].state = GJ_COOL;
+		gj[slot].cool_t0 = now;
 		return true;
 	}
 	if (org[2] < fail_z)
 	{
 		G_cprint("[gapjump] lane=%s trial=%d result=FAIL_GAP land_pos=%.0f,%.0f,%.0f "
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
-				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
-				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+				 gj_lanes[lane].name, gj[slot].trial, org[0], org[1], org[2],
+				 hdist, gj[slot].peak, now - gj[slot].t0, vreq);
 		KDLog_Play(self, gj_lanes[lane].name, "fail", "gap"); // KDLOG
-		gj_state[slot] = GJ_COOL;
-		gj_cool_t0[slot] = now;
+		gj[slot].state = GJ_COOL;
+		gj[slot].cool_t0 = now;
 		return true;
 	}
-	if ((now - gj_t0[slot]) > timeout)
+	if ((now - gj[slot].t0) > timeout)
 	{
 		G_cprint("[gapjump] lane=%s trial=%d result=FAIL_TIMEOUT land_pos=%.0f,%.0f,%.0f "
 				 "hdist=%.0f peak_speed=%.0f tair=%.2f vreq=%.0f\n",
-				 gj_lanes[lane].name, gj_trial[slot], org[0], org[1], org[2],
-				 hdist, gj_peak[slot], now - gj_t0[slot], vreq);
+				 gj_lanes[lane].name, gj[slot].trial, org[0], org[1], org[2],
+				 hdist, gj[slot].peak, now - gj[slot].t0, vreq);
 		KDLog_Play(self, gj_lanes[lane].name, "fail", "timeout"); // KDLOG
-		gj_state[slot] = GJ_COOL;
-		gj_cool_t0[slot] = now;
+		gj[slot].state = GJ_COOL;
+		gj[slot].cool_t0 = now;
 		return true;
 	}
 
@@ -1287,7 +1315,7 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 	vec3_t wish, ang, org, carrot, take, land;
 	float now = g_globalvars.time, myaw, d, vh, fz;
 	qbool onground = ((int)self->s.v.flags & FL_ONGROUND) ? true : false;
-	int leg = gj_pent_leg[slot];
+	int leg = gj[slot].pent_leg;
 
 	VectorCopy(self->s.v.origin, org);
 	*jumping = false;
@@ -1305,18 +1333,18 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 			G_cprint("[pentrj] result=ABORT_STATE pos=%.0f,%.0f,%.0f leg=%d\n",
 					 org[0], org[1], org[2], leg);
 		}
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 	// Stage timeout: the traced walk is ~2.5-6 s; 12 covers a lift-return
 	// wait. Release is safe -- vanilla nav resumes, the trigger re-engages
 	// from anywhere in the region while the pent lasts.
-	if ((now - gj_app_t0[slot]) > 12.0f)
+	if ((now - gj[slot].app_t0) > 12.0f)
 	{
 		G_cprint("[pentrj] result=ABORT_TIMEOUT pos=%.0f,%.0f,%.0f leg=%d\n",
 				 org[0], org[1], org[2], leg);
-		gj_app_supp[slot] = now + 1.0f;
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].app_supp = now + 1.0f;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 	// Missed the shelf exit: the lift is carrying us to the top (z 216).
@@ -1326,8 +1354,8 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 	{
 		G_cprint("[pentrj] result=LIFT_OVERSHOOT pos=%.0f,%.0f,%.0f\n",
 				 org[0], org[1], org[2]);
-		gj_app_supp[slot] = now + 3.0f;
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].app_supp = now + 3.0f;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 
@@ -1390,7 +1418,7 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 			leg = 3;
 		}
 	}
-	gj_pent_leg[slot] = leg;
+	gj[slot].pent_leg = leg;
 
 	switch (leg)
 	{
@@ -1436,17 +1464,17 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 		{
 			G_cprint("[pentrj] result=LAUNCH try=%d name=%s vh=%.0f verr=%.0f "
 					 "pos=%.0f,%.0f,%.0f pentleft=%.1f\n",
-					 gj_pent_tries[slot], self->netname, vh, verr,
+					 gj[slot].pent_tries, self->netname, vh, verr,
 					 org[0], org[1], org[2], self->invincible_finished - now);
-			gj_trial[slot]++;
-			gj_t0[slot] = now;
-			gj_peak[slot] = 0;
-			gj_flip[slot] = 1;
-			gj_jump_latch[slot] = false;
-			gj_has_flown[slot] = false;
-			gj_chain_on[slot] = false;
-			gj_pent_fire[slot] = 0;
-			gj_state[slot] = GJ_CROSS;
+			gj[slot].trial++;
+			gj[slot].t0 = now;
+			gj[slot].peak = 0;
+			gj[slot].flip = 1;
+			gj[slot].jump_latch = false;
+			gj[slot].has_flown = false;
+			gj[slot].chain_on = false;
+			gj[slot].pent_fire = 0;
+			gj[slot].state = GJ_CROSS;
 			return GJ_Cross(self, slot, 7, jumping, firing, impulse, direction);
 		}
 	}
@@ -1485,13 +1513,13 @@ static qbool GJ_PentFrame(gedict_t *self, int slot, qbool *jumping,
 // Start a fresh trial for the given lane.
 static void GJ_StartTrial(gedict_t *self, int slot, int lane)
 {
-	gj_lane_active[slot] = lane;
-	gj_trial[slot]++;
-	gj_t0[slot] = g_globalvars.time;
-	gj_peak[slot] = 0;
-	gj_flip[slot] = 1;
-	gj_jump_latch[slot] = false;
-	gj_has_flown[slot] = false;
+	gj[slot].lane_active = lane;
+	gj[slot].trial++;
+	gj[slot].t0 = g_globalvars.time;
+	gj[slot].peak = 0;
+	gj[slot].flip = 1;
+	gj[slot].jump_latch = false;
+	gj[slot].has_flown = false;
 	// E15 lane 7 seeded trials: the launch needs a loaded RL and (like the
 	// human play) pent to eat the rocket self-damage. Lab-only path -- the
 	// trial driver runs only under k_kbot_gj_lane, never in counted matches.
@@ -1504,7 +1532,7 @@ static void GJ_StartTrial(gedict_t *self, int slot, int lane)
 		}
 		self->invincible_finished = g_globalvars.time + 3600;
 	}
-	gj_state[slot] = GJ_CROSS;
+	gj[slot].state = GJ_CROSS;
 	GJ_Seat(self, lane);
 }
 
@@ -1540,13 +1568,13 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 		launch_bearing = cvar("k_kbot_gj_head");
 	}
 
-	if (gj_state[slot] != GJ_BUILD)
+	if (gj[slot].state != GJ_BUILD)
 	{
-		gj_state[slot] = GJ_BUILD;
-		gj_lane_active[slot] = lane;
-		gj_build_t0[slot] = now;
-		gj_build_sign[slot] = 0;
-		gj_jump_latch[slot] = false;
+		gj[slot].state = GJ_BUILD;
+		gj[slot].lane_active = lane;
+		gj[slot].build_t0 = now;
+		gj[slot].build_sign = 0;
+		gj[slot].jump_latch = false;
 	}
 
 	cur[0] = self->s.v.velocity[0];
@@ -1561,7 +1589,7 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 	}
 
 	// Abort -> decline (never launch a doomed jump).
-	if ((now - gj_build_t0[slot]) > timeout || (!onground && vh < vreq * gate))
+	if ((now - gj[slot].build_t0) > timeout || (!onground && vh < vreq * gate))
 	{
 		if (cvar("k_kbot_gj_gatelog"))
 		{
@@ -1569,19 +1597,19 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 					 gj_lanes[lane].name, vh, vreq, onground ? 1 : 0);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "abort", "build"); // KDLOG
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 
 	// Fast enough while grounded -> release to CROSS (the hop fires there).
 	if (onground && vh >= vreq * gate)
 	{
-		gj_t0[slot] = now;
-		gj_peak[slot] = 0;
-		gj_flip[slot] = 1;
-		gj_jump_latch[slot] = false;
-		gj_has_flown[slot] = false;
-		gj_state[slot] = GJ_CROSS;
+		gj[slot].t0 = now;
+		gj[slot].peak = 0;
+		gj[slot].flip = 1;
+		gj[slot].jump_latch = false;
+		gj[slot].has_flown = false;
+		gj[slot].state = GJ_CROSS;
 		return GJ_Cross(self, slot, lane, jumping, firing, impulse, direction);
 	}
 
@@ -1592,7 +1620,7 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 	{
 		angle = 42.0f;
 	}
-	if (gj_build_sign[slot] == 0)
+	if (gj[slot].build_sign == 0)
 	{
 		float vyaw = (vh > 1) ? atan2(cur[1], cur[0]) * 180.0f / M_PI : launch_bearing;
 		float e = launch_bearing - vyaw;
@@ -1605,12 +1633,12 @@ static qbool GJ_BuildFrame(gedict_t *self, int slot, int lane, qbool *jumping,
 		{
 			e += 360;
 		}
-		gj_build_sign[slot] = (e >= 0) ? 1 : -1;
+		gj[slot].build_sign = (e >= 0) ? 1 : -1;
 	}
 	if (vh > 1)
 	{
 		VectorNormalize(cur);
-		RotatePointAroundVector(wish, up, cur, angle * gj_build_sign[slot]);
+		RotatePointAroundVector(wish, up, cur, angle * gj[slot].build_sign);
 	}
 	else
 	{
@@ -1698,17 +1726,9 @@ static int GJ_PickLaneWithin(gedict_t *self, float back, float pmax, float zband
 		vec3_t take, land, u, perp, rel;
 		float lanelen, along, lat, galong, fz;
 
-		if ((i == 4) && !cvar("k_kbot_gj_rl"))
+		if (!GJ_LaneEnabled(i))
 		{
-			continue; // E12 RL lane disabled -> invisible to intent/route
-		}
-		if ((i == 5 || i == 6) && !cvar("k_kbot_gj_sng"))
-		{
-			continue; // SNG lanes disabled -> invisible to intent/route
-		}
-		if (i == 7)
-		{
-			continue; // E15 pent lane: engaged by the pent trigger ONLY
+			continue; // E12/E15: rl/sng-gated lanes + pent = invisible to intent/route
 		}
 		// Use GJ_Geometry (not raw table) so the E10c mirror-carve relocation of
 		// lanes 2/3 is honoured by the active-path intent/route lane picker too.
@@ -1843,17 +1863,9 @@ float KBot_GJ_RouteShim(gedict_t *self, gedict_t *goal_entity, float goal_time)
 		vec3_t take, land, u;
 		float fail_z, lanelen, along, lat, galong, d_in, d_out, t_gj;
 
-		if ((i == 4) && !cvar("k_kbot_gj_rl"))
+		if (!GJ_LaneEnabled(i))
 		{
-			continue; // E12 RL lane disabled -> not priced as a route edge
-		}
-		if ((i == 5 || i == 6) && !cvar("k_kbot_gj_sng"))
-		{
-			continue; // SNG lanes disabled -> not priced as route edges
-		}
-		if (i == 7)
-		{
-			continue; // E15 pent lane: engaged by the pent trigger ONLY
+			continue; // E12/E15: rl/sng-gated lanes + pent = not priced as route edges
 		}
 		GJ_Geometry(i, take, land, &fail_z);
 		u[0] = land[0] - take[0];
@@ -1892,10 +1904,10 @@ float KBot_GJ_RouteShim(gedict_t *self, gedict_t *goal_entity, float goal_time)
 		if (t_gj < goal_time)
 		{
 			if (cvar("k_kbot_gj_gatelog")
-					&& (((g_globalvars.time - gj_route_log[slot]) >= 1.0f)
-						|| (gj_route_log[slot] > g_globalvars.time)))
+					&& (((g_globalvars.time - gj[slot].route_log) >= 1.0f)
+						|| (gj[slot].route_log > g_globalvars.time)))
 			{
-				gj_route_log[slot] = g_globalvars.time;
+				gj[slot].route_log = g_globalvars.time;
 				G_cprint("[gjroute] lane=%s slot=%d goal=%s t_gj=%.2f t_std=%.2f\n",
 						 gj_lanes[i].name, slot, goal_entity->classname, t_gj, goal_time);
 			}
@@ -2040,7 +2052,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	lanelen = VectorLength(u);
 	if (lanelen < 1)
 	{
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 	VectorNormalize(u);
@@ -2139,7 +2151,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	{
 		float cool = cvar("k_kbot_gj_app_cool");
 
-		gj_app_supp[slot] = now + ((cool > 0) ? cool : 0.3f); // decline re-engage guard
+		gj[slot].app_supp = now + ((cool > 0) ? cool : 0.3f); // decline re-engage guard
 	}
 	// Launch SPEED FLOOR = v_req * launch_mul. v_req (~344) is the bare ballistic
 	// minimum, but the air-carve scrubs speed while correcting heading, so a bot
@@ -2239,8 +2251,8 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// the chain hop -- the flight is 0.675 s bounded and the touchdown frame
 	// re-runs every grounded gate (incl. this timeout), so let it finish
 	// instead of discarding a completed build on a boundary technicality.
-	if (((now - gj_app_t0[slot]) > apptime) &&
-		!(GJ_HopLane(lane) && gj_chain_on[slot] && !onground))
+	if (((now - gj[slot].app_t0) > apptime) &&
+		!(GJ_HopLane(lane) && gj[slot].chain_on && !onground))
 	{
 		if (cvar("k_kbot_gj_gatelog"))
 		{
@@ -2255,9 +2267,9 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		// carries the bot away before the lane is offered again.
 		if ((lane == 5 || lane == 6) && (vh < 30))
 		{
-			gj_app_supp[slot] = now + 6.0f;
+			gj[slot].app_supp = now + 6.0f;
 		}
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 	// Enemy showed up mid-setup -> yield. EXCEPTION: mid-air in the chain hop
@@ -2266,7 +2278,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// frame is grounded, so BOTH this yield and the unseen rule below still
 	// gate the actual launch.
 	if (self->fb.enemy_visible &&
-		!(GJ_HopLane(lane) && gj_chain_on[slot] && !onground))
+		!(GJ_HopLane(lane) && gj[slot].chain_on && !onground))
 	{
 		// E14: log the yield for the SNG lanes -- s2 could not distinguish
 		// "yielded to combat" from "never progressed" (both were silent),
@@ -2277,7 +2289,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 "lat=%.0f vh=%.0f\n",
 					 gj_lanes[lane].name, along_u, lat_n, vh);
 		}
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 	// Owner rule (2026-07-05): abort the RL setup the moment ANY enemy can see
@@ -2292,7 +2304,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 gj_lanes[lane].name, along_u, vh);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "yield", "seen"); // KDLOG
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 
@@ -2306,13 +2318,13 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// through to the launch gate below (launch-aim snap + GJ_Cross), which is
 	// the proven in-match launch path. Timeout/enemy yields above still apply
 	// mid-flight (bot is over the deck the whole hop -- bailing is safe).
-	if (GJ_HopLane(lane) && gj_chain_on[slot] && !onground)
+	if (GJ_HopLane(lane) && gj[slot].chain_on && !onground)
 	{
 		float tgt_v = GJ_ChainTargetV(lane, vreq);
 		vec3_t cur, cwish, cang;
 		float cyaw;
 
-		gj_chain_flew[slot] = true;
+		gj[slot].chain_flew = true;
 		cur[0] = self->s.v.velocity[0];
 		cur[1] = self->s.v.velocity[1];
 		cur[2] = 0;
@@ -2325,9 +2337,9 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		if (vh < tgt_v)
 		{
 			vec3_t up = { 0, 0, 1 };
-			float side = gj_chain_flip[slot] ? 1.0f : -1.0f;
+			float side = gj[slot].chain_flip ? 1.0f : -1.0f;
 
-			gj_chain_flip[slot] = !gj_chain_flip[slot];
+			gj[slot].chain_flip = !gj[slot].chain_flip;
 			RotatePointAroundVector(cwish, up, cur, 90.0f * side);
 			cwish[2] = 0;
 			VectorNormalize(cwish);
@@ -2350,10 +2362,10 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 		*impulse = 0;
 		return true;
 	}
-	if (onground && gj_chain_on[slot] && gj_chain_flew[slot])
+	if (onground && gj[slot].chain_on && gj[slot].chain_flew)
 	{
-		gj_chain_on[slot] = false; // touchdown: hand back to the grounded gates
-		gj_chain_flew[slot] = false;
+		gj[slot].chain_on = false; // touchdown: hand back to the grounded gates
+		gj[slot].chain_flew = false;
 		if (cvar("k_kbot_gj_gatelog"))
 		{
 			G_cprint("[gjchain] lane=%s DOWN vh=%.0f along=%.0f lat=%.0f floor=%.0f\n",
@@ -2428,15 +2440,15 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 			G_cprint("[gapjump] lane=%s result=APP_LAUNCH along=%.0f lat=%.0f vh=%.0f "
 					 "vreq=%.0f floor=%.0f vyaw=%.0f uyaw=%.0f t=%.2f\n",
 					 gj_lanes[lane].name, along_u, lat_n, vh, vreq, floor, vyaw,
-					 u_yaw, now - gj_app_t0[slot]);
+					 u_yaw, now - gj[slot].app_t0);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "launch", NULL); // KDLOG
-		gj_t0[slot] = now;
-		gj_peak[slot] = 0;
-		gj_flip[slot] = 1;
-		gj_jump_latch[slot] = false;
-		gj_has_flown[slot] = false;
-		gj_state[slot] = GJ_CROSS;
+		gj[slot].t0 = now;
+		gj[slot].peak = 0;
+		gj[slot].flip = 1;
+		gj[slot].jump_latch = false;
+		gj[slot].has_flown = false;
+		gj[slot].state = GJ_CROSS;
 		return GJ_Cross(self, slot, lane, jumping, firing, impulse, direction);
 	}
 
@@ -2457,7 +2469,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 	// engages start AT the lip (s3: 13/13 DECLINE_SLOW at along 0-8) and the
 	// L-leg below must first route them north up the corridor.
 	if ((lane == 6 || (lane == 5 && cvar("k_kbot_gj_schain"))) &&
-		!gj_sng_deep[slot])
+		!gj[slot].sng_deep)
 	{
 		goto gj_app_drive;
 	}
@@ -2473,7 +2485,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 						 gj_lanes[lane].name, along_u, lat_n, vh, aerr);
 			}
 			KDLog_Play(self, gj_lanes[lane].name, "decline", "past_orbit"); // KDLOG
-			gj_state[slot] = GJ_IDLE;
+			gj[slot].state = GJ_IDLE;
 			return false;
 		}
 		if (orbiting)
@@ -2495,7 +2507,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 gj_lanes[lane].name, along_u, lat_n, vh, aerr);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "decline", "past"); // KDLOG
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 
@@ -2513,7 +2525,7 @@ static qbool GJ_ApproachFrame(gedict_t *self, int slot, int lane, qbool *jumping
 					 gj_lanes[lane].name, along_u, lat_n, vh, floor);
 		}
 		KDLog_Play(self, gj_lanes[lane].name, "decline", "slow"); // KDLOG
-		gj_state[slot] = GJ_IDLE;
+		gj[slot].state = GJ_IDLE;
 		return false;
 	}
 
@@ -2605,20 +2617,20 @@ gj_app_drive:
 				}
 				if (hop_ok)
 				{
-					if (!gj_chain_on[slot] && cvar("k_kbot_gj_gatelog"))
+					if (!gj[slot].chain_on && cvar("k_kbot_gj_gatelog"))
 					{
 						G_cprint("[gjchain] lane=%s HOP vh=%.0f vpred=%.0f "
 								 "lhop=%.0f pa=%.0f pl=%.0f along=%.0f\n",
 								 gj_lanes[lane].name, vh, vpred, lhop, pa, pl,
 								 along_u);
 					}
-					if (!gj_chain_on[slot])
+					if (!gj[slot].chain_on)
 					{
 						KDLog_Play(self, gj_lanes[lane].name, "chainhop", NULL); // KDLOG
 					}
-					gj_chain_on[slot] = true;
-					gj_chain_flip[slot] = 0;
-					gj_chain_flew[slot] = false;
+					gj[slot].chain_on = true;
+					gj[slot].chain_flip = 0;
+					gj[slot].chain_flew = false;
 					wish[0] = self->s.v.velocity[0] / vh;
 					wish[1] = self->s.v.velocity[1] / vh;
 					wish[2] = 0;
@@ -2716,9 +2728,9 @@ gj_app_drive:
 			if ((along_u <= -240) && (lat_n >= -60) && (lat_n <= 30) &&
 				(org[2] >= take[2] - 30.0f))
 			{
-				gj_sng_deep[slot] = true;
+				gj[slot].sng_deep = true;
 			}
-			if (!gj_sng_deep[slot])
+			if (!gj[slot].sng_deep)
 			{
 				VectorSet(tgt, -540, 800, org[2]);
 			}
@@ -2751,7 +2763,7 @@ gj_app_drive:
 			// va<200 leg then holds the carrot there forever).
 			if (along_u <= -120)
 			{
-				gj_sng_deep[slot] = true; // deep-runway point reached
+				gj[slot].sng_deep = true; // deep-runway point reached
 			}
 			if (org[0] > -710)
 			{
@@ -2787,7 +2799,7 @@ gj_app_drive:
 				// corner at vh 0 for the full 12s timeout).
 				VectorSet(tgt, -848, 283, org[2]);
 			}
-			else if (!gj_sng_deep[slot] && (va < 200))
+			else if (!gj[slot].sng_deep && (va < 200))
 			{
 				// on the ledge without south speed: walk north for runway
 				// (s4: 408 -> 430 so the deep flag at along -120 trips well
@@ -2926,7 +2938,7 @@ gj_app_drive:
 	{
 		G_cprint("[gjapp] t=%.2f pos=%.0f,%.0f,%.0f along=%.0f lat=%.0f vh=%.0f "
 				 "floor=%.0f og=%d\n",
-				 now - gj_app_t0[slot], org[0], org[1], org[2], along_u, lat_n,
+				 now - gj[slot].app_t0, org[0], org[1], org[2], along_u, lat_n,
 				 vh, floor, onground ? 1 : 0);
 	}
 	return true;
@@ -2949,12 +2961,12 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 	// lane table can be pinned in server coordinates. Inert (vanilla nav runs).
 	if (cvar("k_kbot_gj_probe") && (int)cvar("k_kbot_gj_lane") < 0)
 	{
-		if (!ISDEAD(self) && ((now - gj_probe_log[slot]) >= 0.2f || gj_probe_log[slot] > now))
+		if (!ISDEAD(self) && ((now - gj[slot].probe_log) >= 0.2f || gj[slot].probe_log > now))
 		{
 			vec3_t v;
 			float sp;
 
-			gj_probe_log[slot] = now;
+			gj[slot].probe_log = now;
 			v[0] = self->s.v.velocity[0];
 			v[1] = self->s.v.velocity[1];
 			v[2] = 0;
@@ -2977,9 +2989,9 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 		char buf[64];
 		float x, y, z;
 
-		if ((now - gj_probe_log[slot]) >= 0.25f)
+		if ((now - gj[slot].probe_log) >= 0.25f)
 		{
-			gj_probe_log[slot] = now;
+			gj[slot].probe_log = now;
 			trap_cvar_string("k_kbot_gj_to", buf, sizeof(buf));
 			if (buf[0] && sscanf(buf, "%f %f %f", &x, &y, &z) == 3)
 			{
@@ -3019,7 +3031,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 			// E15: leave no live trial behind -- a respawned bot otherwise
 			// CONTINUES the old CROSS from its spawn point (pseed1: constant
 			// FAIL loops at the spawn, never re-seated).
-			gj_state[slot] = GJ_IDLE;
+			gj[slot].state = GJ_IDLE;
 			return false;
 		}
 		cool = cvar("k_kbot_gj_cool");
@@ -3029,16 +3041,16 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 		}
 
 		// (Re)start when idle or when the selected lane changed.
-		if (gj_state[slot] == GJ_IDLE || gj_lane_active[slot] != lane)
+		if (gj[slot].state == GJ_IDLE || gj[slot].lane_active != lane)
 		{
-			gj_trial[slot] = 0;
+			gj[slot].trial = 0;
 			GJ_StartTrial(self, slot, lane);
 			G_cprint("[gapjump] init lane=%s\n", gj_lanes[lane].name);
 		}
 
-		if (gj_state[slot] == GJ_COOL)
+		if (gj[slot].state == GJ_COOL)
 		{
-			if ((now - gj_cool_t0[slot]) >= cool || gj_cool_t0[slot] > now)
+			if ((now - gj[slot].cool_t0) >= cool || gj[slot].cool_t0 > now)
 			{
 				GJ_StartTrial(self, slot, lane);
 			}
@@ -3059,61 +3071,61 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 
 	// ---- PASSIVE TRIGGER (real feature): lane < 0 ----
 	// Continue an in-flight passive crossing across frames until it resolves.
-	if (gj_state[slot] == GJ_CROSS)
+	if (gj[slot].state == GJ_CROSS)
 	{
 		if (ISDEAD(self))
 		{
-			gj_state[slot] = GJ_IDLE;
+			gj[slot].state = GJ_IDLE;
 			return false;
 		}
-		return GJ_Cross(self, slot, gj_lane_active[slot], jumping, firing,
+		return GJ_Cross(self, slot, gj[slot].lane_active, jumping, firing,
 						impulse, direction);
 	}
 	// Continue an in-flight circle-jump run-up (experimental build path).
-	if (gj_state[slot] == GJ_BUILD)
+	if (gj[slot].state == GJ_BUILD)
 	{
 		if (ISDEAD(self))
 		{
-			gj_state[slot] = GJ_IDLE;
+			gj[slot].state = GJ_IDLE;
 			return false;
 		}
-		return GJ_BuildFrame(self, slot, gj_lane_active[slot], jumping, firing,
+		return GJ_BuildFrame(self, slot, gj[slot].lane_active, jumping, firing,
 							 impulse, direction);
 	}
 	// Continue an in-flight E9 deliberate approach.
-	if (gj_state[slot] == GJ_APPROACH)
+	if (gj[slot].state == GJ_APPROACH)
 	{
 		if (ISDEAD(self))
 		{
-			gj_state[slot] = GJ_IDLE;
+			gj[slot].state = GJ_IDLE;
 			return false;
 		}
-		return GJ_ApproachFrame(self, slot, gj_lane_active[slot], jumping, firing,
+		return GJ_ApproachFrame(self, slot, gj[slot].lane_active, jumping, firing,
 								impulse, direction);
 	}
 	// Continue an in-flight E15 pent-play stage 1 (ramp -> lift -> shelf).
 	// Placed with the other continuations, BEFORE the combat-yield: the
 	// carrier is invulnerable and the play is exactly how humans leave the
 	// yard under fire.
-	if (gj_state[slot] == GJ_PENT)
+	if (gj[slot].state == GJ_PENT)
 	{
 		if (ISDEAD(self))
 		{
-			gj_state[slot] = GJ_IDLE;
+			gj[slot].state = GJ_IDLE;
 			return false;
 		}
 		return GJ_PentFrame(self, slot, jumping, firing, impulse, direction);
 	}
-	if (gj_state[slot] == GJ_COOL)
+	if (gj[slot].state == GJ_COOL)
 	{
 		// E14 lane 6 POST-LAND: the mega perch is orphaned in the marker
 		// graph (its SetMarkerPath targets dangle), so vanilla nav cannot
 		// walk the last ~80u from the landing to the mega item. Short
 		// grounded drive to the pickup point, then release; death, an enemy,
 		// a pit-fall (z guard) or the 2s timer hands back to vanilla.
-		if ((gj_lane_active[slot] == 6) && cvar("k_kbot_gj_sng") && !ISDEAD(self)
+		if ((gj[slot].lane_active == 6) && cvar("k_kbot_gj_sng") && !ISDEAD(self)
 			&& !self->fb.enemy_visible && (self->s.v.origin[2] > 100)
-			&& ((now - gj_cool_t0[slot]) < 2.0f))
+			&& ((now - gj[slot].cool_t0) < 2.0f))
 		{
 			vec3_t wish, ang;
 			float d, myaw;
@@ -3140,7 +3152,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 				return true;
 			}
 		}
-		gj_state[slot] = GJ_IDLE; // release movement back to vanilla nav
+		gj[slot].state = GJ_IDLE; // release movement back to vanilla nav
 		return false;
 	}
 
@@ -3152,8 +3164,8 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 	// when humans run this play. Re-engages after fails while the pent lasts
 	// (gj_app_supp paces the retries).
 	if (cvar("k_kbot_gj_pent") && !ISDEAD(self) && (match_in_progress == 2)
-		&& !intermission_running && (gj_state[slot] == GJ_IDLE)
-		&& (now >= gj_app_supp[slot])
+		&& !intermission_running && (gj[slot].state == GJ_IDLE)
+		&& (now >= gj[slot].app_supp)
 		&& ((int)self->s.v.items & IT_ROCKET_LAUNCHER)
 		&& (self->s.v.ammo_rockets >= 1)
 		&& GJ_PentRegion(self->s.v.origin))
@@ -3166,20 +3178,20 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 		}
 		if (self->invincible_finished > now + minleft)
 		{
-			if (self->invincible_finished != gj_pent_id[slot])
+			if (self->invincible_finished != gj[slot].pent_id)
 			{
-				gj_pent_id[slot] = self->invincible_finished;
-				gj_pent_tries[slot] = 0;
+				gj[slot].pent_id = self->invincible_finished;
+				gj[slot].pent_tries = 0;
 			}
-			gj_pent_tries[slot]++;
-			gj_pent_leg[slot] = 0;
-			gj_pent_fire[slot] = 0;
-			gj_lane_active[slot] = 7;
-			gj_app_t0[slot] = now;
-			gj_state[slot] = GJ_PENT;
+			gj[slot].pent_tries++;
+			gj[slot].pent_leg = 0;
+			gj[slot].pent_fire = 0;
+			gj[slot].lane_active = 7;
+			gj[slot].app_t0 = now;
+			gj[slot].state = GJ_PENT;
 			G_cprint("[pentrj] result=ENGAGE try=%d name=%s pos=%.0f,%.0f,%.0f "
 					 "pentleft=%.1f rk=%d\n",
-					 gj_pent_tries[slot], self->netname,
+					 gj[slot].pent_tries, self->netname,
 					 PASSVEC3(self->s.v.origin),
 					 self->invincible_finished - now,
 					 (int)self->s.v.ammo_rockets);
@@ -3219,7 +3231,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 		// Re-engage cooldown: after a decline/abort we suppress re-engaging for a
 		// short window so the bot is carried clear by nav and comes back with a
 		// running start, instead of flickering engage/decline at the lip every frame.
-		if (now < gj_app_supp[slot])
+		if (now < gj[slot].app_supp)
 		{
 			return false;
 		}
@@ -3233,12 +3245,12 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 
 		if (pick >= 0)
 		{
-			gj_lane_active[slot] = pick;
-			gj_app_t0[slot] = now;
-			gj_build_sign[slot] = 0;
-			gj_chain_on[slot] = false;
-			gj_sng_deep[slot] = false;
-			gj_state[slot] = GJ_APPROACH;
+			gj[slot].lane_active = pick;
+			gj[slot].app_t0 = now;
+			gj[slot].build_sign = 0;
+			gj[slot].chain_on = false;
+			gj[slot].sng_deep = false;
+			gj[slot].state = GJ_APPROACH;
 			if (cvar("k_kbot_gj_gatelog"))
 			{
 				G_cprint("[gapjump] lane=%s result=APP_ENGAGE\n",
@@ -3295,19 +3307,19 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 						VectorScale(wish, 320, direction);
 						direction[2] = 0;
 						*jumping = false;
-						if (!gj_stage_on[slot] && cvar("k_kbot_gj_gatelog"))
+						if (!gj[slot].stage_on && cvar("k_kbot_gj_gatelog"))
 						{
 							G_cprint("[gjstage] lane=%s slot=%d engage\n",
 									 gj_lanes[rlane].name, slot);
 						}
-						gj_stage_on[slot] = true;
+						gj[slot].stage_on = true;
 						return true;
 					}
 				}
 			}
-			else if (gj_stage_on[slot])
+			else if (gj[slot].stage_on)
 			{
-				gj_stage_on[slot] = false;
+				gj[slot].stage_on = false;
 				if (cvar("k_kbot_gj_gatelog"))
 				{
 					G_cprint("[gjstage] slot=%d release\n", slot);
@@ -3390,7 +3402,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 				dir[1] = land[1] - take[1];
 				dir[2] = 0;
 				lanelen = VectorLength(dir);
-				if (lanelen > 1 && gj_state[slot] != GJ_CROSS)
+				if (lanelen > 1 && gj[slot].state != GJ_CROSS)
 				{
 					VectorNormalize(dir);
 					rel[0] = self->s.v.origin[0] - take[0];
@@ -3407,7 +3419,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 									 "prog=%.0f perp=%.0f\n",
 									 gj_lanes[pick].name, prog, perp);
 						}
-						gj_state[slot] = GJ_IDLE;
+						gj[slot].state = GJ_IDLE;
 						return false;
 					}
 				}
@@ -3436,7 +3448,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 				hv[2] = 0;
 				vh = VectorLength(hv);
 
-				if (gj_state[slot] != GJ_CROSS && vh < vreq * gate)
+				if (gj[slot].state != GJ_CROSS && vh < vreq * gate)
 				{
 					if (cvar("k_kbot_gj_build") > 0)
 					{
@@ -3453,7 +3465,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 								 self->s.v.origin[0], self->s.v.origin[1],
 								 self->s.v.origin[2]);
 					}
-					gj_state[slot] = GJ_IDLE;
+					gj[slot].state = GJ_IDLE;
 					return false; // too slow -> decline, vanilla nav continues
 				}
 			}
@@ -3471,7 +3483,7 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 			{
 				float align_tol = cvar("k_kbot_gj_align_tol");
 
-				if (align_tol > 0 && gj_state[slot] != GJ_CROSS)
+				if (align_tol > 0 && gj[slot].state != GJ_CROSS)
 				{
 					float lb = GJ_Bearing(take, land) + GJ_LaneHeadOff(pick);
 					float vyaw, aerr;
@@ -3500,22 +3512,22 @@ qbool KBot_GapjumpFrame(gedict_t *self, qbool *jumping, qbool *firing,
 									 "tol=%.0f vyaw=%.0f want=%.0f\n",
 									 gj_lanes[pick].name, aerr, align_tol, vyaw, lb);
 						}
-						gj_state[slot] = GJ_IDLE;
+						gj[slot].state = GJ_IDLE;
 						return false; // arrival heading too far off -> decline
 					}
 				}
 			}
 
 			// Execute one crossing (no teleport; use live position/speed).
-			if (gj_state[slot] != GJ_CROSS || gj_lane_active[slot] != pick)
+			if (gj[slot].state != GJ_CROSS || gj[slot].lane_active != pick)
 			{
-				gj_lane_active[slot] = pick;
-				gj_t0[slot] = now;
-				gj_peak[slot] = 0;
-				gj_flip[slot] = 1;
-				gj_jump_latch[slot] = false;
-				gj_has_flown[slot] = false;
-				gj_state[slot] = GJ_CROSS;
+				gj[slot].lane_active = pick;
+				gj[slot].t0 = now;
+				gj[slot].peak = 0;
+				gj[slot].flip = 1;
+				gj[slot].jump_latch = false;
+				gj[slot].has_flown = false;
+				gj[slot].state = GJ_CROSS;
 			}
 			return GJ_Cross(self, slot, pick, jumping, firing, impulse, direction);
 		}
