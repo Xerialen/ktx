@@ -40,6 +40,14 @@ void Nano_NavMapReset(void)
 	g_nano_attempted = false;
 }
 
+// Engine-side point-contents adapter for Nano_NavBuild. The navmesh is otherwise
+// pure over the BSP, but liquid volumes (water/slime/lava) are not encoded in
+// the player clip hull, so we ask the engine for the real contents.
+static int Nano_EnginePointContents(const vec3_t p)
+{
+	return (int)trap_pointcontents(p[0], p[1], p[2]);
+}
+
 const nano_navgraph_t *Nano_NavEnsure(void)
 {
 	char path[80];
@@ -90,7 +98,7 @@ const nano_navgraph_t *Nano_NavEnsure(void)
 		return NULL;
 	}
 
-	g_nano_nav = Nano_NavBuild(g_nano_bsp);
+	g_nano_nav = Nano_NavBuild(g_nano_bsp, Nano_EnginePointContents);
 	if (!g_nano_nav)
 	{
 		Nano_BspFree(g_nano_bsp);

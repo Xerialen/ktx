@@ -167,11 +167,21 @@ void Nano_Hull1Trace(const nano_bsp_t *bsp, const vec3_t p1, const vec3_t p2,
 // Opaque built graph (heap-owned; Nano_NavFree).
 typedef struct nano_navgraph_s nano_navgraph_t;
 
-// Build the land navmesh from a parsed BSP clip hull (pure; no engine calls).
-// Caller frees with Nano_NavFree. Returns NULL on alloc failure or a mesh with
-// no cells (an empty/degenerate map). Mirrors rtx NavGraph::build + link_cells.
-nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp);
+// Build the land navmesh from a parsed BSP clip hull.
+// `point_contents` returns the engine CONTENTS_* value at the given point; pass
+// a function that always returns CONTENT_EMPTY for standalone/offline builds.
+// Cells whose floor point is liquid (water/slime/lava) are skipped so the mesh
+// routes around them. Caller frees with Nano_NavFree. Returns NULL on alloc
+// failure or a mesh with no cells. Mirrors rtx NavGraph::build + link_cells.
+nano_navgraph_t *Nano_NavBuild(const nano_bsp_t *bsp,
+                               int (*point_contents)(const vec3_t p));
 void Nano_NavFree(nano_navgraph_t *g);
+
+// True for engine contents that nano should not treat as walkable floor.
+static inline qbool Nano_IsLiquidContent(int contents)
+{
+    return contents == CONTENT_WATER || contents == CONTENT_SLIME || contents == CONTENT_LAVA;
+}
 
 // Cell whose standing origin is nearest pos (searches outward a few grid
 // columns from pos's own column). Returns -1 if the graph is empty or nothing
