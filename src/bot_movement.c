@@ -6084,7 +6084,7 @@ static void BotLogMoveProbeCommand(gedict_t *self, int cmd_msec, vec3_t directio
 			 moveprobe_s25_out_fwd[slot], moveprobe_s25_out_side[slot]);
 }
 
-void BotSetCommand(gedict_t *self)
+static void BotSetCommandMode(gedict_t *self, qbool blocked_replacement)
 {
 	extern float last_frame_time;
 	float msec_since_last = (last_frame_time - self->fb.last_cmd_sent) * 1000;
@@ -6246,8 +6246,18 @@ void BotSetCommand(gedict_t *self)
 	buttons |= (firing ? 1 : 0);
 	buttons |= (jumping ? 2 : 0);
 	BotLogMoveProbeCommand(self, cmd_msec, direction, buttons, impulse);
-	trap_SetBotCMD(NUM_FOR_EDICT(self), cmd_msec, PASSVEC3(self->fb.desired_angle),
-					PASSVEC3(direction), buttons, impulse);
+	if (blocked_replacement)
+	{
+		trap_ReplaceBotCMD(NUM_FOR_EDICT(self), cmd_msec,
+			PASSVEC3(self->fb.desired_angle), PASSVEC3(direction), buttons,
+			impulse);
+	}
+	else
+	{
+		trap_SetBotCMD(NUM_FOR_EDICT(self), cmd_msec,
+			PASSVEC3(self->fb.desired_angle), PASSVEC3(direction), buttons,
+			impulse);
+	}
 
 	self->fb.next_impulse = 0;
 	self->fb.botchose = false;
@@ -6263,6 +6273,16 @@ void BotSetCommand(gedict_t *self)
 
 	self->fb.prev_look_object = self->fb.look_object;
 	VectorCopy(self->s.v.velocity, self->fb.prev_velocity);
+}
+
+void BotSetCommand(gedict_t *self)
+{
+	BotSetCommandMode(self, false);
+}
+
+void BotReplaceCommand(gedict_t *self)
+{
+	BotSetCommandMode(self, true);
 }
 
 #endif

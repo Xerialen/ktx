@@ -19,6 +19,7 @@
 #define CE_SEAT_NONCE_CAP CE_SHA256_HEX_CAP
 #define CE_BUILD_ID_CAP 128u
 #define CE_WRITER_ID_CAP 64u
+#define CE_WRITER_ID_MAX_LENGTH_V1 31u
 
 /*
  * One mapped syscall takes (operation, payload pointer, payload size).
@@ -30,7 +31,8 @@ typedef enum ce_operation_v1 {
 	CE_FRAME_REQUEST = 2,
 	CE_MATCH_BEGIN = 3,
 	CE_MATCH_END = 4,
-	CE_UNBIND = 5
+	CE_UNBIND = 5,
+	CE_FRAME_REPLACE = 6
 } ce_operation_v1;
 
 enum {

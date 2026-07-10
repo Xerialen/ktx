@@ -81,7 +81,7 @@ forbid_occurrences("${SOL_EVIDENCE_RUN}"
 	"(sol_core_step_v1|sol_ktx_encode_observation_v1|\"SLO1\"|\"SLA1\")"
 	"evidence lifecycle coupled to the old diagnostic core")
 forbid_occurrences("${SOL_RUNTIME_SCHEDULE}"
-	"(CE_MATCH_END|CE_UNBIND|trap_RemoveBot|trap_SetBotCMD|CE_FRAME_REQUEST)"
+	"(CE_MATCH_END|CE_UNBIND|trap_RemoveBot|trap_SetBotCMD|CE_FRAME_REQUEST|CE_FRAME_REPLACE)"
 	"pure runtime scheduling policy performing a frame or cleanup side effect")
 
 require_exact_occurrences("${SOL_EVIDENCE_RUN}"
@@ -93,20 +93,30 @@ require_exact_occurrences("${SOL_EVIDENCE_RUN}"
 require_exact_occurrences("${SOL_EVIDENCE_RUN}" "CE_UNBIND" 1
 	"one safe evidence unbind call site")
 require_exact_occurrences("${G_SYSCALLS}"
-	"trap_ControllerEvidenceV1\\(CE_FRAME_REQUEST" 1
+	"trap_ControllerEvidenceV1\\(operation" 1
 	"one global actual-command evidence writer")
 require_exact_occurrences("${G_SYSCALLS}" "syscall\\(G_SetBotCMD" 1
 	"one raw engine command syscall provenance point")
+require_exact_occurrences("${G_SYSCALLS_H}"
+	"#define trap_ReplaceBotCMD trap_SetBotCMD" 1
+	"QVM replacement commands reuse the existing SetBotCMD import")
 require_exact_occurrences("${G_SYSCALLS}" "sol_actual_command_submit_v1\\(" 1
 	"public command wrapper delegates exactly once to the global hook")
-forbid_occurrences("${SOL_RUNTIME}" "CE_FRAME_REQUEST"
+forbid_occurrences("${SOL_RUNTIME}" "(CE_FRAME_REQUEST|CE_FRAME_REPLACE)"
 	"candidate-specific frame-evidence callback after global interception")
-forbid_occurrences("${SOL_CANDIDATE_REGISTRY}" "(CE_FRAME_REQUEST|candidate_evidence)"
+forbid_occurrences("${SOL_CANDIDATE_REGISTRY}"
+	"(CE_FRAME_REQUEST|CE_FRAME_REPLACE|candidate_evidence)"
 	"candidate registry owning evidence instead of command preparation")
 require_exact_occurrences("${SOL_RUNTIME}" "trap_SetBotCMD\\(" 1
 	"candidate commands use the public globally intercepted writer")
 require_exact_occurrences("${BOT_MOVEMENT}" "trap_SetBotCMD\\(" 1
 	"stock movement uses the public globally intercepted writer")
+require_exact_occurrences("${BOT_MOVEMENT}" "trap_ReplaceBotCMD\\(" 1
+	"stock movement owns one explicit blocked-replacement writer")
+require_exact_occurrences("${BOT_BLOCKED}" "BotReplaceCommand\\(self\\)" 1
+	"only the stock BotBlocked callback declares a replacement")
+forbid_occurrences("${BOT_BLOCKED}" "BotSetCommand\\(self\\)"
+	"BotBlocked disguising a replacement as an ordinary frame request")
 require_exact_occurrences("${BOT_COMMANDS}" "trap_SetBotCMD\\(" 1
 	"stock debug command uses the public globally intercepted writer")
 require_exact_occurrences("${NANO_BRAIN}" "trap_SetBotCMD\\(" 2

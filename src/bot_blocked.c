@@ -76,7 +76,7 @@ void BotBlocked(void)
 			AvoidHazards(self);
 		}
 
-		BotSetCommand(self);
+		BotReplaceCommand(self);
 
 		return;
 	}

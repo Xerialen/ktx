@@ -220,6 +220,7 @@ void BotPreThink(gedict_t *self);
 void BotClientConnectedEvent(gedict_t *self);
 void BotOutOfWater(gedict_t *self);
 void BotSetCommand(gedict_t *self);
+void BotReplaceCommand(gedict_t *self);
 void BotsThinkTime(gedict_t *self);
 
 // botphys.qc

@@ -27,6 +27,7 @@ typedef struct sol_actual_command_input_v1
 typedef sol_actual_command_route_v1 (*sol_actual_command_lookup_v1)(
 	void *context, uint32_t engine_slot, uint32_t *client_generation);
 typedef intptr_t (*sol_actual_command_evidence_v1)(void *context,
+	ce_operation_v1 operation,
 	const ce_frame_request_v1 *request);
 typedef intptr_t (*sol_actual_command_syscall_v1)(void *context,
 	const sol_actual_command_input_v1 *command);
@@ -42,6 +43,6 @@ typedef struct sol_actual_command_ops_v1
 } sol_actual_command_ops_v1;
 
 intptr_t sol_actual_command_submit_v1(const sol_actual_command_input_v1 *input,
-	const sol_actual_command_ops_v1 *ops);
+	ce_operation_v1 operation, const sol_actual_command_ops_v1 *ops);
 
 #endif

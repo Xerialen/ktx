@@ -47,7 +47,7 @@ static void fail_after_actual(const sol_actual_command_ops_v1 *ops)
 }
 
 intptr_t sol_actual_command_submit_v1(const sol_actual_command_input_v1 *input,
-	const sol_actual_command_ops_v1 *ops)
+	ce_operation_v1 operation, const sol_actual_command_ops_v1 *ops)
 {
 	sol_actual_command_route_v1 route = SOL_ACTUAL_COMMAND_UNBOUND;
 	ce_frame_request_v1 request;
@@ -67,9 +67,10 @@ intptr_t sol_actual_command_submit_v1(const sol_actual_command_input_v1 *input,
 		route = ops->lookup(ops->context, engine_slot, &client_generation);
 	}
 	if (route == SOL_ACTUAL_COMMAND_BOUND && ops->evidence
+			&& (operation == CE_FRAME_REQUEST || operation == CE_FRAME_REPLACE)
 			&& encode_exact_request(input, engine_slot, client_generation, &request))
 	{
-		evidence_result = ops->evidence(ops->context, &request);
+		evidence_result = ops->evidence(ops->context, operation, &request);
 		actual_result = ops->actual(ops->context, input);
 		if (evidence_result != CE_RESULT_OK)
 		{

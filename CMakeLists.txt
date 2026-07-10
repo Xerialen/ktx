@@ -290,6 +290,7 @@ if(SOL_SUPPORT)
 				"-DBOT_ENEMY=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_botenemy.c"
 				"-DCOMBAT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/combat.c"
 				"-DBOT_COMMANDS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_commands.c"
+				"-DBOT_BLOCKED=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_blocked.c"
 				"-DBOT_MOVEMENT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_movement.c"
 				"-DNANO_BRAIN=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/nano_brain.c"
 				"-DBOT_CLIENT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_client.c"
@@ -311,6 +312,7 @@ if(SOL_SUPPORT)
 				"-DSOL_LAUNCH_COORDINATOR=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_launch_coordinator.c"
 				"-DSOL_OBSERVATION_CLIENT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_observation_client.c"
 				"-DG_SYSCALLS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/g_syscalls.c"
+				"-DG_SYSCALLS_H=${CMAKE_CURRENT_SOURCE_DIR}/include/g_syscalls.h"
 				"-DG_LOCAL=${CMAKE_CURRENT_SOURCE_DIR}/include/g_local.h"
 				-P "${CMAKE_CURRENT_SOURCE_DIR}/test/check_sol_runtime_guards.cmake")
 		add_test(NAME sol_core_capability_denylist

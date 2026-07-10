@@ -31,6 +31,7 @@
 #endif
 
 #include "g_local.h"
+#include "controller_evidence_protocol.h"
 #ifdef SOL_SUPPORT
 #include "sol_actual_command.h"
 #include "sol_runtime.h"
@@ -456,11 +457,11 @@ static sol_actual_command_route_v1 sol_command_lookup(void *context,
 	return Sol_ActualCommandLookup(engine_slot, client_generation);
 }
 
-static intptr_t sol_command_evidence(void *context,
+static intptr_t sol_command_evidence(void *context, ce_operation_v1 operation,
 	const ce_frame_request_v1 *request)
 {
 	(void) context;
-	return trap_ControllerEvidenceV1(CE_FRAME_REQUEST, (void *) request,
+	return trap_ControllerEvidenceV1(operation, (void *) request,
 		(intptr_t) sizeof(*request));
 }
 
@@ -481,9 +482,10 @@ static void sol_command_fail_stop(void *context)
 }
 #endif
 
-intptr_t trap_SetBotCMD(intptr_t edn, intptr_t msec, float angles_x, float angles_y, float angles_z,
-						intptr_t forwardmove, intptr_t sidemove, intptr_t upmove, intptr_t buttons,
-						intptr_t impulse)
+static intptr_t trap_SetBotCMDWithEvidence(ce_operation_v1 operation,
+	intptr_t edn, intptr_t msec, float angles_x, float angles_y, float angles_z,
+	intptr_t forwardmove, intptr_t sidemove, intptr_t upmove, intptr_t buttons,
+	intptr_t impulse)
 {
 #ifdef SOL_SUPPORT
 	sol_actual_command_input_v1 command;
@@ -503,11 +505,28 @@ intptr_t trap_SetBotCMD(intptr_t edn, intptr_t msec, float angles_x, float angle
 	command.upmove = upmove;
 	command.buttons = buttons;
 	command.impulse = impulse;
-	return sol_actual_command_submit_v1(&command, &ops);
+	return sol_actual_command_submit_v1(&command, operation, &ops);
 #else
+	(void) operation;
 	return trap_SetBotCMDRaw(edn, msec, angles_x, angles_y, angles_z,
 		forwardmove, sidemove, upmove, buttons, impulse);
 #endif
+}
+
+intptr_t trap_SetBotCMD(intptr_t edn, intptr_t msec, float angles_x,
+	float angles_y, float angles_z, intptr_t forwardmove, intptr_t sidemove,
+	intptr_t upmove, intptr_t buttons, intptr_t impulse)
+{
+	return trap_SetBotCMDWithEvidence(CE_FRAME_REQUEST, edn, msec, angles_x,
+		angles_y, angles_z, forwardmove, sidemove, upmove, buttons, impulse);
+}
+
+intptr_t trap_ReplaceBotCMD(intptr_t edn, intptr_t msec, float angles_x,
+	float angles_y, float angles_z, intptr_t forwardmove, intptr_t sidemove,
+	intptr_t upmove, intptr_t buttons, intptr_t impulse)
+{
+	return trap_SetBotCMDWithEvidence(CE_FRAME_REPLACE, edn, msec, angles_x,
+		angles_y, angles_z, forwardmove, sidemove, upmove, buttons, impulse);
 }
 
 void trap_setpause(intptr_t pause)

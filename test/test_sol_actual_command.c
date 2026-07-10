@@ -10,6 +10,7 @@ typedef struct command_fixture_v1
 	sol_actual_command_route_v1 route;
 	uint32_t expected_slot;
 	uint32_t generation;
+	ce_operation_v1 expected_operation;
 	int evidence_result;
 	intptr_t actual_result;
 	sol_actual_command_input_v1 expected_actual;
@@ -55,14 +56,15 @@ static sol_actual_command_route_v1 lookup_route(void *context,
 	return fixture->route;
 }
 
-static intptr_t write_evidence(void *context,
+static intptr_t write_evidence(void *context, ce_operation_v1 operation,
 	const ce_frame_request_v1 *request)
 {
 	command_fixture_v1 *fixture = context;
 
 	trace(fixture, 'E');
 	fixture->evidence_calls++;
-	require(request != NULL
+	require(operation == fixture->expected_operation
+		&& request != NULL
 		&& request->header.protocol_version == CE_PROTOCOL_VERSION_V1
 		&& request->header.struct_size == sizeof(*request)
 		&& request->engine_slot == fixture->expected_slot
@@ -136,6 +138,7 @@ static command_fixture_v1 fixture_for(
 	fixture.route = SOL_ACTUAL_COMMAND_BOUND;
 	fixture.expected_slot = 7u;
 	fixture.generation = 42u;
+	fixture.expected_operation = CE_FRAME_REQUEST;
 	fixture.evidence_result = CE_RESULT_OK;
 	fixture.actual_result = 77;
 	fixture.expected_actual = *input;
@@ -158,11 +161,24 @@ static void test_bound_valid_command_requests_then_calls_actual_once(void)
 	command_fixture_v1 fixture = fixture_for(&input);
 	sol_actual_command_ops_v1 ops = ops_for(&fixture);
 
-	require(sol_actual_command_submit_v1(&input, &ops) == 77
+	require(sol_actual_command_submit_v1(&input, CE_FRAME_REQUEST, &ops) == 77
 		&& !strcmp(fixture.trace, "EA") && fixture.lookup_calls == 1
 		&& fixture.evidence_calls == 1 && fixture.actual_calls == 1
 		&& fixture.fail_calls == 0,
 			"bound representable command requests immediately before one real syscall");
+}
+
+static void test_bound_replacement_routes_explicit_evidence_operation(void)
+{
+	sol_actual_command_input_v1 input = valid_command();
+	command_fixture_v1 fixture = fixture_for(&input);
+	sol_actual_command_ops_v1 ops = ops_for(&fixture);
+
+	fixture.expected_operation = CE_FRAME_REPLACE;
+	require(sol_actual_command_submit_v1(&input, CE_FRAME_REPLACE, &ops) == 77
+		&& !strcmp(fixture.trace, "EA") && fixture.evidence_calls == 1
+		&& fixture.actual_calls == 1 && fixture.fail_calls == 0,
+			"declared blocked replacement reaches the distinct evidence operation");
 }
 
 static void test_unbound_command_is_byte_and_behavior_bypass(void)
@@ -178,7 +194,7 @@ static void test_unbound_command_is_byte_and_behavior_bypass(void)
 	fixture = fixture_for(&input);
 	fixture.route = SOL_ACTUAL_COMMAND_UNBOUND;
 	ops = ops_for(&fixture);
-	require(sol_actual_command_submit_v1(&input, &ops) == 77
+	require(sol_actual_command_submit_v1(&input, CE_FRAME_REQUEST, &ops) == 77
 		&& !strcmp(fixture.trace, "A") && fixture.lookup_calls == 1
 		&& fixture.evidence_calls == 0 && fixture.actual_calls == 1
 		&& fixture.fail_calls == 0,
@@ -193,7 +209,7 @@ static void test_evidence_failure_calls_actual_once_then_fail_stops(void)
 
 	fixture.evidence_result = CE_RESULT_INVALID;
 	ops = ops_for(&fixture);
-	require(sol_actual_command_submit_v1(&input, &ops) == 77
+	require(sol_actual_command_submit_v1(&input, CE_FRAME_REQUEST, &ops) == 77
 		&& !strcmp(fixture.trace, "EAF") && fixture.evidence_calls == 1
 		&& fixture.actual_calls == 1 && fixture.fail_calls == 1,
 			"evidence rejection cannot suppress actual syscall and fails afterward");
@@ -223,7 +239,8 @@ static void test_invalid_bound_commands_call_actual_once_without_fabricated_requ
 		command_fixture_v1 fixture = fixture_for(&invalid[index]);
 		sol_actual_command_ops_v1 ops = ops_for(&fixture);
 
-		require(sol_actual_command_submit_v1(&invalid[index], &ops) == 77
+		require(sol_actual_command_submit_v1(&invalid[index], CE_FRAME_REQUEST,
+			&ops) == 77
 			&& !strcmp(fixture.trace, "AF") && fixture.evidence_calls == 0
 			&& fixture.actual_calls == 1 && fixture.fail_calls == 1,
 				"non-representable bound command is actual once then fail-stop");
@@ -238,7 +255,7 @@ static void test_ambiguous_binding_calls_actual_once_then_fail_stops(void)
 
 	fixture.route = SOL_ACTUAL_COMMAND_AMBIGUOUS;
 	ops = ops_for(&fixture);
-	require(sol_actual_command_submit_v1(&input, &ops) == 77
+	require(sol_actual_command_submit_v1(&input, CE_FRAME_REQUEST, &ops) == 77
 		&& !strcmp(fixture.trace, "AF") && fixture.evidence_calls == 0
 		&& fixture.actual_calls == 1 && fixture.fail_calls == 1,
 			"ambiguous successful routes never fabricate one evidence owner");
@@ -247,10 +264,11 @@ static void test_ambiguous_binding_calls_actual_once_then_fail_stops(void)
 int main(void)
 {
 	test_bound_valid_command_requests_then_calls_actual_once();
+	test_bound_replacement_routes_explicit_evidence_operation();
 	test_unbound_command_is_byte_and_behavior_bypass();
 	test_evidence_failure_calls_actual_once_then_fail_stops();
 	test_invalid_bound_commands_call_actual_once_without_fabricated_request();
 	test_ambiguous_binding_calls_actual_once_then_fail_stops();
-	printf("sol_actual_command: 5 wrapper contracts passed\n");
+	printf("sol_actual_command: 6 wrapper contracts passed\n");
 	return 0;
 }

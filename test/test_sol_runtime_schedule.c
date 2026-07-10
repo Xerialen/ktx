@@ -263,14 +263,15 @@ static sol_actual_command_route_v1 lookup_command(void *context,
 		SOL_ACTUAL_COMMAND_UNBOUND;
 }
 
-static intptr_t write_complete_request(void *context,
+static intptr_t write_complete_request(void *context, ce_operation_v1 operation,
 	const ce_frame_request_v1 *request)
 {
 	timing_fixture_v1 *fixture = context;
 	size_t candidate;
 	size_t index = index_for_slot(request->engine_slot);
 
-	require(fixture->bot_phase, "CE frame requests occur only in bot callbacks");
+	require(operation == CE_FRAME_REQUEST && fixture->bot_phase,
+		"ordinary scheduled commands use CE frame requests only in bot callbacks");
 	for (candidate = 0; candidate < SOL_KTX_CANDIDATE_COUNT_V1; ++candidate)
 	{
 		require(fixture->observers[candidate].poll_calls == 1,
@@ -327,7 +328,7 @@ static void submit_command(timing_fixture_v1 *fixture, size_t index,
 	input.upmove = command->upmove;
 	input.buttons = command->buttons;
 	input.impulse = command->impulse;
-	require(sol_actual_command_submit_v1(&input, &ops) == 1,
+	require(sol_actual_command_submit_v1(&input, CE_FRAME_REQUEST, &ops) == 1,
 			"global command hook submits one exact actual command");
 }
 

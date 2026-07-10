@@ -134,6 +134,15 @@ intptr_t trap_SetBotUserInfo(intptr_t edn, const char *varname, const char *valu
 intptr_t trap_SetBotCMD(intptr_t edn, intptr_t msec, float angles_x, float angles_y, float angles_z,
 						intptr_t forwardmove, intptr_t sidemove, intptr_t upmove, intptr_t buttons,
 						intptr_t impulse);
+#ifdef Q3_VM
+/* QVM has no SOL evidence ABI; preserve the stock G_SetBotCMD import. */
+#define trap_ReplaceBotCMD trap_SetBotCMD
+#else
+intptr_t trap_ReplaceBotCMD(intptr_t edn, intptr_t msec, float angles_x,
+						float angles_y, float angles_z, intptr_t forwardmove,
+						intptr_t sidemove, intptr_t upmove, intptr_t buttons,
+						intptr_t impulse);
+#endif
 
 void trap_setpause(intptr_t pause);
 
