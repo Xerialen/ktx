@@ -159,6 +159,36 @@ static void test_observation_batch_size_boundary(void)
 	free(wire);
 }
 
+static void test_observation_accepts_complete_sound_semantic_enum(void)
+{
+	uint8_t bytes[219];
+	size_t length = hex_to_bytes(observation_golden_hex, bytes, sizeof(bytes));
+	size_t semantic_offset;
+
+	require(length == 202u, "sound fixture starts from the canonical batch");
+	fixture_u64(bytes + 90u, 2u);
+	fixture_u32(bytes + 98u, 3u);
+	fixture_u64(bytes + length, 2u);
+	length += 8u;
+	bytes[length++] = 2u;
+	fixture_u16(bytes + length, UINT16_C(0x0201));
+	length += 2u;
+	semantic_offset = length;
+	bytes[length++] = 26u;
+	fixture_u16(bytes + length, 1u);
+	length += 2u;
+	fixture_u16(bytes + length, 0u);
+	length += 2u;
+	bytes[length++] = 0u;
+
+	require(length == sizeof(bytes), "sound fixture has exact SOB1 length");
+	require(sol_wire_observation_is_canonical_v1(bytes, length),
+		"reader accepts canonical teleport sound semantic 26");
+	bytes[semantic_offset] = 27u;
+	require(!sol_wire_observation_is_canonical_v1(bytes, length),
+		"reader rejects sound semantic beyond the canonical enum");
+}
+
 static void test_action_golden_and_round_trip(void)
 {
 	static const uint8_t expected[SOL_WIRE_ACTION_BASE_V1] = {
@@ -257,9 +287,10 @@ int main(void)
 {
 	test_independent_observation_fixture();
 	test_observation_batch_size_boundary();
+	test_observation_accepts_complete_sound_semantic_enum();
 	test_action_golden_and_round_trip();
 	test_negative_zero_normalizes_and_noncanonical_wire_rejects();
 	test_closed_control_and_chat_validation();
-	printf("sol_wire: 5 contract tests passed\n");
+	printf("sol_wire: 6 contract tests passed\n");
 	return 0;
 }

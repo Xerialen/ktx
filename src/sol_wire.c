@@ -220,7 +220,8 @@ static int parse_event_payload(sol_cursor_v1 *cursor, uint8_t channel,
 		uint16_t left = cursor_u16(cursor);
 		uint16_t right = cursor_u16(cursor);
 		uint8_t self_originated = cursor_u8(cursor);
-		return channel == SOL_CHANNEL_SOUND_V1 && semantic <= 7u &&
+		return channel == SOL_CHANNEL_SOUND_V1 &&
+			semantic <= SOL_SOUND_SEMANTIC_MAX_V1 &&
 			(left || right) && self_originated <= 1u && cursor->valid;
 	}
 	case SOL_KIND_TEAMSAY_V1:
