@@ -9,8 +9,15 @@
 enum
 {
 	SOL_KTX_COMMAND_V1_SIZE = 25,
-	SOL_KTX_CANDIDATE_COUNT_V1 = 4
+	SOL_KTX_CANDIDATE_COUNT_V1 = 4,
+	SOL_KTX_EVIDENCE_SEAT_COUNT_V1 = 8
 };
+
+typedef enum sol_ktx_seat_role_v1
+{
+	SOL_KTX_SEAT_CANDIDATE_V1 = 1,
+	SOL_KTX_SEAT_CONTROL_V1 = 2
+} sol_ktx_seat_role_v1;
 
 typedef struct sol_ktx_seat_identity_v1
 {
@@ -18,6 +25,8 @@ typedef struct sol_ktx_seat_identity_v1
 	const char *plan_seat;
 	const char *evidence_seat;
 	const char *player_name;
+	const char *team;
+	sol_ktx_seat_role_v1 role;
 } sol_ktx_seat_identity_v1;
 
 typedef struct sol_ktx_snapshot_v1
@@ -62,5 +71,6 @@ int sol_ktx_encode_command_v1(const sol_ktx_command_v1 *command,
 const sol_ktx_seat_identity_v1 *sol_ktx_plan_identity_v1(const char *plan_seat);
 int sol_ktx_plan_seat_v1(const char *plan_seat, char *evidence_seat, size_t capacity);
 int sol_ktx_add_shape_v1(const char *skill_token, const char *team);
+int sol_ktx_control_selector_v1(int skill_level, const char *team);
 
 #endif

@@ -20,7 +20,6 @@ typedef struct sol_candidate_prepared_v1
 	sol_observation_status_v1 observation_status;
 	size_t batch_length;
 	sol_ktx_command_v1 command;
-	uint8_t command_wire[SOL_KTX_COMMAND_V1_SIZE];
 } sol_candidate_prepared_v1;
 
 struct sol_candidate_registry_v1
@@ -389,12 +388,6 @@ static void prepare_all_bound_v1(sol_candidate_registry_v1 *registry,
 			continue;
 		}
 		neutral_command(msec, entry->observation, &seat->command);
-		if (!sol_ktx_encode_command_v1(&seat->command, seat->command_wire))
-		{
-			neutral_command(msec, NULL, &seat->command);
-			seat->emittable = sol_ktx_encode_command_v1(&seat->command,
-				seat->command_wire);
-		}
 	}
 }
 
@@ -410,18 +403,14 @@ static size_t emit_all_bound_v1(sol_candidate_registry_v1 *registry,
 	{
 		const sol_candidate_entry_v1 *entry = &registry->entries[index];
 		sol_candidate_prepared_v1 *seat = &prepared[index];
-		int evidence_result;
 
 		if (!seat->participating || !seat->emittable)
 		{
 			continue;
 		}
-		evidence_result = ops->evidence(ops->context, index, entry->entity,
-			entry->client_generation, seat->command_wire);
 		ops->command(ops->context, index, entry->entity, &seat->command);
 		if (results)
 		{
-			results[index].evidence_result = evidence_result;
 			results[index].emitted = 1;
 		}
 		emitted++;
@@ -452,8 +441,7 @@ size_t sol_candidate_registry_run_frame_v1(sol_candidate_registry_v1 *registry,
 			}
 		}
 	}
-	if (!registry || !msec || !dt_us || !ops || !ops->healthy ||
-		!ops->evidence || !ops->command)
+	if (!registry || !msec || !dt_us || !ops || !ops->healthy || !ops->command)
 	{
 		return 0u;
 	}

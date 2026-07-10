@@ -42,7 +42,11 @@ static const char seat_nonces[SOL_EVIDENCE_RUN_SEATS_V1][CE_SEAT_NONCE_CAP] = {
 	"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-	"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+	"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+	"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+	"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 };
 
 static void require(int condition, const char *message)
@@ -170,7 +174,8 @@ static void configure_bound_seat(fake_ce_v1 *fake, size_t index)
 	require(sol_evidence_run_record_client_v1(fake->run, index, slot),
 			"client route is recorded before CE bind");
 	fake_bind(fake, index, slot, generation);
-	require(sol_evidence_run_record_bind_v1(fake->run, index, slot, generation),
+	require(sol_evidence_run_record_bind_v1(fake->run, index, slot, generation) ==
+			SOL_EVIDENCE_BIND_ACCEPTED,
 			"successful CE bind route is retained immediately");
 }
 
@@ -341,7 +346,8 @@ static void test_config_and_client_route_reject_ambiguity(void)
 			"first live client route records");
 	require(!sol_evidence_run_record_client_v1(fake.run, 1u, 7u),
 			"duplicate live engine slot is rejected across seats");
-	require(!sol_evidence_run_record_bind_v1(fake.run, 0u, 7u, 0u),
+	require(sol_evidence_run_record_bind_v1(fake.run, 0u, 7u, 0u) ==
+			SOL_EVIDENCE_BIND_REJECTED,
 			"bind generation zero is rejected");
 	sol_evidence_run_fail_stop_v1(fake.run);
 	require(!sol_evidence_run_record_client_v1(fake.run, 1u, 8u),
@@ -366,7 +372,8 @@ static void test_mismatched_successful_bind_keeps_both_cleanup_routes(void)
 			sol_evidence_run_record_client_v1(fake.run, 0u, 7u),
 			"original client removal route records before CE bind");
 	fake_bind(&fake, 0u, 8u, 100u);
-	require(!sol_evidence_run_record_bind_v1(fake.run, 0u, 8u, 100u),
+	require(sol_evidence_run_record_bind_v1(fake.run, 0u, 8u, 100u) ==
+			SOL_EVIDENCE_BIND_RETAINED_CONFLICT,
 			"mismatched successful CE route reports fail-stop");
 	require(sol_evidence_run_binding_v1(fake.run, 0u, &slot, &generation) &&
 			slot == 8u && generation == 100u,
@@ -401,14 +408,19 @@ static void test_duplicate_successful_ce_routes_are_all_retained(void)
 			sol_evidence_run_record_client_v1(fake.run, 1u, 8u),
 			"two distinct original client routes record");
 	fake_bind(&fake, 0u, 7u, 100u);
-	require(sol_evidence_run_record_bind_v1(fake.run, 0u, 7u, 100u),
+	require(sol_evidence_run_record_bind_v1(fake.run, 0u, 7u, 100u) ==
+			SOL_EVIDENCE_BIND_ACCEPTED,
 			"first exact CE route records");
 	fake_bind(&fake, 1u, 7u, 101u);
-	require(!sol_evidence_run_record_bind_v1(fake.run, 1u, 7u, 101u),
+	require(sol_evidence_run_record_bind_v1(fake.run, 1u, 7u, 101u) ==
+			SOL_EVIDENCE_BIND_RETAINED_CONFLICT,
 			"duplicate CE slot reports fail-stop");
 	require(sol_evidence_run_binding_v1(fake.run, 1u, &slot, &generation) &&
 			slot == 7u && generation == 101u,
 			"duplicate successful CE route is retained despite rejection result");
+	require(sol_evidence_run_find_binding_v1(fake.run, 7u, NULL, NULL) ==
+			SOL_EVIDENCE_BINDING_AMBIGUOUS,
+			"duplicate successful CE slot is never exposed as an exact command route");
 	fake.trace_length = 0u;
 	fake.trace[0] = '\0';
 	sol_evidence_run_fail_stop_v1(fake.run);
@@ -432,7 +444,8 @@ static void test_late_successful_bind_is_retained_while_reporting_fail_stop(void
 			"late-bind original client route records");
 	fake_bind(&fake, 0u, 7u, 100u);
 	sol_evidence_run_fail_stop_v1(fake.run);
-	require(!sol_evidence_run_record_bind_v1(fake.run, 0u, 7u, 100u),
+	require(sol_evidence_run_record_bind_v1(fake.run, 0u, 7u, 100u) ==
+			SOL_EVIDENCE_BIND_RETAINED_CONFLICT,
 			"cleanup-pending successful bind reports fail-stop");
 	require(sol_evidence_run_binding_v1(fake.run, 0u, &slot, &generation) &&
 			slot == 7u && generation == 100u,
@@ -440,6 +453,51 @@ static void test_late_successful_bind_is_retained_while_reporting_fail_stop(void
 	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
 			SOL_EVIDENCE_CLEANUP_COMPLETE,
 			"late successful bind is safely unbound before client removal");
+	sol_evidence_run_destroy_v1(fake.run);
+}
+
+static void test_all_eight_generic_seats_bind_cleanup_and_reuse(void)
+{
+	static const size_t launch_order[SOL_EVIDENCE_RUN_SEATS_V1] = {
+		0u, 4u, 1u, 5u, 2u, 6u, 3u, 7u
+	};
+	fake_ce_v1 fake = { 0 };
+	size_t launched;
+
+	require(SOL_EVIDENCE_RUN_SEATS_V1 == 8,
+			"generic evidence lifecycle owns exactly eight seats");
+	fake.run = sol_evidence_run_create_v1();
+	require(fake.run != NULL && sol_evidence_run_begin_v1(fake.run, run_nonce,
+			"ktx-match/v1", fake_call, &fake), "eight-seat fixture begins");
+	for (launched = 0; launched < SOL_EVIDENCE_RUN_SEATS_V1; ++launched)
+	{
+		size_t index = launch_order[launched];
+		size_t found = SOL_EVIDENCE_RUN_SEATS_V1;
+		uint32_t generation = 0u;
+
+		configure_bound_seat(&fake, index);
+		require(sol_evidence_run_find_binding_v1(fake.run,
+				7u + (uint32_t) index, &found, &generation) ==
+				SOL_EVIDENCE_BINDING_EXACT && found == index
+			&& generation == 100u + (uint32_t) index,
+				"each alternating launch exposes one unique exact command route");
+	}
+	require(sol_evidence_run_find_binding_v1(fake.run, 31u, NULL, NULL) ==
+			SOL_EVIDENCE_BINDING_NONE,
+			"unbound engine slot remains an exact bypass");
+	fake.trace_length = 0u;
+	fake.trace[0] = '\0';
+	sol_evidence_run_request_close_v1(fake.run);
+	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
+			SOL_EVIDENCE_CLEANUP_COMPLETE
+		&& !strcmp(fake.trace,
+			"E12345678R1R2R3R4R5R6R7R8"),
+			"all eight routes END, UNBIND, and remove in canonical seat order");
+	require(sol_evidence_run_begin_v1(fake.run, second_run_nonce, "ktx-match/v1",
+			fake_call, &fake), "eight-seat cleanup permits a reusable second epoch");
+	sol_evidence_run_request_close_v1(fake.run);
+	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
+			SOL_EVIDENCE_CLEANUP_COMPLETE, "empty reused epoch closes cleanly");
 	sol_evidence_run_destroy_v1(fake.run);
 }
 
@@ -454,6 +512,7 @@ int main(void)
 	test_mismatched_successful_bind_keeps_both_cleanup_routes();
 	test_duplicate_successful_ce_routes_are_all_retained();
 	test_late_successful_bind_is_retained_while_reporting_fail_stop();
-	printf("sol_evidence_run: 9 contract tests passed\n");
+	test_all_eight_generic_seats_bind_cleanup_and_reuse();
+	printf("sol_evidence_run: 10 contract tests passed\n");
 	return 0;
 }

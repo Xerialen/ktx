@@ -227,11 +227,15 @@ int sol_ktx_encode_command_v1(const sol_ktx_command_v1 *command,
 
 const sol_ktx_seat_identity_v1 *sol_ktx_plan_identity_v1(const char *plan_seat)
 {
-	static const sol_ktx_seat_identity_v1 identities[SOL_KTX_CANDIDATE_COUNT_V1] = {
-		{ 1u, "1", "candidate-1", "cand-1" },
-		{ 2u, "2", "candidate-2", "cand-2" },
-		{ 3u, "3", "candidate-3", "cand-3" },
-		{ 4u, "4", "candidate-4", "cand-4" }
+	static const sol_ktx_seat_identity_v1 identities[SOL_KTX_EVIDENCE_SEAT_COUNT_V1] = {
+		{ 1u, "1", "candidate-1", "cand-1", "red", SOL_KTX_SEAT_CANDIDATE_V1 },
+		{ 2u, "2", "candidate-2", "cand-2", "red", SOL_KTX_SEAT_CANDIDATE_V1 },
+		{ 3u, "3", "candidate-3", "cand-3", "red", SOL_KTX_SEAT_CANDIDATE_V1 },
+		{ 4u, "4", "candidate-4", "cand-4", "red", SOL_KTX_SEAT_CANDIDATE_V1 },
+		{ 5u, "5", "control-5", "ctrl-5", "blue", SOL_KTX_SEAT_CONTROL_V1 },
+		{ 6u, "6", "control-6", "ctrl-6", "blue", SOL_KTX_SEAT_CONTROL_V1 },
+		{ 7u, "7", "control-7", "ctrl-7", "blue", SOL_KTX_SEAT_CONTROL_V1 },
+		{ 8u, "8", "control-8", "ctrl-8", "blue", SOL_KTX_SEAT_CONTROL_V1 }
 	};
 	unsigned index;
 
@@ -239,7 +243,7 @@ const sol_ktx_seat_identity_v1 *sol_ktx_plan_identity_v1(const char *plan_seat)
 	{
 		return NULL;
 	}
-	for (index = 0; index < SOL_KTX_CANDIDATE_COUNT_V1; ++index)
+	for (index = 0; index < SOL_KTX_EVIDENCE_SEAT_COUNT_V1; ++index)
 	{
 		if (!strcmp(plan_seat, identities[index].plan_seat))
 		{
@@ -270,4 +274,9 @@ int sol_ktx_plan_seat_v1(const char *plan_seat, char *evidence_seat, size_t capa
 int sol_ktx_add_shape_v1(const char *skill_token, const char *team)
 {
 	return skill_token && team && !strcmp(skill_token, "20") && !strcmp(team, "red");
+}
+
+int sol_ktx_control_selector_v1(int skill_level, const char *team)
+{
+	return team && skill_level == 20 && !strcmp(team, "blue");
 }

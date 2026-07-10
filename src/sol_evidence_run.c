@@ -191,8 +191,9 @@ int sol_evidence_run_record_client_v1(sol_evidence_run_v1 *run,
 	return 1;
 }
 
-int sol_evidence_run_record_bind_v1(sol_evidence_run_v1 *run,
-	size_t index, uint32_t engine_slot, uint32_t client_generation)
+sol_evidence_bind_record_result_v1 sol_evidence_run_record_bind_v1(
+	sol_evidence_run_v1 *run, size_t index, uint32_t engine_slot,
+	uint32_t client_generation)
 {
 	sol_evidence_run_seat_v1 *seat;
 	int route_matches_client;
@@ -202,12 +203,12 @@ int sol_evidence_run_record_bind_v1(sol_evidence_run_v1 *run,
 	if (!run || !run->active || !engine_slot || !client_generation
 		|| index >= SOL_EVIDENCE_RUN_SEATS_V1)
 	{
-		return 0;
+		return SOL_EVIDENCE_BIND_REJECTED;
 	}
 	seat = &run->seats[index];
 	if (!seat->configured || seat->ce_bound)
 	{
-		return 0;
+		return SOL_EVIDENCE_BIND_REJECTED;
 	}
 	route_matches_client = seat->client_present
 		&& seat->client_slot == engine_slot;
@@ -223,7 +224,8 @@ int sol_evidence_run_record_bind_v1(sol_evidence_run_v1 *run,
 	seat->bind_engine_slot = engine_slot;
 	seat->client_generation = client_generation;
 	seat->ce_bound = 1;
-	return route_matches_client && unique_slot && accepted_before_cleanup;
+	return route_matches_client && unique_slot && accepted_before_cleanup ?
+		SOL_EVIDENCE_BIND_ACCEPTED : SOL_EVIDENCE_BIND_RETAINED_CONFLICT;
 }
 
 int sol_evidence_run_find_client_v1(const sol_evidence_run_v1 *run,
@@ -279,6 +281,54 @@ int sol_evidence_run_binding_v1(const sol_evidence_run_v1 *run,
 		*client_generation = seat->client_generation;
 	}
 	return 1;
+}
+
+sol_evidence_binding_lookup_result_v1 sol_evidence_run_find_binding_v1(
+	const sol_evidence_run_v1 *run, uint32_t engine_slot, size_t *index,
+	uint32_t *client_generation)
+{
+	size_t candidate;
+	size_t found = SOL_EVIDENCE_RUN_SEATS_V1;
+
+	if (index)
+	{
+		*index = SOL_EVIDENCE_RUN_SEATS_V1;
+	}
+	if (client_generation)
+	{
+		*client_generation = 0u;
+	}
+	if (!run || !run->active || !engine_slot)
+	{
+		return SOL_EVIDENCE_BINDING_NONE;
+	}
+	for (candidate = 0; candidate < SOL_EVIDENCE_RUN_SEATS_V1; ++candidate)
+	{
+		const sol_evidence_run_seat_v1 *seat = &run->seats[candidate];
+
+		if (!seat->ce_bound || seat->bind_engine_slot != engine_slot)
+		{
+			continue;
+		}
+		if (found != SOL_EVIDENCE_RUN_SEATS_V1)
+		{
+			return SOL_EVIDENCE_BINDING_AMBIGUOUS;
+		}
+		found = candidate;
+	}
+	if (found == SOL_EVIDENCE_RUN_SEATS_V1)
+	{
+		return SOL_EVIDENCE_BINDING_NONE;
+	}
+	if (index)
+	{
+		*index = found;
+	}
+	if (client_generation)
+	{
+		*client_generation = run->seats[found].client_generation;
+	}
+	return SOL_EVIDENCE_BINDING_EXACT;
 }
 
 void sol_evidence_run_request_close_v1(sol_evidence_run_v1 *run)

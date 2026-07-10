@@ -366,6 +366,8 @@ qbool HasWeapon(gedict_t *player, int weapon);
 int FrogbotSkillLevel(void);
 int FrogbotHealth(void);
 int FrogbotWeapon(void);
+int FrogbotsRemoveBotByEntity(int entity);
+int FrogbotsForgetBotByEntity(int entity);
 int FrogbotQuadMultiplier(void);
 qbool FrogbotItemPickupBonus(void);
 qbool FrogbotEasySkillMode(void);

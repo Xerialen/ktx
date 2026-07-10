@@ -10,6 +10,19 @@
 #define SOL_OBSERVATION_MAX_ANCHORS_V1 16u
 #define SOL_OBSERVATION_MAX_ASYNC_V1 128u
 
+static const uint8_t sol_static_asset_set_id_v1[32] = {
+	0x57, 0x1c, 0x7e, 0x66, 0x68, 0xb2, 0xbc, 0x1f,
+	0x25, 0x9d, 0x60, 0xf2, 0xfd, 0x32, 0x17, 0x11,
+	0x3e, 0x5b, 0x06, 0x94, 0xf8, 0x54, 0x2c, 0xc2,
+	0x89, 0x4a, 0x09, 0x84, 0xa8, 0x81, 0x2a, 0xb0
+};
+static const uint8_t sol_sensory_profile_id_v1[32] = {
+	0xb1, 0x5a, 0x18, 0xab, 0xfa, 0x89, 0xbc, 0x7e,
+	0x53, 0xc8, 0xe9, 0x0b, 0xf7, 0x0f, 0xaf, 0x55,
+	0x92, 0xee, 0x93, 0x47, 0xe1, 0x52, 0x8b, 0x7f,
+	0xc1, 0x07, 0x7f, 0x12, 0xb2, 0x79, 0x2d, 0x92
+};
+
 struct sol_observation_client_v1 {
 	cov_profile_v1 profile;
 	cov_get_committed_v1 get;
@@ -28,14 +41,21 @@ static void init_header(cov_payload_header_v1 *header, size_t size)
 	header->struct_size = (uint32_t)size;
 }
 
-static int identity_nonzero(const uint8_t identity[32])
+static void seal_profile(cov_profile_v1 *profile, uint32_t engine_slot,
+	uint32_t client_generation)
 {
-	uint8_t any = 0;
-	size_t i;
-
-	for (i = 0; i < 32u; ++i)
-		any |= identity[i];
-	return any != 0;
+	memset(profile, 0, sizeof(*profile));
+	init_header(&profile->header, sizeof(*profile));
+	profile->engine_slot = engine_slot;
+	profile->client_generation = client_generation;
+	memcpy(profile->static_asset_set_id, sol_static_asset_set_id_v1,
+		sizeof(profile->static_asset_set_id));
+	memcpy(profile->sensory_profile_id, sol_sensory_profile_id_v1,
+		sizeof(profile->sensory_profile_id));
+	profile->max_batch_bytes = COV_MAX_BATCH_BYTES_V1;
+	profile->max_seen_entities = SOL_OBSERVATION_MAX_SEEN_V1;
+	profile->max_static_anchors = SOL_OBSERVATION_MAX_ANCHORS_V1;
+	profile->max_async_events = SOL_OBSERVATION_MAX_ASYNC_V1;
 }
 
 static int profile_valid(const cov_profile_v1 *profile, uint32_t engine_slot,
@@ -45,8 +65,10 @@ static int profile_valid(const cov_profile_v1 *profile, uint32_t engine_slot,
 		profile->header.struct_size == sizeof(*profile) &&
 		profile->engine_slot == engine_slot &&
 		profile->client_generation == client_generation &&
-		identity_nonzero(profile->static_asset_set_id) &&
-		identity_nonzero(profile->sensory_profile_id) &&
+		!memcmp(profile->static_asset_set_id, sol_static_asset_set_id_v1,
+			sizeof(profile->static_asset_set_id)) &&
+		!memcmp(profile->sensory_profile_id, sol_sensory_profile_id_v1,
+			sizeof(profile->sensory_profile_id)) &&
 		profile->max_batch_bytes == COV_MAX_BATCH_BYTES_V1 &&
 		profile->max_seen_entities == SOL_OBSERVATION_MAX_SEEN_V1 &&
 		profile->max_static_anchors == SOL_OBSERVATION_MAX_ANCHORS_V1 &&
@@ -127,6 +149,7 @@ sol_observation_client_v1 *sol_observation_client_create_v1(
 	sol_observation_call_v1 call, void *call_context)
 {
 	sol_observation_client_v1 *client;
+	cov_profile_v1 response;
 	intptr_t result;
 
 	if (!call || engine_slot == 0u ||
@@ -137,13 +160,12 @@ sol_observation_client_v1 *sol_observation_client_create_v1(
 		return NULL;
 	client->call = call;
 	client->call_context = call_context;
-	init_header(&client->profile.header, sizeof(client->profile));
-	client->profile.engine_slot = engine_slot;
-	client->profile.client_generation = client_generation;
+	seal_profile(&client->profile, engine_slot, client_generation);
+	response = client->profile;
 	result = client->call(client->call_context, COV_GET_PROFILE,
-		&client->profile, (intptr_t)sizeof(client->profile));
+		&response, (intptr_t)sizeof(response));
 	if (result != COV_RESULT_OK ||
-		!profile_valid(&client->profile, engine_slot, client_generation)) {
+		!profile_valid(&response, engine_slot, client_generation)) {
 		sol_observation_client_destroy_v1(client);
 		return NULL;
 	}

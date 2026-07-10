@@ -8,8 +8,22 @@
 
 enum
 {
-	SOL_EVIDENCE_RUN_SEATS_V1 = 4
+	SOL_EVIDENCE_RUN_SEATS_V1 = 8
 };
+
+typedef enum sol_evidence_bind_record_result_v1
+{
+	SOL_EVIDENCE_BIND_REJECTED = 0,
+	SOL_EVIDENCE_BIND_ACCEPTED = 1,
+	SOL_EVIDENCE_BIND_RETAINED_CONFLICT = 2
+} sol_evidence_bind_record_result_v1;
+
+typedef enum sol_evidence_binding_lookup_result_v1
+{
+	SOL_EVIDENCE_BINDING_NONE = 0,
+	SOL_EVIDENCE_BINDING_EXACT = 1,
+	SOL_EVIDENCE_BINDING_AMBIGUOUS = 2
+} sol_evidence_binding_lookup_result_v1;
 
 typedef struct sol_evidence_run_v1 sol_evidence_run_v1;
 
@@ -43,15 +57,19 @@ int sol_evidence_run_record_client_v1(sol_evidence_run_v1 *run,
 	size_t index, uint32_t engine_slot);
 /*
  * Call only after CE_BIND returns OK.  Every syntactically valid successful
- * route is retained for safe UNBIND; a zero return reports that the retained
- * route conflicts with local client/run state and the caller must fail-stop.
+ * route is retained for safe UNBIND; RETAINED_CONFLICT reports that the route
+ * conflicts with local client/run state and the caller must fail-stop.
  */
-int sol_evidence_run_record_bind_v1(sol_evidence_run_v1 *run,
+sol_evidence_bind_record_result_v1 sol_evidence_run_record_bind_v1(
+	sol_evidence_run_v1 *run,
 	size_t index, uint32_t engine_slot, uint32_t client_generation);
 int sol_evidence_run_binding_v1(const sol_evidence_run_v1 *run,
 	size_t index, uint32_t *engine_slot, uint32_t *client_generation);
 int sol_evidence_run_find_client_v1(const sol_evidence_run_v1 *run,
 	uint32_t engine_slot, size_t *index);
+sol_evidence_binding_lookup_result_v1 sol_evidence_run_find_binding_v1(
+	const sol_evidence_run_v1 *run, uint32_t engine_slot, size_t *index,
+	uint32_t *client_generation);
 
 void sol_evidence_run_request_close_v1(sol_evidence_run_v1 *run);
 void sol_evidence_run_fail_stop_v1(sol_evidence_run_v1 *run);

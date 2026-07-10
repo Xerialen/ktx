@@ -23,9 +23,7 @@ struct registry_fixture_v1
 	fake_observer_v1 observers[SOL_KTX_CANDIDATE_COUNT_V1];
 	char trace[128];
 	size_t trace_length;
-	int evidence_calls[SOL_KTX_CANDIDATE_COUNT_V1];
 	int command_calls[SOL_KTX_CANDIDATE_COUNT_V1];
-	int fail_evidence_index;
 	int remove_calls[SOL_KTX_CANDIDATE_COUNT_V1];
 };
 
@@ -54,20 +52,32 @@ static intptr_t fake_observation_call(void *context, intptr_t operation,
 
 	if (operation == COV_GET_PROFILE)
 	{
+		static const uint8_t asset_id[32] = {
+			0x57, 0x1c, 0x7e, 0x66, 0x68, 0xb2, 0xbc, 0x1f,
+			0x25, 0x9d, 0x60, 0xf2, 0xfd, 0x32, 0x17, 0x11,
+			0x3e, 0x5b, 0x06, 0x94, 0xf8, 0x54, 0x2c, 0xc2,
+			0x89, 0x4a, 0x09, 0x84, 0xa8, 0x81, 0x2a, 0xb0
+		};
+		static const uint8_t sensory_id[32] = {
+			0xb1, 0x5a, 0x18, 0xab, 0xfa, 0x89, 0xbc, 0x7e,
+			0x53, 0xc8, 0xe9, 0x0b, 0xf7, 0x0f, 0xaf, 0x55,
+			0x92, 0xee, 0x93, 0x47, 0xe1, 0x52, 0x8b, 0x7f,
+			0xc1, 0x07, 0x7f, 0x12, 0xb2, 0x79, 0x2d, 0x92
+		};
 		cov_profile_v1 *profile = payload;
 
 		require(payload_size == (intptr_t) sizeof(*profile),
 				"profile request uses the exact ABI size");
 		require(profile->engine_slot == observer->slot &&
-				profile->client_generation == observer->generation,
-				"private profile request retains its own route");
+			profile->client_generation == observer->generation &&
+			!memcmp(profile->static_asset_set_id, asset_id, sizeof(asset_id)) &&
+			!memcmp(profile->sensory_profile_id, sensory_id, sizeof(sensory_id)) &&
+			profile->max_batch_bytes == COV_MAX_BATCH_BYTES_V1 &&
+			profile->max_seen_entities == 96u &&
+			profile->max_static_anchors == 16u &&
+			profile->max_async_events == 128u,
+				"private profile request is pre-sealed to the exact shared contract");
 		observer->profile_calls++;
-		memset(profile->static_asset_set_id, (int) (0x10u + observer->index), 32u);
-		memset(profile->sensory_profile_id, (int) (0x20u + observer->index), 32u);
-		profile->max_batch_bytes = COV_MAX_BATCH_BYTES_V1;
-		profile->max_seen_entities = 96u;
-		profile->max_static_anchors = 16u;
-		profile->max_async_events = 128u;
 		return COV_RESULT_OK;
 	}
 	if (operation == COV_GET_COMMITTED)
@@ -97,9 +107,8 @@ static int seat_is_healthy(void *context, size_t index, int entity,
 		client_generation == observer->generation;
 }
 
-static int write_evidence(void *context, size_t index, int entity,
-	uint32_t client_generation,
-	const uint8_t command_wire[SOL_KTX_COMMAND_V1_SIZE])
+static void write_command(void *context, size_t index, int entity,
+	const sol_ktx_command_v1 *command)
 {
 	registry_fixture_v1 *fixture = context;
 	unsigned poll_index;
@@ -109,24 +118,9 @@ static int write_evidence(void *context, size_t index, int entity,
 		if (!fixture->observers[poll_index].invalid_poll)
 		{
 			require(fixture->observers[poll_index].poll_calls == 1,
-					"no evidence or command side effect occurs before all healthy polls");
+					"no command side effect occurs before all healthy polls");
 		}
 	}
-	require(entity == (int) fixture->observers[index].slot &&
-		client_generation == fixture->observers[index].generation,
-			"evidence route is seat-private");
-	require(!memcmp(command_wire, "SUC1", 4u),
-			"evidence receives one complete canonical neutral command");
-	fixture->evidence_calls[index]++;
-	append_trace(fixture, 'E', index);
-	return (int) index == fixture->fail_evidence_index ? -1 : 1;
-}
-
-static void write_command(void *context, size_t index, int entity,
-	const sol_ktx_command_v1 *command)
-{
-	registry_fixture_v1 *fixture = context;
-
 	require(entity == (int) fixture->observers[index].slot,
 			"command target is host-bound and seat-private");
 	require(command->msec == 13u && command->angles[0] == 0.0f &&
@@ -228,31 +222,27 @@ static void test_four_candidate_lifecycle_has_no_cross_seat_alias(void)
 static void test_frame_polls_all_inputs_before_any_neutral_command(void)
 {
 	static const char expected_trace[] =
-		"P1P2P3P4E1C1E2C2E3C3E4C4";
+		"P1P2P3P4C1C2C3C4";
 	registry_fixture_v1 fixture = { 0 };
 	sol_candidate_frame_result_v1 results[SOL_KTX_CANDIDATE_COUNT_V1];
 	sol_candidate_frame_ops_v1 ops = {
-		&fixture, seat_is_healthy, write_evidence, write_command
+		&fixture, seat_is_healthy, write_command
 	};
 	sol_candidate_registry_v1 *registry = sol_candidate_registry_create_v1();
 	size_t index;
 
 	require(registry != NULL, "phase registry allocation succeeds");
-	fixture.fail_evidence_index = 2;
 	bind_four_private_candidates(registry, &fixture);
 	require(sol_candidate_registry_run_frame_v1(registry, 13u, 13000u,
 			&ops, results) == SOL_KTX_CANDIDATE_COUNT_V1,
-			"one frame emits exactly one pair for all four healthy bound candidates");
+			"one frame emits one command for all four healthy bound candidates");
 	require(!strcmp(fixture.trace, expected_trace),
-			"all four polls precede all evidence and command side effects");
+			"all four polls precede all command side effects");
 	for (index = 0; index < SOL_KTX_CANDIDATE_COUNT_V1; ++index)
 	{
-		require(fixture.evidence_calls[index] == 1 && fixture.command_calls[index] == 1
-				&& results[index].emitted,
-				"every healthy candidate receives one evidence request and one command");
+		require(fixture.command_calls[index] == 1 && results[index].emitted,
+				"every healthy candidate receives one command through the global writer");
 	}
-	require(results[2].evidence_result == -1 && fixture.command_calls[2] == 1,
-			"evidence failure never rewrites or suppresses the prepared current command");
 	sol_candidate_registry_destroy_v1(registry);
 }
 
@@ -261,13 +251,12 @@ static void test_invalid_observer_emits_neutral_then_requires_termination(void)
 	registry_fixture_v1 fixture = { 0 };
 	sol_candidate_frame_result_v1 results[SOL_KTX_CANDIDATE_COUNT_V1];
 	sol_candidate_frame_ops_v1 ops = {
-		&fixture, seat_is_healthy, write_evidence, write_command
+		&fixture, seat_is_healthy, write_command
 	};
 	sol_candidate_registry_v1 *registry = sol_candidate_registry_create_v1();
 	size_t index;
 
 	require(registry != NULL, "failure registry allocation succeeds");
-	fixture.fail_evidence_index = -1;
 	bind_four_private_candidates(registry, &fixture);
 	fixture.observers[1].invalid_poll = 1;
 	require(sol_candidate_registry_run_frame_v1(registry, 13u, 13000u,
@@ -275,8 +264,7 @@ static void test_invalid_observer_emits_neutral_then_requires_termination(void)
 			"invalid observer still emits its one current-frame neutral pair");
 	for (index = 0; index < SOL_KTX_CANDIDATE_COUNT_V1; ++index)
 	{
-		require(fixture.evidence_calls[index] == 1 &&
-				fixture.command_calls[index] == 1,
+		require(fixture.command_calls[index] == 1,
 				"one invalid route cannot cancel any current-frame candidate writer");
 	}
 	require(results[1].observation_status == SOL_OBSERVATION_INVALID &&

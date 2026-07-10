@@ -12,21 +12,21 @@ _Static_assert(offsetof(cov_get_committed_v1, batch) == 36u,
 	"COV v1 native GET prefix ABI changed");
 
 static const uint8_t asset_id[32] = {
-	0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-	0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-	0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-	0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11
+	0x57, 0x1c, 0x7e, 0x66, 0x68, 0xb2, 0xbc, 0x1f,
+	0x25, 0x9d, 0x60, 0xf2, 0xfd, 0x32, 0x17, 0x11,
+	0x3e, 0x5b, 0x06, 0x94, 0xf8, 0x54, 0x2c, 0xc2,
+	0x89, 0x4a, 0x09, 0x84, 0xa8, 0x81, 0x2a, 0xb0
 };
 static const uint8_t sensory_id[32] = {
-	0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
-	0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
-	0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
-	0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22
+	0xb1, 0x5a, 0x18, 0xab, 0xfa, 0x89, 0xbc, 0x7e,
+	0x53, 0xc8, 0xe9, 0x0b, 0xf7, 0x0f, 0xaf, 0x55,
+	0x92, 0xee, 0x93, 0x47, 0xe1, 0x52, 0x8b, 0x7f,
+	0xc1, 0x07, 0x7f, 0x12, 0xb2, 0x79, 0x2d, 0x92
 };
 static const char observation_golden_hex[] =
 	"534f42310000000000000000c8320000"
-	"1111111111111111111111111111111111111111111111111111111111111111"
-	"2222222222222222222222222222222222222222222222222222222222222222"
+	"571c7e6668b2bc1f259d60f2fd3217113e5b0694f8542cc2894a0984a8812ab0"
+	"b15a18abfa89bc7e53c8e90bf70faf5592ee9347e1528b7fc1077f12b2792d92"
 	"01000000000000000001010000000000000002000000"
 	"0000000000000000000100"
 	"0101020100f8ff10001800640038ff0000000000400080b000"
@@ -40,6 +40,7 @@ typedef struct fake_host_v1 {
 	uint32_t generation;
 	uint32_t health;
 	int profile_calls;
+	int profile_request_was_sealed;
 	int profile_mode;
 	int poll_calls;
 	int empty_polls;
@@ -100,21 +101,26 @@ static intptr_t fake_profile_call(void *context, intptr_t operation,
 			profile->header.protocol_version != COV_PROTOCOL_VERSION_V1 ||
 			profile->header.struct_size != sizeof(*profile) ||
 			profile->engine_slot != host->slot ||
-			profile->client_generation != host->generation)
+			profile->client_generation != host->generation ||
+			memcmp(profile->static_asset_set_id, asset_id, sizeof(asset_id)) ||
+			memcmp(profile->sensory_profile_id, sensory_id, sizeof(sensory_id)) ||
+			profile->max_batch_bytes != COV_MAX_BATCH_BYTES_V1 ||
+			profile->max_seen_entities != 96u ||
+			profile->max_static_anchors != 16u ||
+			profile->max_async_events != 128u)
 			return COV_RESULT_INVALID;
 		host->profile_calls++;
-		memcpy(profile->static_asset_set_id, asset_id, sizeof(asset_id));
-		memcpy(profile->sensory_profile_id, sensory_id, sizeof(sensory_id));
-		profile->max_batch_bytes = COV_MAX_BATCH_BYTES_V1;
-		profile->max_seen_entities = 96u;
-		profile->max_static_anchors = 16u;
-		profile->max_async_events = 128u;
+		host->profile_request_was_sealed = 1;
 		if (host->profile_mode == 1)
 			profile->header.struct_size--;
 		else if (host->profile_mode == 2)
 			profile->max_batch_bytes--;
 		else if (host->profile_mode == 3)
 			profile->client_generation++;
+		else if (host->profile_mode == 4)
+			profile->static_asset_set_id[0] ^= 1u;
+		else if (host->profile_mode == 5)
+			profile->sensory_profile_id[31] ^= 1u;
 		return COV_RESULT_OK;
 	}
 	if (operation == COV_GET_COMMITTED) {
@@ -173,7 +179,8 @@ static void test_profile_query_is_generation_bound_and_exact(void)
 
 	require(client != NULL, "valid bound generation creates an observation client");
 	profile = sol_observation_client_profile_v1(client);
-	require(host.profile_calls == 1 && host.last_operation == COV_GET_PROFILE &&
+	require(host.profile_calls == 1 && host.profile_request_was_sealed &&
+		host.last_operation == COV_GET_PROFILE &&
 		host.last_payload_size == (intptr_t)sizeof(cov_profile_v1),
 		"bind issues exactly one closed profile operation and native size");
 	require(profile != NULL && profile->engine_slot == host.slot &&
@@ -184,7 +191,7 @@ static void test_profile_query_is_generation_bound_and_exact(void)
 		profile->max_seen_entities == 96u &&
 		profile->max_static_anchors == 16u &&
 		profile->max_async_events == 128u,
-		"profile is engine-authored and retains its generation route");
+		"profile remains the exact pre-sealed KTX contract and generation route");
 	sol_observation_client_destroy_v1(client);
 }
 
@@ -300,12 +307,12 @@ static void test_malformed_profile_and_batch_fail_closed(void)
 	host.slot = 4u;
 	host.generation = 12u;
 	host.health = 40u;
-	for (mode = 1; mode <= 3; ++mode) {
+	for (mode = 1; mode <= 5; ++mode) {
 		host.profile_mode = mode;
 		client = sol_observation_client_create_v1(host.slot, host.generation,
 			fake_profile_call, &host);
 		require(client == NULL,
-			"mutated native profile header, capacity, or generation rejects");
+			"mutated header, route, caps, or sealed identity rejects");
 	}
 	host.profile_mode = 0;
 	host.poll_mode = 2;

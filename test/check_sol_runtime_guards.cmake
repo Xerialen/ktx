@@ -1,3 +1,5 @@
+cmake_policy(SET CMP0007 NEW)
+
 function(require_occurrences path pattern minimum description)
 	file(READ "${path}" contents)
 	string(REGEX MATCHALL "${pattern}" matches "${contents}")
@@ -90,11 +92,29 @@ require_exact_occurrences("${SOL_EVIDENCE_RUN}"
 	"one run-level evidence end call site")
 require_exact_occurrences("${SOL_EVIDENCE_RUN}" "CE_UNBIND" 1
 	"one safe evidence unbind call site")
-require_exact_occurrences("${SOL_RUNTIME}"
+require_exact_occurrences("${G_SYSCALLS}"
 	"trap_ControllerEvidenceV1\\(CE_FRAME_REQUEST" 1
-	"one production frame-evidence writer")
+	"one global actual-command evidence writer")
+require_exact_occurrences("${G_SYSCALLS}" "syscall\\(G_SetBotCMD" 1
+	"one raw engine command syscall provenance point")
+require_exact_occurrences("${G_SYSCALLS}" "sol_actual_command_submit_v1\\(" 1
+	"public command wrapper delegates exactly once to the global hook")
+forbid_occurrences("${SOL_RUNTIME}" "CE_FRAME_REQUEST"
+	"candidate-specific frame-evidence callback after global interception")
+forbid_occurrences("${SOL_CANDIDATE_REGISTRY}" "(CE_FRAME_REQUEST|candidate_evidence)"
+	"candidate registry owning evidence instead of command preparation")
 require_exact_occurrences("${SOL_RUNTIME}" "trap_SetBotCMD\\(" 1
-	"one production command writer")
+	"candidate commands use the public globally intercepted writer")
+require_exact_occurrences("${BOT_MOVEMENT}" "trap_SetBotCMD\\(" 1
+	"stock movement uses the public globally intercepted writer")
+require_exact_occurrences("${BOT_COMMANDS}" "trap_SetBotCMD\\(" 1
+	"stock debug command uses the public globally intercepted writer")
+require_exact_occurrences("${NANO_BRAIN}" "trap_SetBotCMD\\(" 2
+	"both nano command routes use the public globally intercepted writer")
+foreach(producer "${SOL_RUNTIME}" "${BOT_MOVEMENT}" "${BOT_COMMANDS}" "${NANO_BRAIN}")
+	forbid_occurrences("${producer}" "G_SetBotCMD"
+		"producer bypassing the one raw syscall provenance point")
+endforeach()
 forbid_occurrences("${SOL_RUNTIME}" "(CE_MATCH_END|CE_UNBIND)"
 	"end or unbind operation outside the safe evidence lifecycle")
 require_occurrences("${SOL_RUNTIME}" "sol_evidence_run_fail_stop_v1" 5
@@ -106,8 +126,8 @@ require_exact_occurrences("${SOL_RUNTIME}"
 	"sol_runtime_schedule_decide_v1\\(" 2
 	"both runtime frame phases use the shared scheduling policy")
 require_exact_occurrences("${SOL_RUNTIME}"
-	"sol_evidence_run_emissions_open_v1\\(" 2
-	"runtime scheduling distinguishes emissions-open from lifecycle-active")
+	"sol_evidence_run_emissions_open_v1\\(" 3
+	"runtime scheduling and the command hook distinguish emissions-open from active")
 require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_candidates\\)" 1
 	"bot frame obeys the candidate scheduling decision")
 require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_cleanup\\)" 1
@@ -145,12 +165,15 @@ endif()
 string(FIND "${sol_runtime_contents}"
 	"identity = sol_ktx_plan_identity_v1(plan_seat);" identity_index)
 string(FIND "${sol_runtime_contents}"
-	"SOL evidencebind accepts candidate seats 1..4 only" control_reject_index)
-string(FIND "${sol_runtime_contents}" "|| !ensure_runtime()" registry_mutation_index)
-if(identity_index LESS 0 OR control_reject_index LESS identity_index
-		OR registry_mutation_index LESS control_reject_index)
+	"SOL evidencebind accepts lifecycle seats 1..8." eight_seat_index)
+string(FIND "${sol_runtime_contents}"
+	"ControllerObservationV1 is unavailable for candidate seats." candidate_cov_index)
+string(FIND "${sol_runtime_contents}" "|| !ensure_runtime()" runtime_mutation_index)
+if(identity_index LESS 0 OR eight_seat_index LESS identity_index
+		OR candidate_cov_index LESS eight_seat_index
+		OR runtime_mutation_index LESS candidate_cov_index)
 	message(FATAL_ERROR
-		"control seats 5..8 must be rejected before the SOL run epoch or registry can mutate")
+		"eight-seat identity and candidate-only COV eligibility must precede runtime mutation")
 endif()
 
 string(FIND "${sol_runtime_contents}"
@@ -166,6 +189,73 @@ if(ce_bind_index LESS 0 OR record_bind_index LESS ce_bind_index
 		OR observation_bind_index LESS identity_validation_index)
 	message(FATAL_ERROR
 		"every CE_BIND OK route must be retained before identity validation or COV creation")
+endif()
+
+require_occurrences("${SOL_KTX_ADAPTER_H}" "SOL_KTX_CANDIDATE_COUNT_V1 = 4" 1
+	"candidate policy registry remains exactly four seats")
+require_occurrences("${SOL_KTX_ADAPTER_H}" "SOL_KTX_EVIDENCE_SEAT_COUNT_V1 = 8" 1
+	"generic evidence lifecycle owns exactly eight seats")
+require_occurrences("${SOL_KTX_ADAPTER}" "control-[5-8]" 4
+	"four canonical control evidence identities exist")
+require_occurrences("${SOL_KTX_ADAPTER}" "ctrl-[5-8]" 4
+	"four canonical stock-control player names exist")
+require_occurrences("${SOL_KTX_ADAPTER}"
+	"skill_level == 20 && !strcmp\\(team, \"blue\"\\)" 1
+	"stock control selector is exactly addbot 20 blue")
+require_occurrences("${SOL_LAUNCH_COORDINATOR}"
+	"pending_index != SOL_KTX_EVIDENCE_SEAT_COUNT_V1" 1
+	"generic coordinator permits exactly one launch-pending seat")
+require_exact_occurrences("${BOT_COMMANDS}" "Sol_StockPendingBotName\\(" 1
+	"stock addbot has one narrow SOL name override seam")
+require_exact_occurrences("${BOT_COMMANDS}" "Sol_StockBotInitialized\\(" 1
+	"stock addbot binds SOL only after ordinary initialization")
+require_occurrences("${BOT_COMMANDS}" "FrogbotsRemoveBotByEntity" 1
+	"control cleanup removes through the stock table by entity")
+require_occurrences("${BOT_COMMANDS}" "FrogbotsForgetBotByEntity" 1
+	"synchronous control disconnect clears the stock table by entity")
+require_occurrences("${SOL_RUNTIME}" "FrogbotsRemoveBotByEntity" 1
+	"control lifecycle cleanup uses the stock removal seam")
+require_occurrences("${SOL_RUNTIME}" "FrogbotsForgetBotByEntity" 1
+	"control disconnect uses the stock forget seam")
+require_occurrences("${BOT_COMMANDS}" "if \\(Sol_RemoveAll\\(\\)\\)" 1
+	"removeall defers stock-control removal to safe evidence cleanup")
+
+file(READ "${BOT_COMMANDS}" bot_commands_contents)
+string(FIND "${bot_commands_contents}"
+	"Sol_StockPendingBotName(skill_level" stock_name_index)
+string(FIND "${bot_commands_contents}"
+	"entity = trap_AddBot(bots[i].name" stock_add_index)
+string(FIND "${bot_commands_contents}"
+	"trap_SetBotUserInfo(entity, \"*skill\"" stock_initialized_index)
+string(FIND "${bot_commands_contents}"
+	"Sol_StockBotInitialized(entity" stock_bind_index)
+if(stock_name_index LESS 0 OR stock_add_index LESS stock_name_index
+		OR stock_initialized_index LESS stock_add_index
+		OR stock_bind_index LESS stock_initialized_index)
+	message(FATAL_ERROR
+		"control name override must precede stock add and CE bind must follow full stock initialization")
+endif()
+
+require_occurrences("${SOL_ACTUAL_COMMAND}"
+	"input->msec < 1 \\|\\| input->msec > UINT8_MAX" 1
+	"bound command evidence requires exact byte-representable msec")
+require_occurrences("${SOL_ACTUAL_COMMAND}"
+	"input->forwardmove < INT16_MIN \\|\\| input->forwardmove > INT16_MAX" 1
+	"bound command evidence requires exact int16-representable movement")
+forbid_occurrences("${SOL_ACTUAL_COMMAND}" "(bound\\(|clamp|normalize|trunc)"
+	"global command hook normalizing or truncating an actual command")
+
+file(READ "${SOL_ACTUAL_COMMAND}" sol_actual_command_contents)
+string(FIND "${sol_actual_command_contents}"
+	"evidence_result = ops->evidence" command_evidence_index)
+string(FIND "${sol_actual_command_contents}"
+	"actual_result = ops->actual" command_actual_index)
+string(FIND "${sol_actual_command_contents}"
+	"fail_after_actual(ops);" command_fail_index)
+if(command_evidence_index LESS 0 OR command_actual_index LESS command_evidence_index
+		OR command_fail_index LESS command_actual_index)
+	message(FATAL_ERROR
+		"canonical exact request must immediately precede actual command and fail-stop must follow it")
 endif()
 
 file(READ "${G_MAIN}" g_main_contents)

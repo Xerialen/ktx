@@ -34,15 +34,11 @@ typedef struct sol_candidate_frame_result_v1
 	uint32_t client_generation;
 	sol_observation_status_v1 observation_status;
 	size_t batch_length;
-	int evidence_result;
 	int emitted;
 } sol_candidate_frame_result_v1;
 
 typedef int (*sol_candidate_healthy_v1)(void *context, size_t index,
 	int entity, uint32_t client_generation);
-typedef int (*sol_candidate_evidence_v1)(void *context, size_t index,
-	int entity, uint32_t client_generation,
-	const uint8_t command_wire[SOL_KTX_COMMAND_V1_SIZE]);
 typedef void (*sol_candidate_command_v1)(void *context, size_t index,
 	int entity, const sol_ktx_command_v1 *command);
 typedef void (*sol_candidate_remove_v1)(void *context, size_t index,
@@ -52,7 +48,6 @@ typedef struct sol_candidate_frame_ops_v1
 {
 	void *context;
 	sol_candidate_healthy_v1 healthy;
-	sol_candidate_evidence_v1 evidence;
 	sol_candidate_command_v1 command;
 } sol_candidate_frame_ops_v1;
 

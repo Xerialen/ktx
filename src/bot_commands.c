@@ -294,6 +294,13 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 			int topColor = 0;
 			int bottomColor = 0;
 			const char *teamName = specificteam;
+			char selectedName[sizeof(bots[i].name)];
+#ifdef SOL_SUPPORT
+			qbool solControlName = Sol_StockPendingBotName(skill_level,
+				specificteam, bots[i].name, sizeof(bots[i].name));
+#else
+			qbool solControlName = false;
+#endif
 
 			customised_skill = SetAttributesBasedOnSkill(skill_level);
 			if (teamplay && !specificteam[0])
@@ -313,15 +320,24 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 
 				if (team->humans && !otherTeam->humans)
 				{
-					strlcpy(bots[i].name, BotNameFriendly(team->bots), sizeof(bots[i].name));
+					if (!solControlName)
+					{
+						strlcpy(bots[i].name, BotNameFriendly(team->bots), sizeof(bots[i].name));
+					}
 				}
 				else if (otherTeam->humans && !team->humans)
 				{
-					strlcpy(bots[i].name, BotNameEnemy(team->bots), sizeof(bots[i].name));
+					if (!solControlName)
+					{
+						strlcpy(bots[i].name, BotNameEnemy(team->bots), sizeof(bots[i].name));
+					}
 				}
 				else
 				{
-					strlcpy(bots[i].name, BotNameGeneric(i), sizeof(bots[i].name));
+					if (!solControlName)
+					{
+						strlcpy(bots[i].name, BotNameGeneric(i), sizeof(bots[i].name));
+					}
 				}
 
 				topColor = team->topColor;
@@ -330,12 +346,16 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 			}
 			else
 			{
-				strlcpy(bots[i].name, BotNameGeneric(i), sizeof(bots[i].name));
+				if (!solControlName)
+				{
+					strlcpy(bots[i].name, BotNameGeneric(i), sizeof(bots[i].name));
+				}
 
 				topColor = tot_mode_enabled() ? 11 : i_rnd(0, 13);
 				bottomColor = tot_mode_enabled() ? 12 : i_rnd(0, 13);
 			}
 
+			strlcpy(selectedName, bots[i].name, sizeof(selectedName));
 			entity = trap_AddBot(bots[i].name, bottomColor, topColor, "base");
 
 			if (entity == 0)
@@ -350,6 +370,10 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 
 			memset(&bots[i], 0, sizeof(bot_t));
 			bots[i].entity = entity;
+			if (solControlName)
+			{
+				strlcpy(bots[i].name, selectedName, sizeof(bots[i].name));
+			}
 			memset(&bots[i].command, 0, sizeof(bots[i].command));
 			g_edicts[entity].fb.last_cmd_sent = g_globalvars.time;
 			// A reused entity slot may have hosted a komodobot earlier; a
@@ -370,6 +394,9 @@ int FrogbotsAddbot(int skill_level, const char *specificteam, qbool error_messag
 			SetAttribs(&g_edicts[entity], customised_skill);
 			trap_SetBotUserInfo(entity, "k_nick", bots[i].name, 0);
 			trap_SetBotUserInfo(entity, "*skill", skill_level_str, SETUSERINFO_STAR);
+#ifdef SOL_SUPPORT
+			Sol_StockBotInitialized(entity, skill_level, teamName, bots[i].name);
+#endif
 
 			return entity;
 		}
@@ -455,6 +482,36 @@ static void FrogbotsRemoveBot(bot_t *lastbot)
 	sound(e, CHAN_BODY, "player/tornoff2.wav", 1, ATTN_NONE);
 	trap_RemoveBot(lastbot->entity);
 	memset(lastbot, 0, sizeof(bot_t));
+}
+
+int FrogbotsForgetBotByEntity(int entity)
+{
+	int i;
+
+	for (i = 0; i < sizeof(bots) / sizeof(bots[0]); ++i)
+	{
+		if (bots[i].entity == entity)
+		{
+			memset(&bots[i], 0, sizeof(bots[i]));
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int FrogbotsRemoveBotByEntity(int entity)
+{
+	int i;
+
+	for (i = 0; i < sizeof(bots) / sizeof(bots[0]); ++i)
+	{
+		if (bots[i].entity == entity)
+		{
+			FrogbotsRemoveBot(&bots[i]);
+			return 1;
+		}
+	}
+	return 0;
 }
 
 static void FrogbotsRemovebot_f(void)
@@ -1969,7 +2026,10 @@ static void FrogbotsRemoveAll(void)
 	int bot_count;
 
 #ifdef SOL_SUPPORT
-	Sol_RemoveAll();
+	if (Sol_RemoveAll())
+	{
+		return;
+	}
 #endif
 	bot_count = CountBots();
 
@@ -2376,7 +2436,7 @@ static frogbot_cmd_t std_commands[] =
 		{ "addbot", FrogbotsAddbot_f, "Adds a bot. Skill & team optional" },
 		{ "addkbot", FrogbotsAddKbot_f, "Adds a komodobot. Skill & team optional" },
 #ifdef SOL_SUPPORT
-		{ "evidencebind", Sol_EvidenceBind_f, "Seal SOL candidate seat 1..4" },
+		{ "evidencebind", Sol_EvidenceBind_f, "Seal SOL lifecycle seat 1..8" },
 		{ "addsol", Sol_Add_f, "Adds the pending SOL candidate: addsol 20 red" },
 		{ "evidenceclose", Sol_EvidenceClose_f, "Close and unbind SOL evidence" },
 #endif

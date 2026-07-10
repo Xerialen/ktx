@@ -119,19 +119,26 @@ static void test_previous_self_snapshot_drives_exact_active_command(void)
 
 static void test_plan_seat_evidence_identity_and_skill_token_stay_distinct(void)
 {
-	static const char *const plan_seats[SOL_KTX_CANDIDATE_COUNT_V1] = {
-		"1", "2", "3", "4"
+	static const char *const plan_seats[SOL_KTX_EVIDENCE_SEAT_COUNT_V1] = {
+		"1", "2", "3", "4", "5", "6", "7", "8"
 	};
-	static const char *const evidence_seats[SOL_KTX_CANDIDATE_COUNT_V1] = {
-		"candidate-1", "candidate-2", "candidate-3", "candidate-4"
+	static const char *const evidence_seats[SOL_KTX_EVIDENCE_SEAT_COUNT_V1] = {
+		"candidate-1", "candidate-2", "candidate-3", "candidate-4",
+		"control-5", "control-6", "control-7", "control-8"
 	};
-	static const char *const player_names[SOL_KTX_CANDIDATE_COUNT_V1] = {
-		"cand-1", "cand-2", "cand-3", "cand-4"
+	static const char *const player_names[SOL_KTX_EVIDENCE_SEAT_COUNT_V1] = {
+		"cand-1", "cand-2", "cand-3", "cand-4",
+		"ctrl-5", "ctrl-6", "ctrl-7", "ctrl-8"
+	};
+	static const char *const teams[SOL_KTX_EVIDENCE_SEAT_COUNT_V1] = {
+		"red", "red", "red", "red", "blue", "blue", "blue", "blue"
 	};
 	char evidence_seat[32];
 	unsigned index;
 
-	for (index = 0; index < SOL_KTX_CANDIDATE_COUNT_V1; ++index)
+	expect(SOL_KTX_CANDIDATE_COUNT_V1 == 4 && SOL_KTX_EVIDENCE_SEAT_COUNT_V1 == 8,
+			"candidate registry remains four seats while evidence lifecycle is eight");
+	for (index = 0; index < SOL_KTX_EVIDENCE_SEAT_COUNT_V1; ++index)
 	{
 		const sol_ktx_seat_identity_v1 *identity =
 				sol_ktx_plan_identity_v1(plan_seats[index]);
@@ -140,22 +147,29 @@ static void test_plan_seat_evidence_identity_and_skill_token_stay_distinct(void)
 				"candidate plan seat has its fixed ordinal");
 		expect(identity != NULL && !strcmp(identity->plan_seat, plan_seats[index])
 				&& !strcmp(identity->evidence_seat, evidence_seats[index])
-				&& !strcmp(identity->player_name, player_names[index]),
-				"candidate plan seat maps to exact evidence and bot identities");
+				&& !strcmp(identity->player_name, player_names[index])
+				&& !strcmp(identity->team, teams[index])
+				&& identity->role == (index < SOL_KTX_CANDIDATE_COUNT_V1 ?
+					SOL_KTX_SEAT_CANDIDATE_V1 : SOL_KTX_SEAT_CONTROL_V1),
+				"plan seat maps to exact role, evidence, bot, and team identities");
 		expect(sol_ktx_plan_seat_v1(plan_seats[index], evidence_seat,
 				sizeof(evidence_seat)) && !strcmp(evidence_seat, evidence_seats[index]),
-				"legacy evidence-seat projection covers every candidate");
+				"evidence-seat projection covers all eight lifecycle seats");
 	}
 	expect(sol_ktx_plan_identity_v1("0") == NULL &&
-			sol_ktx_plan_identity_v1("5") == NULL &&
+			sol_ktx_plan_identity_v1("9") == NULL &&
 			sol_ktx_plan_identity_v1("20") == NULL,
-			"control and legacy skill seats never enter the SOL candidate registry");
+			"out-of-range and legacy skill tokens are never evidence seats");
 	expect(!sol_ktx_plan_seat_v1("20", evidence_seat, sizeof(evidence_seat)),
 			"legacy skill token 20 is not an evidencebind seat");
 	expect(sol_ktx_add_shape_v1("20", "red"),
 			"legacy addsol shape accepts skill token 20 and team red");
 	expect(!sol_ktx_add_shape_v1("1", "red"),
 			"numeric plan seat 1 is not the addsol skill token");
+	expect(sol_ktx_control_selector_v1(20, "blue")
+			&& !sol_ktx_control_selector_v1(20, "red")
+			&& !sol_ktx_control_selector_v1(19, "blue"),
+			"stock control selector is exactly addbot skill 20 team blue");
 }
 
 int main(void)

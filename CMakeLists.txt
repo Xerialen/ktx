@@ -179,6 +179,8 @@ if(SOL_SUPPORT)
 	add_library(sol_candidate_registry STATIC "${DIR_SRC}/sol_candidate_registry.c")
 	add_library(sol_evidence_run STATIC "${DIR_SRC}/sol_evidence_run.c")
 	add_library(sol_runtime_schedule STATIC "${DIR_SRC}/sol_runtime_schedule.c")
+	add_library(sol_launch_coordinator STATIC "${DIR_SRC}/sol_launch_coordinator.c")
+	add_library(sol_actual_command STATIC "${DIR_SRC}/sol_actual_command.c")
 	target_include_directories(sol_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
 	target_include_directories(sol_ktx_adapter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
 	target_include_directories(sol_wire PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
@@ -186,6 +188,8 @@ if(SOL_SUPPORT)
 	target_include_directories(sol_candidate_registry PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
 	target_include_directories(sol_evidence_run PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
 	target_include_directories(sol_runtime_schedule PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
+	target_include_directories(sol_launch_coordinator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
+	target_include_directories(sol_actual_command PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
 	set_target_properties(sol_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	set_target_properties(sol_ktx_adapter PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	set_target_properties(sol_wire PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -193,6 +197,8 @@ if(SOL_SUPPORT)
 	set_target_properties(sol_candidate_registry PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	set_target_properties(sol_evidence_run PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	set_target_properties(sol_runtime_schedule PROPERTIES POSITION_INDEPENDENT_CODE ON)
+	set_target_properties(sol_launch_coordinator PROPERTIES POSITION_INDEPENDENT_CODE ON)
+	set_target_properties(sol_actual_command PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	if(NOT CMAKE_C_COMPILER_ID STREQUAL "MSVC")
 		target_compile_options(sol_core PRIVATE -Wall -Wextra -Werror -std=c17)
 		target_compile_options(sol_ktx_adapter PRIVATE -Wall -Wextra -Werror -std=c17)
@@ -201,10 +207,13 @@ if(SOL_SUPPORT)
 		target_compile_options(sol_candidate_registry PRIVATE -Wall -Wextra -Werror -std=c17)
 		target_compile_options(sol_evidence_run PRIVATE -Wall -Wextra -Werror -std=c17)
 		target_compile_options(sol_runtime_schedule PRIVATE -Wall -Wextra -Werror -std=c17)
+		target_compile_options(sol_launch_coordinator PRIVATE -Wall -Wextra -Werror -std=c17)
+		target_compile_options(sol_actual_command PRIVATE -Wall -Wextra -Werror -std=c17)
 		target_link_libraries(sol_core PUBLIC m)
 	endif()
 	target_link_libraries(sol_observation_client PUBLIC sol_wire)
 	target_link_libraries(sol_candidate_registry PUBLIC sol_ktx_adapter sol_observation_client)
+	target_link_libraries(sol_actual_command PUBLIC sol_ktx_adapter)
 endif()
 
 # Build native library.
@@ -222,7 +231,7 @@ if(NANO_SUPPORT)
 endif()
 if(SOL_SUPPORT)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE SOL_SUPPORT=1)
-	target_link_libraries(${PROJECT_NAME} PRIVATE sol_core sol_ktx_adapter sol_wire sol_observation_client sol_candidate_registry sol_evidence_run sol_runtime_schedule)
+	target_link_libraries(${PROJECT_NAME} PRIVATE sol_core sol_ktx_adapter sol_wire sol_observation_client sol_candidate_registry sol_evidence_run sol_runtime_schedule sol_launch_coordinator sol_actual_command)
 endif()
 if(FTESV)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE FTESV=1)
@@ -238,13 +247,21 @@ if(SOL_SUPPORT)
 		add_executable(test_sol_candidate_registry "test/test_sol_candidate_registry.c")
 		add_executable(test_sol_evidence_run "test/test_sol_evidence_run.c")
 		add_executable(test_sol_runtime_schedule "test/test_sol_runtime_schedule.c")
+		add_executable(test_sol_launch_coordinator "test/test_sol_launch_coordinator.c")
+		add_executable(test_sol_actual_command "test/test_sol_actual_command.c")
+		target_include_directories(test_sol_launch_coordinator PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
+		target_include_directories(test_sol_actual_command PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
 		target_link_libraries(test_sol_core PRIVATE sol_core)
 		target_link_libraries(test_sol_ktx_adapter PRIVATE sol_core sol_ktx_adapter)
 		target_link_libraries(test_sol_wire PRIVATE sol_wire)
 		target_link_libraries(test_sol_observation_client PRIVATE sol_observation_client)
 		target_link_libraries(test_sol_candidate_registry PRIVATE sol_candidate_registry)
 		target_link_libraries(test_sol_evidence_run PRIVATE sol_evidence_run)
-		target_link_libraries(test_sol_runtime_schedule PRIVATE sol_candidate_registry sol_evidence_run sol_runtime_schedule)
+		target_link_libraries(test_sol_runtime_schedule PRIVATE sol_candidate_registry sol_evidence_run sol_runtime_schedule sol_actual_command)
+		target_link_libraries(test_sol_launch_coordinator PRIVATE sol_launch_coordinator)
+		target_link_libraries(test_sol_actual_command PRIVATE sol_actual_command)
 		if(NOT CMAKE_C_COMPILER_ID STREQUAL "MSVC")
 			target_compile_options(test_sol_core PRIVATE -Wall -Wextra -Werror -std=c17)
 			target_compile_options(test_sol_ktx_adapter PRIVATE -Wall -Wextra -Werror -std=c17)
@@ -253,6 +270,8 @@ if(SOL_SUPPORT)
 			target_compile_options(test_sol_candidate_registry PRIVATE -Wall -Wextra -Werror -std=c17)
 			target_compile_options(test_sol_evidence_run PRIVATE -Wall -Wextra -Werror -std=c17)
 			target_compile_options(test_sol_runtime_schedule PRIVATE -Wall -Wextra -Werror -std=c17)
+			target_compile_options(test_sol_launch_coordinator PRIVATE -Wall -Wextra -Werror -std=c17)
+			target_compile_options(test_sol_actual_command PRIVATE -Wall -Wextra -Werror -std=c17)
 		endif()
 		add_test(NAME sol_core_contract COMMAND test_sol_core)
 		add_test(NAME sol_ktx_adapter_contract COMMAND test_sol_ktx_adapter)
@@ -261,6 +280,8 @@ if(SOL_SUPPORT)
 		add_test(NAME sol_candidate_registry_contract COMMAND test_sol_candidate_registry)
 		add_test(NAME sol_evidence_run_contract COMMAND test_sol_evidence_run)
 		add_test(NAME sol_runtime_schedule_contract COMMAND test_sol_runtime_schedule)
+		add_test(NAME sol_launch_coordinator_contract COMMAND test_sol_launch_coordinator)
+		add_test(NAME sol_actual_command_contract COMMAND test_sol_actual_command)
 		add_test(NAME sol_runtime_guard_sentinel
 			COMMAND ${CMAKE_COMMAND}
 				"-DBOT_PHYS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_botphys.c"
@@ -269,6 +290,8 @@ if(SOL_SUPPORT)
 				"-DBOT_ENEMY=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_botenemy.c"
 				"-DCOMBAT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/combat.c"
 				"-DBOT_COMMANDS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_commands.c"
+				"-DBOT_MOVEMENT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_movement.c"
+				"-DNANO_BRAIN=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/nano_brain.c"
 				"-DBOT_CLIENT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_client.c"
 				"-DBOT_STAT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_botstat.c"
 				"-DBOT_HAZARD=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_bothazd.c"
@@ -282,6 +305,10 @@ if(SOL_SUPPORT)
 				"-DSOL_CANDIDATE_REGISTRY=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_candidate_registry.c"
 				"-DSOL_EVIDENCE_RUN=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_evidence_run.c"
 				"-DSOL_RUNTIME_SCHEDULE=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_runtime_schedule.c"
+				"-DSOL_ACTUAL_COMMAND=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_actual_command.c"
+				"-DSOL_KTX_ADAPTER=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_ktx_adapter.c"
+				"-DSOL_KTX_ADAPTER_H=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_ktx_adapter.h"
+				"-DSOL_LAUNCH_COORDINATOR=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_launch_coordinator.c"
 				"-DSOL_OBSERVATION_CLIENT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_observation_client.c"
 				"-DG_SYSCALLS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/g_syscalls.c"
 				"-DG_LOCAL=${CMAKE_CURRENT_SOURCE_DIR}/include/g_local.h"

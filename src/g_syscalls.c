@@ -31,6 +31,10 @@
 #endif
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_actual_command.h"
+#include "sol_runtime.h"
+#endif
 
 static intptr_t ( QDECL *syscall)(intptr_t arg, ...) =
 ( intptr_t ( QDECL * ) ( intptr_t, ... ) ) -1;
@@ -53,6 +57,15 @@ static intptr_t PASSFLOAT(float x)
 	rc._float = x;
 
 	return rc._int;
+}
+
+static intptr_t trap_SetBotCMDRaw(intptr_t edn, intptr_t msec,
+	float angles_x, float angles_y, float angles_z, intptr_t forwardmove,
+	intptr_t sidemove, intptr_t upmove, intptr_t buttons, intptr_t impulse)
+{
+	return syscall(G_SetBotCMD, edn, msec, PASSFLOAT(angles_x),
+		PASSFLOAT(angles_y), PASSFLOAT(angles_z), forwardmove, sidemove,
+		upmove, buttons, impulse);
 }
 
 intptr_t trap_GetApiVersion(void)
@@ -435,12 +448,66 @@ intptr_t trap_SetBotUserInfo(intptr_t edn, const char *varname, const char *valu
 	return syscall(G_SetBotUserInfo, edn, (intptr_t) varname, (intptr_t) value, flags);
 }
 
+#ifdef SOL_SUPPORT
+static sol_actual_command_route_v1 sol_command_lookup(void *context,
+	uint32_t engine_slot, uint32_t *client_generation)
+{
+	(void) context;
+	return Sol_ActualCommandLookup(engine_slot, client_generation);
+}
+
+static intptr_t sol_command_evidence(void *context,
+	const ce_frame_request_v1 *request)
+{
+	(void) context;
+	return trap_ControllerEvidenceV1(CE_FRAME_REQUEST, (void *) request,
+		(intptr_t) sizeof(*request));
+}
+
+static intptr_t sol_command_actual(void *context,
+	const sol_actual_command_input_v1 *command)
+{
+	(void) context;
+	return trap_SetBotCMDRaw(command->engine_slot, command->msec,
+		command->angles[0], command->angles[1], command->angles[2],
+		command->forwardmove, command->sidemove, command->upmove,
+		command->buttons, command->impulse);
+}
+
+static void sol_command_fail_stop(void *context)
+{
+	(void) context;
+	Sol_ActualCommandFailStop();
+}
+#endif
+
 intptr_t trap_SetBotCMD(intptr_t edn, intptr_t msec, float angles_x, float angles_y, float angles_z,
 						intptr_t forwardmove, intptr_t sidemove, intptr_t upmove, intptr_t buttons,
 						intptr_t impulse)
 {
-	return syscall(G_SetBotCMD, edn, msec, PASSFLOAT(angles_x), PASSFLOAT(angles_y),
-					PASSFLOAT(angles_z), forwardmove, sidemove, upmove, buttons, impulse);
+#ifdef SOL_SUPPORT
+	sol_actual_command_input_v1 command;
+	sol_actual_command_ops_v1 ops = {
+		NULL, sol_command_lookup, sol_command_evidence, sol_command_actual,
+		sol_command_fail_stop
+	};
+
+	memset(&command, 0, sizeof(command));
+	command.engine_slot = edn;
+	command.msec = msec;
+	memcpy(&command.angles[0], &angles_x, sizeof(angles_x));
+	memcpy(&command.angles[1], &angles_y, sizeof(angles_y));
+	memcpy(&command.angles[2], &angles_z, sizeof(angles_z));
+	command.forwardmove = forwardmove;
+	command.sidemove = sidemove;
+	command.upmove = upmove;
+	command.buttons = buttons;
+	command.impulse = impulse;
+	return sol_actual_command_submit_v1(&command, &ops);
+#else
+	return trap_SetBotCMDRaw(edn, msec, angles_x, angles_y, angles_z,
+		forwardmove, sidemove, upmove, buttons, impulse);
+#endif
 }
 
 void trap_setpause(intptr_t pause)
