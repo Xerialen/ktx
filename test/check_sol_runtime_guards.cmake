@@ -75,23 +75,30 @@ forbid_occurrences("${SOL_RUNTIME}"
 forbid_occurrences("${SOL_CANDIDATE_REGISTRY}"
 	"(sol_core_step_v1|sol_ktx_encode_observation_v1|\"SLO1\"|\"SLA1\")"
 	"old diagnostic core attached to the canonical SOB1 registry")
+forbid_occurrences("${SOL_EVIDENCE_RUN}"
+	"(sol_core_step_v1|sol_ktx_encode_observation_v1|\"SLO1\"|\"SLA1\")"
+	"evidence lifecycle coupled to the old diagnostic core")
 
-require_exact_occurrences("${SOL_RUNTIME}"
-	"trap_ControllerEvidenceV1\\(CE_MATCH_BEGIN" 1
+require_exact_occurrences("${SOL_EVIDENCE_RUN}"
+	"CE_MATCH_BEGIN" 1
 	"one run-level evidence begin call site")
-require_exact_occurrences("${SOL_RUNTIME}"
-	"trap_ControllerEvidenceV1\\(CE_MATCH_END" 1
+require_exact_occurrences("${SOL_EVIDENCE_RUN}"
+	"CE_MATCH_END" 1
 	"one run-level evidence end call site")
+require_exact_occurrences("${SOL_EVIDENCE_RUN}" "CE_UNBIND" 1
+	"one safe evidence unbind call site")
 require_exact_occurrences("${SOL_RUNTIME}"
 	"trap_ControllerEvidenceV1\\(CE_FRAME_REQUEST" 1
 	"one production frame-evidence writer")
 require_exact_occurrences("${SOL_RUNTIME}" "trap_SetBotCMD\\(" 1
 	"one production command writer")
-require_occurrences("${SOL_RUNTIME}" "terminate_before_next_frame" 3
-	"observation failure is surfaced and closes before a later bot frame")
+forbid_occurrences("${SOL_RUNTIME}" "(CE_MATCH_END|CE_UNBIND)"
+	"end or unbind operation outside the safe evidence lifecycle")
+require_occurrences("${SOL_RUNTIME}" "sol_evidence_run_fail_stop_v1" 5
+	"frame and setup failures mark deferred fail-stop without immediate teardown")
 require_exact_occurrences("${SOL_RUNTIME}"
-	"sol_candidate_registry_remove_all_v1\\(" 1
-	"one registry-wide production client-removal path")
+	"sol_evidence_run_server_cleanup_v1\\(" 1
+	"one safe non-bot evidence cleanup path")
 require_occurrences("${SOL_CANDIDATE_REGISTRY}"
 	"entries\\[SOL_KTX_CANDIDATE_COUNT_V1\\]" 1
 	"the production registry owns the fixed four-entry table")
@@ -113,23 +120,45 @@ if(poll_index LESS 0 OR prepare_index LESS 0 OR emit_index LESS 0
 endif()
 
 file(READ "${SOL_RUNTIME}" sol_runtime_contents)
+string(FIND "${sol_runtime_contents}" "void Sol_ServerStartFrame(void)" server_start_index)
 string(FIND "${sol_runtime_contents}"
-	"static void terminate_invalid_run(void)" terminate_function_index)
-string(FIND "${sol_runtime_contents}"
-	"close_evidence_run();\n\tremoved = remove_all_candidate_clients();" terminate_sequence_index)
-string(FIND "${sol_runtime_contents}" "void Sol_StartFrame(void)" start_frame_index)
-if(terminate_function_index LESS 0 OR terminate_sequence_index LESS terminate_function_index
-		OR start_frame_index LESS terminate_sequence_index)
+	"sol_evidence_run_server_cleanup_v1(sol.evidence," safe_cleanup_index)
+string(FIND "${sol_runtime_contents}" "void Sol_StartFrame(void)" bot_start_index)
+if(server_start_index LESS 0 OR safe_cleanup_index LESS server_start_index
+		OR bot_start_index LESS safe_cleanup_index)
 	message(FATAL_ERROR
-		"invalid runs must close evidence and remove all SOL clients before returning to the next bot loop")
+		"end, unbind, and removal must be owned by the non-bot server-frame hook")
 endif()
 string(FIND "${sol_runtime_contents}"
 	"identity = sol_ktx_plan_identity_v1(plan_seat);" identity_index)
 string(FIND "${sol_runtime_contents}"
 	"SOL evidencebind accepts candidate seats 1..4 only" control_reject_index)
-string(FIND "${sol_runtime_contents}" "|| !ensure_registry()" registry_mutation_index)
+string(FIND "${sol_runtime_contents}" "|| !ensure_runtime()" registry_mutation_index)
 if(identity_index LESS 0 OR control_reject_index LESS identity_index
 		OR registry_mutation_index LESS control_reject_index)
 	message(FATAL_ERROR
 		"control seats 5..8 must be rejected before the SOL run epoch or registry can mutate")
+endif()
+
+string(FIND "${sol_runtime_contents}"
+	"result = trap_ControllerEvidenceV1(CE_BIND" ce_bind_index)
+string(FIND "${sol_runtime_contents}"
+	"sol_evidence_run_record_bind_v1(sol.evidence" record_bind_index)
+string(FIND "${sol_runtime_contents}"
+	"strcmp(bind.observed_player_name" identity_validation_index)
+string(FIND "${sol_runtime_contents}"
+	"sol_candidate_registry_bind_v1(sol.candidates" observation_bind_index)
+if(ce_bind_index LESS 0 OR record_bind_index LESS ce_bind_index
+		OR identity_validation_index LESS record_bind_index
+		OR observation_bind_index LESS identity_validation_index)
+	message(FATAL_ERROR
+		"every CE_BIND OK route must be retained before identity validation or COV creation")
+endif()
+
+file(READ "${G_MAIN}" g_main_contents)
+string(FIND "${g_main_contents}" "Sol_ServerStartFrame();" server_hook_index)
+string(FIND "${g_main_contents}" "StartFrame(arg0);" ordinary_start_index)
+if(server_hook_index LESS 0 OR ordinary_start_index LESS server_hook_index)
+	message(FATAL_ERROR
+		"non-bot SOL cleanup hook must run before ordinary StartFrame")
 endif()

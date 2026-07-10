@@ -187,6 +187,9 @@ intptr_t VISIBILITY_VISIBLE vmMain(
 			}
 			else
 			{
+#ifdef SOL_SUPPORT
+				Sol_ServerStartFrame();
+#endif
 				if (framecount == 0)
 				{
 					infokey(world, "mapname", mapname, sizeof(mapname));

@@ -7,6 +7,7 @@ int Sol_IsClient(const struct gedict_s *client);
 int Sol_ClientConnectedEvent(struct gedict_s *client);
 int Sol_ClientEntersEvent(struct gedict_s *client);
 void Sol_ClientDisconnectedEvent(struct gedict_s *client);
+void Sol_ServerStartFrame(void);
 void Sol_StartFrame(void);
 
 int Sol_CommandBypassesBotGates(const char *command);
