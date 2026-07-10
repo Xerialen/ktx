@@ -5,6 +5,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const char observation_golden_hex[] =
+	"534f42310000000000000000c8320000"
+	"1111111111111111111111111111111111111111111111111111111111111111"
+	"2222222222222222222222222222222222222222222222222222222222222222"
+	"01000000000000000001010000000000000002000000"
+	"0000000000000000000100"
+	"0101020100f8ff10001800640038ff0000000000400080b000"
+	"640000003200000007000000190000001e000000050000000c000000"
+	"002000402000000011000304000d04"
+	"0100000000000000010101"
+	"00000000000000000000";
+
 static void require(int condition, const char *message)
 {
 	if (!condition) {
@@ -29,6 +41,67 @@ static size_t hex_to_bytes(const char *hex, uint8_t *output, size_t capacity)
 	return length;
 }
 
+static void fixture_u16(uint8_t *output, uint16_t value)
+{
+	output[0] = (uint8_t)value;
+	output[1] = (uint8_t)(value >> 8);
+}
+
+static void fixture_u32(uint8_t *output, uint32_t value)
+{
+	output[0] = (uint8_t)value;
+	output[1] = (uint8_t)(value >> 8);
+	output[2] = (uint8_t)(value >> 16);
+	output[3] = (uint8_t)(value >> 24);
+}
+
+static void fixture_u64(uint8_t *output, uint64_t value)
+{
+	fixture_u32(output, (uint32_t)value);
+	fixture_u32(output + 4u, (uint32_t)(value >> 32));
+}
+
+static size_t append_killfeed_fixture(uint8_t *output, size_t capacity,
+	size_t offset, uint64_t sequence, uint16_t text_length)
+{
+	size_t required = 13u + text_length;
+
+	require(offset <= capacity && required <= capacity - offset,
+		"large observation fixture stays in bounds");
+	fixture_u64(output + offset, sequence);
+	offset += 8u;
+	output[offset++] = 4u;
+	fixture_u16(output + offset, UINT16_C(0x0401));
+	offset += 2u;
+	fixture_u16(output + offset, text_length);
+	offset += 2u;
+	memset(output + offset, 'k', text_length);
+	return offset + text_length;
+}
+
+static size_t build_large_observation_fixture(uint8_t *output, size_t capacity,
+	uint16_t short_text_length)
+{
+	size_t offset;
+	uint64_t sequence = 2u;
+	unsigned i;
+
+	require(short_text_length == 52u || short_text_length == 53u,
+		"large observation uses a worked boundary payload");
+	offset = hex_to_bytes(observation_golden_hex, output, capacity);
+	require(offset == 202u, "large observation starts from the golden batch");
+	fixture_u64(output + 90u, 65u);
+	fixture_u32(output + 98u, 66u);
+	offset = append_killfeed_fixture(output, capacity, offset, sequence++,
+		short_text_length);
+	for (i = 0; i < 63u; ++i) {
+		offset = append_killfeed_fixture(output, capacity, offset, sequence++,
+			1023u);
+	}
+	require(sequence == 66u, "large observation has contiguous event sequences");
+	return offset;
+}
+
 static sol_action_response_v1 known_action(void)
 {
 	sol_action_response_v1 action = {0};
@@ -46,19 +119,8 @@ static sol_action_response_v1 known_action(void)
 
 static void test_independent_observation_fixture(void)
 {
-	static const char golden_hex[] =
-		"534f42310000000000000000c8320000"
-		"1111111111111111111111111111111111111111111111111111111111111111"
-		"2222222222222222222222222222222222222222222222222222222222222222"
-		"01000000000000000001010000000000000002000000"
-		"0000000000000000000100"
-		"0101020100f8ff10001800640038ff0000000000400080b000"
-		"640000003200000007000000190000001e000000050000000c000000"
-		"002000402000000011000304000d04"
-		"0100000000000000010101"
-		"00000000000000000000";
 	uint8_t bytes[203];
-	size_t length = hex_to_bytes(golden_hex, bytes, sizeof(bytes));
+	size_t length = hex_to_bytes(observation_golden_hex, bytes, sizeof(bytes));
 	uint8_t saved;
 
 	require(length == 202, "independent mvdsv fixture is 202 bytes");
@@ -74,6 +136,27 @@ static void test_independent_observation_fixture(void)
 	bytes[110] = saved;
 	require(sol_wire_observation_is_canonical_v1(bytes, length),
 		"restored observation remains canonical");
+}
+
+static void test_observation_batch_size_boundary(void)
+{
+	uint8_t *wire = malloc(SOL_WIRE_MAX_BATCH_V1 + 1u);
+	size_t length;
+
+	require(wire != NULL, "large observation fixture allocates");
+	length = build_large_observation_fixture(wire,
+		SOL_WIRE_MAX_BATCH_V1 + 1u, 52u);
+	require(length == SOL_WIRE_MAX_BATCH_V1,
+		"worked canonical observation is exactly 65,535 bytes");
+	require(sol_wire_observation_is_canonical_v1(wire, length),
+		"reader accepts a canonical observation at the maximum batch size");
+	length = build_large_observation_fixture(wire,
+		SOL_WIRE_MAX_BATCH_V1 + 1u, 53u);
+	require(length == SOL_WIRE_MAX_BATCH_V1 + 1u,
+		"worked oversized observation is exactly 65,536 bytes");
+	require(!sol_wire_observation_is_canonical_v1(wire, length),
+		"reader rejects an otherwise canonical observation above the maximum");
+	free(wire);
 }
 
 static void test_action_golden_and_round_trip(void)
@@ -173,9 +256,10 @@ static void test_closed_control_and_chat_validation(void)
 int main(void)
 {
 	test_independent_observation_fixture();
+	test_observation_batch_size_boundary();
 	test_action_golden_and_round_trip();
 	test_negative_zero_normalizes_and_noncanonical_wire_rejects();
 	test_closed_control_and_chat_validation();
-	printf("sol_wire: 4 contract tests passed\n");
+	printf("sol_wire: 5 contract tests passed\n");
 	return 0;
 }

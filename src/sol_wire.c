@@ -261,7 +261,8 @@ int sol_wire_observation_is_canonical_v1(const uint8_t *wire, size_t length)
 	size_t previous_length = 0;
 	unsigned self_count = 0, damage_count = 0, sight_count = 0;
 
-	if (!wire || length < 102u || memcmp(wire, "SOB1", 4u))
+	if (!wire || length < 102u || length > SOL_WIRE_MAX_BATCH_V1 ||
+		memcmp(wire, "SOB1", 4u))
 		return SOL_WIRE_INVALID;
 	cursor.offset = 4u;
 	(void)cursor_u64(&cursor);
