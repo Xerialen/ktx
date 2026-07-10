@@ -78,6 +78,9 @@ forbid_occurrences("${SOL_CANDIDATE_REGISTRY}"
 forbid_occurrences("${SOL_EVIDENCE_RUN}"
 	"(sol_core_step_v1|sol_ktx_encode_observation_v1|\"SLO1\"|\"SLA1\")"
 	"evidence lifecycle coupled to the old diagnostic core")
+forbid_occurrences("${SOL_RUNTIME_SCHEDULE}"
+	"(CE_MATCH_END|CE_UNBIND|trap_RemoveBot|trap_SetBotCMD|CE_FRAME_REQUEST)"
+	"pure runtime scheduling policy performing a frame or cleanup side effect")
 
 require_exact_occurrences("${SOL_EVIDENCE_RUN}"
 	"CE_MATCH_BEGIN" 1
@@ -99,6 +102,13 @@ require_occurrences("${SOL_RUNTIME}" "sol_evidence_run_fail_stop_v1" 5
 require_exact_occurrences("${SOL_RUNTIME}"
 	"sol_evidence_run_server_cleanup_v1\\(" 1
 	"one safe non-bot evidence cleanup path")
+require_exact_occurrences("${SOL_RUNTIME}"
+	"sol_runtime_schedule_decide_v1\\(" 2
+	"both runtime frame phases use the shared scheduling policy")
+require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_candidates\\)" 1
+	"bot frame obeys the candidate scheduling decision")
+require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_cleanup\\)" 1
+	"server frame obeys the cleanup scheduling decision")
 require_occurrences("${SOL_CANDIDATE_REGISTRY}"
 	"entries\\[SOL_KTX_CANDIDATE_COUNT_V1\\]" 1
 	"the production registry owns the fixed four-entry table")

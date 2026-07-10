@@ -6,6 +6,7 @@
 #include "sol_evidence_run.h"
 #include "sol_ktx_adapter.h"
 #include "sol_runtime.h"
+#include "sol_runtime_schedule.h"
 
 #include <string.h>
 
@@ -266,8 +267,12 @@ static void remove_candidate_after_unbind(void *context, size_t index,
 void Sol_ServerStartFrame(void)
 {
 	sol_evidence_cleanup_result_v1 result;
+	sol_runtime_schedule_decision_v1 schedule;
 
-	if (!sol.evidence || !sol_evidence_run_cleanup_pending_v1(sol.evidence))
+	schedule = sol_runtime_schedule_decide_v1(SOL_RUNTIME_SERVER_FRAME_V1,
+		sol_evidence_run_active_v1(sol.evidence), sol.candidates != NULL,
+		sol_evidence_run_cleanup_pending_v1(sol.evidence));
+	if (!schedule.run_cleanup)
 	{
 		return;
 	}
@@ -331,6 +336,7 @@ static void frame_write_command(void *context, size_t index, int entity,
 void Sol_StartFrame(void)
 {
 	sol_candidate_frame_result_v1 results[SOL_KTX_CANDIDATE_COUNT_V1];
+	sol_runtime_schedule_decision_v1 schedule;
 	sol_candidate_frame_ops_v1 ops = {
 		NULL, frame_candidate_healthy, frame_write_evidence, frame_write_command
 	};
@@ -338,8 +344,10 @@ void Sol_StartFrame(void)
 	uint32_t dt_us;
 	size_t index;
 
-	if (!sol.evidence || !sol_evidence_run_active_v1(sol.evidence)
-		|| sol_evidence_run_cleanup_pending_v1(sol.evidence) || !sol.candidates)
+	schedule = sol_runtime_schedule_decide_v1(SOL_RUNTIME_BOT_FRAME_V1,
+		sol_evidence_run_active_v1(sol.evidence), sol.candidates != NULL,
+		sol_evidence_run_cleanup_pending_v1(sol.evidence));
+	if (!schedule.run_candidates)
 	{
 		return;
 	}
