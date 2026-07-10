@@ -225,16 +225,45 @@ int sol_ktx_encode_command_v1(const sol_ktx_command_v1 *command,
 	return 1;
 }
 
+const sol_ktx_seat_identity_v1 *sol_ktx_plan_identity_v1(const char *plan_seat)
+{
+	static const sol_ktx_seat_identity_v1 identities[SOL_KTX_CANDIDATE_COUNT_V1] = {
+		{ 1u, "1", "candidate-1", "cand-1" },
+		{ 2u, "2", "candidate-2", "cand-2" },
+		{ 3u, "3", "candidate-3", "cand-3" },
+		{ 4u, "4", "candidate-4", "cand-4" }
+	};
+	unsigned index;
+
+	if (!plan_seat)
+	{
+		return NULL;
+	}
+	for (index = 0; index < SOL_KTX_CANDIDATE_COUNT_V1; ++index)
+	{
+		if (!strcmp(plan_seat, identities[index].plan_seat))
+		{
+			return &identities[index];
+		}
+	}
+	return NULL;
+}
+
 int sol_ktx_plan_seat_v1(const char *plan_seat, char *evidence_seat, size_t capacity)
 {
-	static const char canonical_evidence_seat[] = "candidate-1";
+	const sol_ktx_seat_identity_v1 *identity = sol_ktx_plan_identity_v1(plan_seat);
+	size_t length;
 
-	if (!plan_seat || strcmp(plan_seat, "1") || !evidence_seat
-			|| capacity < sizeof(canonical_evidence_seat))
+	if (!identity || !evidence_seat)
 	{
 		return 0;
 	}
-	memcpy(evidence_seat, canonical_evidence_seat, sizeof(canonical_evidence_seat));
+	length = strlen(identity->evidence_seat) + 1u;
+	if (capacity < length)
+	{
+		return 0;
+	}
+	memcpy(evidence_seat, identity->evidence_seat, length);
 	return 1;
 }
 

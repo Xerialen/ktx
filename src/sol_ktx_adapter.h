@@ -8,8 +8,17 @@
 
 enum
 {
-	SOL_KTX_COMMAND_V1_SIZE = 25
+	SOL_KTX_COMMAND_V1_SIZE = 25,
+	SOL_KTX_CANDIDATE_COUNT_V1 = 4
 };
+
+typedef struct sol_ktx_seat_identity_v1
+{
+	unsigned ordinal;
+	const char *plan_seat;
+	const char *evidence_seat;
+	const char *player_name;
+} sol_ktx_seat_identity_v1;
 
 typedef struct sol_ktx_snapshot_v1
 {
@@ -50,6 +59,7 @@ int sol_ktx_encode_command_v1(const sol_ktx_command_v1 *command,
 		uint8_t output[SOL_KTX_COMMAND_V1_SIZE]);
 
 /* The diagnostic plan seat, evidence seat id, and legacy skill token are distinct. */
+const sol_ktx_seat_identity_v1 *sol_ktx_plan_identity_v1(const char *plan_seat);
 int sol_ktx_plan_seat_v1(const char *plan_seat, char *evidence_seat, size_t capacity);
 int sol_ktx_add_shape_v1(const char *skill_token, const char *team);
 

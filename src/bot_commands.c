@@ -2376,8 +2376,8 @@ static frogbot_cmd_t std_commands[] =
 		{ "addbot", FrogbotsAddbot_f, "Adds a bot. Skill & team optional" },
 		{ "addkbot", FrogbotsAddKbot_f, "Adds a komodobot. Skill & team optional" },
 #ifdef SOL_SUPPORT
-		{ "evidencebind", Sol_EvidenceBind_f, "Seal one SOL evidence seat" },
-		{ "addsol", Sol_Add_f, "Adds the sealed SOL seat: addsol 20 red" },
+		{ "evidencebind", Sol_EvidenceBind_f, "Seal SOL candidate seat 1..4" },
+		{ "addsol", Sol_Add_f, "Adds the pending SOL candidate: addsol 20 red" },
 		{ "evidenceclose", Sol_EvidenceClose_f, "Close and unbind SOL evidence" },
 #endif
 #ifdef NANO_SUPPORT

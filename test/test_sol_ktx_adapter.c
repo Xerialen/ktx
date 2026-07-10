@@ -119,12 +119,37 @@ static void test_previous_self_snapshot_drives_exact_active_command(void)
 
 static void test_plan_seat_evidence_identity_and_skill_token_stay_distinct(void)
 {
+	static const char *const plan_seats[SOL_KTX_CANDIDATE_COUNT_V1] = {
+		"1", "2", "3", "4"
+	};
+	static const char *const evidence_seats[SOL_KTX_CANDIDATE_COUNT_V1] = {
+		"candidate-1", "candidate-2", "candidate-3", "candidate-4"
+	};
+	static const char *const player_names[SOL_KTX_CANDIDATE_COUNT_V1] = {
+		"cand-1", "cand-2", "cand-3", "cand-4"
+	};
 	char evidence_seat[32];
+	unsigned index;
 
-	expect(sol_ktx_plan_seat_v1("1", evidence_seat, sizeof(evidence_seat)),
-			"numeric plan seat 1 is accepted");
-	expect(!strcmp(evidence_seat, "candidate-1"),
-			"plan seat 1 maps to canonical evidence seat candidate-1");
+	for (index = 0; index < SOL_KTX_CANDIDATE_COUNT_V1; ++index)
+	{
+		const sol_ktx_seat_identity_v1 *identity =
+				sol_ktx_plan_identity_v1(plan_seats[index]);
+
+		expect(identity != NULL && identity->ordinal == index + 1u,
+				"candidate plan seat has its fixed ordinal");
+		expect(identity != NULL && !strcmp(identity->plan_seat, plan_seats[index])
+				&& !strcmp(identity->evidence_seat, evidence_seats[index])
+				&& !strcmp(identity->player_name, player_names[index]),
+				"candidate plan seat maps to exact evidence and bot identities");
+		expect(sol_ktx_plan_seat_v1(plan_seats[index], evidence_seat,
+				sizeof(evidence_seat)) && !strcmp(evidence_seat, evidence_seats[index]),
+				"legacy evidence-seat projection covers every candidate");
+	}
+	expect(sol_ktx_plan_identity_v1("0") == NULL &&
+			sol_ktx_plan_identity_v1("5") == NULL &&
+			sol_ktx_plan_identity_v1("20") == NULL,
+			"control and legacy skill seats never enter the SOL candidate registry");
 	expect(!sol_ktx_plan_seat_v1("20", evidence_seat, sizeof(evidence_seat)),
 			"legacy skill token 20 is not an evidencebind seat");
 	expect(sol_ktx_add_shape_v1("20", "red"),

@@ -16,6 +16,16 @@ function(forbid_occurrences path pattern description)
 	endif()
 endfunction()
 
+function(require_exact_occurrences path pattern expected description)
+	file(READ "${path}" contents)
+	string(REGEX MATCHALL "${pattern}" matches "${contents}")
+	list(LENGTH matches count)
+	if(NOT count EQUAL expected)
+		message(FATAL_ERROR
+			"SOL exact guard failed: ${description}; expected ${expected}, found ${count} in ${path}")
+	endif()
+endfunction()
+
 require_occurrences("${BOT_PHYS}" "!Sol_IsClient\\((p|self)\\)" 2
 	"both global Frogbot pre-physics passes exclude SOL")
 require_occurrences("${CLIENT}" "!Sol_IsClient\\(self\\)" 5
@@ -60,13 +70,66 @@ require_occurrences("${G_SYSCALLS}" "trap_ControllerObservationV1" 1
 require_occurrences("${SOL_OBSERVATION_CLIENT}" "cov_get_committed_v1 get;" 1
 	"the maximum native GET payload is owned by each heap client")
 forbid_occurrences("${SOL_RUNTIME}"
-	"(sol_core_step_v1|sol_ktx_encode_observation_v1|Sol_CapturePostThink|cov_get_committed_v1)"
+	"(sol_core_step_v1|sol_ktx_encode_observation_v1|Sol_CapturePostThink|cov_get_committed_v1|\"SLO1\"|\"SLA1\")"
 	"legacy observation/core path or stack-sized GET payload")
+forbid_occurrences("${SOL_CANDIDATE_REGISTRY}"
+	"(sol_core_step_v1|sol_ktx_encode_observation_v1|\"SLO1\"|\"SLA1\")"
+	"old diagnostic core attached to the canonical SOB1 registry")
+
+require_exact_occurrences("${SOL_RUNTIME}"
+	"trap_ControllerEvidenceV1\\(CE_MATCH_BEGIN" 1
+	"one run-level evidence begin call site")
+require_exact_occurrences("${SOL_RUNTIME}"
+	"trap_ControllerEvidenceV1\\(CE_MATCH_END" 1
+	"one run-level evidence end call site")
+require_exact_occurrences("${SOL_RUNTIME}"
+	"trap_ControllerEvidenceV1\\(CE_FRAME_REQUEST" 1
+	"one production frame-evidence writer")
+require_exact_occurrences("${SOL_RUNTIME}" "trap_SetBotCMD\\(" 1
+	"one production command writer")
+require_occurrences("${SOL_RUNTIME}" "terminate_before_next_frame" 3
+	"observation failure is surfaced and closes before a later bot frame")
+require_exact_occurrences("${SOL_RUNTIME}"
+	"sol_candidate_registry_remove_all_v1\\(" 1
+	"one registry-wide production client-removal path")
+require_occurrences("${SOL_CANDIDATE_REGISTRY}"
+	"entries\\[SOL_KTX_CANDIDATE_COUNT_V1\\]" 1
+	"the production registry owns the fixed four-entry table")
+require_occurrences("${SOL_CANDIDATE_REGISTRY}"
+	"sol_observation_client_v1 \\*observation" 1
+	"every registry entry owns its private observation client")
+
+file(READ "${SOL_CANDIDATE_REGISTRY}" sol_registry_contents)
+string(FIND "${sol_registry_contents}"
+	"poll_all_bound_v1(registry, dt_us, ops, prepared, results);" poll_index)
+string(FIND "${sol_registry_contents}"
+	"prepare_all_bound_v1(registry, msec, prepared);" prepare_index)
+string(FIND "${sol_registry_contents}"
+	"emit_all_bound_v1(registry, ops, prepared, results);" emit_index)
+if(poll_index LESS 0 OR prepare_index LESS 0 OR emit_index LESS 0
+		OR poll_index GREATER prepare_index OR prepare_index GREATER emit_index)
+	message(FATAL_ERROR
+		"SOL phase order must complete all polls, then all preparation, then all command side effects")
+endif()
 
 file(READ "${SOL_RUNTIME}" sol_runtime_contents)
-string(FIND "${sol_runtime_contents}" "sol_observation_client_poll_v1" poll_index)
-string(FIND "${sol_runtime_contents}" "trap_SetBotCMD" command_index)
-if(poll_index LESS 0 OR command_index LESS 0 OR poll_index GREATER command_index)
+string(FIND "${sol_runtime_contents}"
+	"static void terminate_invalid_run(void)" terminate_function_index)
+string(FIND "${sol_runtime_contents}"
+	"close_evidence_run();\n\tremoved = remove_all_candidate_clients();" terminate_sequence_index)
+string(FIND "${sol_runtime_contents}" "void Sol_StartFrame(void)" start_frame_index)
+if(terminate_function_index LESS 0 OR terminate_sequence_index LESS terminate_function_index
+		OR start_frame_index LESS terminate_sequence_index)
 	message(FATAL_ERROR
-		"SOL phase order must poll/seal observations before the first command side effect")
+		"invalid runs must close evidence and remove all SOL clients before returning to the next bot loop")
+endif()
+string(FIND "${sol_runtime_contents}"
+	"identity = sol_ktx_plan_identity_v1(plan_seat);" identity_index)
+string(FIND "${sol_runtime_contents}"
+	"SOL evidencebind accepts candidate seats 1..4 only" control_reject_index)
+string(FIND "${sol_runtime_contents}" "|| !ensure_registry()" registry_mutation_index)
+if(identity_index LESS 0 OR control_reject_index LESS identity_index
+		OR registry_mutation_index LESS control_reject_index)
+	message(FATAL_ERROR
+		"control seats 5..8 must be rejected before the SOL run epoch or registry can mutate")
 endif()
