@@ -12,6 +12,9 @@
 
 #include "g_local.h"
 #include "kbot.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 //static float best_score;
 #define BACKPACK_CLASSNAME "backpack"
@@ -41,6 +44,12 @@ void UpdateGoalEntity(gedict_t *item, gedict_t *taker)
 
 	for (plr = world; (plr = find_plr(plr));)
 	{
+#ifdef SOL_SUPPORT
+		if (Sol_IsClient(plr))
+		{
+			continue;
+		}
+#endif
 		// if the same team, pretend bot read a 'took' notification
 		qbool same_team = SameTeam(plr, taker);
 		qbool heard_it = VectorDistance(plr->s.v.origin, item->s.v.origin) < 1000;

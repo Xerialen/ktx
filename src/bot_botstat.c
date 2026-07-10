@@ -7,6 +7,9 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 // FIXME: Copy/paste from combat.c
 #ifndef Q3_VM
@@ -51,6 +54,12 @@ float TotalStrengthAfterDamage(float health, float armorValue, float armorType, 
 // Evaluate desire for armor, health etc based on the improvement it would cause
 void FrogbotSetHealthArmour(gedict_t *client)
 {
+#ifdef SOL_SUPPORT
+	if (Sol_IsClient(client))
+	{
+		return;
+	}
+#endif
 	client->fb.total_armor = client->s.v.armortype * client->s.v.armorvalue;
 	client->fb.total_damage = TotalStrength(client->s.v.health, client->s.v.armorvalue,
 											client->s.v.armortype);

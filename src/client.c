@@ -28,6 +28,9 @@
 //
 //===========================================================================
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 vec3_t VEC_ORIGIN =
 	{ 0, 0, 0 };
@@ -1867,7 +1870,11 @@ void PutClientInServer(void)
 		// Nothing more to do
 	}
 #ifdef BOT_SUPPORT
-	else if (FrogbotOptionEnabled(FB_OPTION_DEBUG_MOVEMENT) && self->isBot && match_in_progress
+	else if (FrogbotOptionEnabled(FB_OPTION_DEBUG_MOVEMENT) && self->isBot
+#ifdef SOL_SUPPORT
+			&& !Sol_IsClient(self)
+#endif
+			&& match_in_progress
 			&& streq(mapname, "povdmm4"))
 	{
 		gedict_t *highest = NULL;
@@ -2233,7 +2240,11 @@ void PutClientInServer(void)
 
 			self->s.v.armorvalue = self->isBot ? 0 : 200;
 			self->s.v.armortype = self->isBot ? 0 : 0.8;
-			self->s.v.health = self->isBot ? FrogbotHealth() : 250;
+			self->s.v.health = self->isBot
+#ifdef SOL_SUPPORT
+					&& !Sol_IsClient(self)
+#endif
+					? FrogbotHealth() : 250;
 
 			items = self->s.v.items;
 			items |= IT_NAILGUN;
@@ -2753,7 +2764,11 @@ void WaterMove(void)
 	if (self->s.v.waterlevel != 3)
 	{
 #ifdef BOT_SUPPORT
-		if (self->isBot && self->s.v.waterlevel)
+		if (self->isBot && self->s.v.waterlevel
+#ifdef SOL_SUPPORT
+				&& !Sol_IsClient(self)
+#endif
+				)
 		{
 			BotWaterJumpFix();
 		}
@@ -2772,7 +2787,11 @@ void WaterMove(void)
 		self->dmg = 2;
 
 #ifdef BOT_SUPPORT
-		if (self->isBot)
+		if (self->isBot
+#ifdef SOL_SUPPORT
+				&& !Sol_IsClient(self)
+#endif
+				)
 		{
 			BotOutOfWater(self);
 		}
@@ -2810,7 +2829,11 @@ void WaterMove(void)
 	}
 
 #ifdef BOT_SUPPORT
-	if (self->isBot)
+	if (self->isBot
+#ifdef SOL_SUPPORT
+			&& !Sol_IsClient(self)
+#endif
+			)
 	{
 		BotWaterMove(self);
 	}
@@ -3739,7 +3762,11 @@ void PlayerPreThink(void)
 	}
 
 #ifdef BOT_SUPPORT
-	if (bots_enabled())
+	if (bots_enabled()
+#ifdef SOL_SUPPORT
+			&& !Sol_IsClient(self)
+#endif
+			)
 	{
 		BotPreThink(self);
 	}
@@ -4562,7 +4589,11 @@ void PlayerPostThink(void)
 	mv_record();
 
 #ifdef BOT_SUPPORT
-	if (bots_enabled())
+	if (bots_enabled()
+#ifdef SOL_SUPPORT
+			&& !Sol_IsClient(self)
+#endif
+			)
 	{
 		BotsThinkTime(self);
 	}

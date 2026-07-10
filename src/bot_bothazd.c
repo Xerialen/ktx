@@ -10,6 +10,9 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 // A lot of this is the bot 'cheating'?..
 #define ARROW_TIME_AFTER_TELEPORT 0.20  // was 0.5
@@ -1082,6 +1085,12 @@ void BotsRocketSpawned(gedict_t *newmis)
 
 qbool BotsPreTeleport(gedict_t *self, gedict_t *other)
 {
+#ifdef SOL_SUPPORT
+	if (Sol_IsClient(other))
+	{
+		return false;
+	}
+#endif
 	if (NoItemTouch(self, other))
 	{
 		if (IsMarkerFrame())
@@ -1102,6 +1111,12 @@ qbool BotsPreTeleport(gedict_t *self, gedict_t *other)
 
 void BotsPostTeleport(gedict_t *teleport_trigger, gedict_t *player, gedict_t *teleport_destination)
 {
+#ifdef SOL_SUPPORT
+	if (Sol_IsClient(player))
+	{
+		return;
+	}
+#endif
 	if (player->isBot)
 	{
 		//if (teamplay != 0)

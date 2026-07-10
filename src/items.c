@@ -24,6 +24,9 @@
  */
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 void SP_item_artifact_invisibility(void);
 void SP_item_artifact_super_damage(void);
@@ -38,7 +41,11 @@ void BotsPowerupDropped(gedict_t *player, gedict_t *powerup);
 static qbool ItemTouched(gedict_t *item, gedict_t *player)
 {
 #ifdef BOT_SUPPORT
-	return (self->fb.item_touch && self->fb.item_touch(item, player));
+	return (
+#ifdef SOL_SUPPORT
+			!Sol_IsClient(player) &&
+#endif
+			self->fb.item_touch && self->fb.item_touch(item, player));
 #else
 	return false;
 #endif
@@ -3133,4 +3140,3 @@ void SpawnicideDisable(void)
 		ent_remove(e);
 	}
 }
-

@@ -10,6 +10,9 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 static float unstick_time = 0;
 static qbool no_bots_stuck = 0;
@@ -36,7 +39,11 @@ void FrogbotPrePhysics1(void)
 
 	for (p = world; (p = find_plr(p));)
 	{
-		if (p->isBot && p->s.v.takedamage)
+		if (p->isBot
+#ifdef SOL_SUPPORT
+				&& !Sol_IsClient(p)
+#endif
+				&& p->s.v.takedamage)
 		{
 			VectorCopy(p->s.v.velocity, p->fb.oldvelocity);
 		}
@@ -104,7 +111,11 @@ void FrogbotPrePhysics2(void)
 
 	for (self = world; (self = find_plr(self));)
 	{
-		if (self->isBot)
+		if (self->isBot
+#ifdef SOL_SUPPORT
+				&& !Sol_IsClient(self)
+#endif
+				)
 		{
 			BotDetectTrapped(self);
 

@@ -406,6 +406,13 @@ intptr_t trap_Map_Extension(const char *ext_name, intptr_t mapto)
 	return syscall(G_Map_Extension, (intptr_t) ext_name, mapto);
 }
 
+#ifdef SOL_SUPPORT
+intptr_t trap_ControllerEvidenceV1(intptr_t operation, void *payload, intptr_t payload_size)
+{
+	return syscall(G_CONTROLLER_EVIDENCE_V1, operation, (intptr_t) payload, payload_size);
+}
+#endif
+
 intptr_t trap_AddBot(const char *name, intptr_t bottomcolor, intptr_t topcolor, const char *skin)
 {
 	return syscall(G_Add_Bot, (intptr_t) name, bottomcolor, topcolor, (intptr_t) skin);

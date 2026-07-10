@@ -1056,6 +1056,13 @@ void FirstFrame(void)
 
 	RegisterCvarEx("k_demotxt_format", "xml"); // what format for .txt files
 
+#ifdef SOL_SUPPORT
+	RegisterCvarEx("k_sol_goal_x", "705");
+	RegisterCvarEx("k_sol_goal_y", "146");
+	RegisterCvarEx("k_sol_goal_z", "56");
+	RegisterCvarEx("k_sol_goal_radius", "32");
+#endif
+
 #ifdef BOT_SUPPORT
 // { frogbots support
 	RegisterCvarEx(FB_CVAR_ENABLED, "0");

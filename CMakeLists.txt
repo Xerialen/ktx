@@ -16,8 +16,12 @@ option(FTESV "Build with FTE extensions support" OFF)
 # build is byte-identical to the stock frogbot baseline (no nano source
 # compiled, no dispatch branch, no cvars, no struct change).
 option(NANO_SUPPORT "Build with nano-bot (rtx-port) brain" OFF)
+option(SOL_SUPPORT "Build the isolated SOL diagnostic core" OFF)
 if(NANO_SUPPORT AND NOT BOT_SUPPORT)
 	message(FATAL_ERROR "NANO_SUPPORT requires BOT_SUPPORT=ON (nano is a peer brain on the frogbot base).")
+endif()
+if(SOL_SUPPORT AND NOT BOT_SUPPORT)
+	message(FATAL_ERROR "SOL_SUPPORT requires BOT_SUPPORT=ON (the native runtime uses bot lifecycle commands).")
 endif()
 
 # Set where sources located.
@@ -163,6 +167,24 @@ if(NANO_SUPPORT)
 		"${DIR_SRC}/nano_brain.c")
 endif()
 
+if(SOL_SUPPORT)
+	list(APPEND SRC_NATIVE "${DIR_SRC}/sol_runtime.c")
+endif()
+
+if(SOL_SUPPORT)
+	add_library(sol_core STATIC "${DIR_SRC}/sol_core.c")
+	add_library(sol_ktx_adapter STATIC "${DIR_SRC}/sol_ktx_adapter.c")
+	target_include_directories(sol_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
+	target_include_directories(sol_ktx_adapter PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}")
+	set_target_properties(sol_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+	set_target_properties(sol_ktx_adapter PROPERTIES POSITION_INDEPENDENT_CODE ON)
+	if(NOT CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+		target_compile_options(sol_core PRIVATE -Wall -Wextra -Werror -std=c17)
+		target_compile_options(sol_ktx_adapter PRIVATE -Wall -Wextra -Werror -std=c17)
+		target_link_libraries(sol_core PUBLIC m)
+	endif()
+endif()
+
 # Build native library.
 add_library(${PROJECT_NAME} SHARED ${SRC_COMMON} ${SRC_NATIVE})
 target_include_directories(${PROJECT_NAME} PRIVATE "include")
@@ -176,8 +198,52 @@ endif()
 if(NANO_SUPPORT)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE NANO_SUPPORT=1)
 endif()
+if(SOL_SUPPORT)
+	target_compile_definitions(${PROJECT_NAME} PRIVATE SOL_SUPPORT=1)
+	target_link_libraries(${PROJECT_NAME} PRIVATE sol_core sol_ktx_adapter)
+endif()
 if(FTESV)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE FTESV=1)
+endif()
+
+if(SOL_SUPPORT)
+	include(CTest)
+	if(BUILD_TESTING)
+		add_executable(test_sol_core "test/test_sol_core.c")
+		add_executable(test_sol_ktx_adapter "test/test_sol_ktx_adapter.c")
+		target_link_libraries(test_sol_core PRIVATE sol_core)
+		target_link_libraries(test_sol_ktx_adapter PRIVATE sol_core sol_ktx_adapter)
+		if(NOT CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+			target_compile_options(test_sol_core PRIVATE -Wall -Wextra -Werror -std=c17)
+			target_compile_options(test_sol_ktx_adapter PRIVATE -Wall -Wextra -Werror -std=c17)
+		endif()
+		add_test(NAME sol_core_contract COMMAND test_sol_core)
+		add_test(NAME sol_ktx_adapter_contract COMMAND test_sol_ktx_adapter)
+		add_test(NAME sol_runtime_guard_sentinel
+			COMMAND ${CMAKE_COMMAND}
+				"-DBOT_PHYS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_botphys.c"
+				"-DCLIENT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/client.c"
+				"-DITEMS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/items.c"
+				"-DBOT_ENEMY=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_botenemy.c"
+				"-DCOMBAT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/combat.c"
+				"-DBOT_COMMANDS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_commands.c"
+				"-DBOT_CLIENT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_client.c"
+				"-DBOT_STAT=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_botstat.c"
+				"-DBOT_HAZARD=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_bothazd.c"
+				"-DBOT_ITEMS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_items.c"
+				"-DBOT_MATCH=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_match.c"
+				"-DG_MAIN=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/g_main.c"
+				"-DWEAPONS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/weapons.c"
+				"-DBOT_GOALS=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/bot_botgoals.c"
+				"-DMARKER_UTIL=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/marker_util.c"
+				-P "${CMAKE_CURRENT_SOURCE_DIR}/test/check_sol_runtime_guards.cmake")
+		add_test(NAME sol_core_capability_denylist
+			COMMAND ${CMAKE_COMMAND}
+				"-DNM=${CMAKE_NM}"
+				"-DARCHIVE=$<TARGET_FILE:sol_core>"
+				"-DHEADER=${CMAKE_CURRENT_SOURCE_DIR}/${DIR_SRC}/sol_core.h"
+				-P "${CMAKE_CURRENT_SOURCE_DIR}/test/check_sol_core_capabilities.cmake")
+	endif()
 endif()
 # If not Miscrosoft compilator - then set additional options for linker.
 if (CMAKE_C_COMPILER_ID STREQUAL "MSVC")

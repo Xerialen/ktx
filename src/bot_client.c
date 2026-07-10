@@ -13,6 +13,9 @@
 
 #include "g_local.h"
 #include "kbot.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 #define PERIODIC_MM2_STATUS 4
 
@@ -59,6 +62,12 @@ static void ResetEnemy(gedict_t *self)
 	// Find all players who consider the current player their enemy, and clear it
 	for (test_enemy = world; (test_enemy = find_plr(test_enemy));)
 	{
+#ifdef SOL_SUPPORT
+		if (Sol_IsClient(test_enemy))
+		{
+			continue;
+		}
+#endif
 		if (test_enemy->s.v.enemy == NUM_FOR_EDICT(self))
 		{
 			test_enemy->s.v.enemy = NUM_FOR_EDICT(world);
@@ -83,7 +92,12 @@ static void ResetEnemy(gedict_t *self)
 		}
 	}
 
-	self->s.v.enemy = NUM_FOR_EDICT(world);
+#ifdef SOL_SUPPORT
+	if (!Sol_IsClient(self))
+#endif
+	{
+		self->s.v.enemy = NUM_FOR_EDICT(world);
+	}
 }
 
 void ResetGoalEntity(gedict_t *self)
@@ -98,6 +112,12 @@ void ResetGoalEntity(gedict_t *self)
 
 void BotPlayerKilledEvent(gedict_t *targ, gedict_t *attacker, gedict_t *inflictor)
 {
+#ifdef SOL_SUPPORT
+	if (Sol_IsClient(targ))
+	{
+		return;
+	}
+#endif
 	if ((inflictor && inflictor->ct != ctPlayer) && (inflictor->fb.T & UNREACHABLE))
 	{
 		targ->fb.state |= BACKPACK_IS_UNREACHABLE;
@@ -112,8 +132,22 @@ void BotPlayerKilledEvent(gedict_t *targ, gedict_t *attacker, gedict_t *inflicto
 // Called whenever a player dies
 void BotPlayerDeathEvent(gedict_t *self)
 {
+#ifdef SOL_SUPPORT
+	if (!Sol_IsClient(self))
+	{
+		ResetGoalEntity(self);
+	}
+#else
 	ResetGoalEntity(self);
+#endif
 	ResetEnemy(self);
+
+#ifdef SOL_SUPPORT
+	if (Sol_IsClient(self))
+	{
+		return;
+	}
+#endif
 
 	if (self->isBot && teamplay)
 	{
@@ -135,6 +169,12 @@ void BotPlayerDeathEvent(gedict_t *self)
 // Was: PutClientInServer_apply()
 void BotClientEntersEvent(gedict_t *self, gedict_t *spawn_pos)
 {
+#ifdef SOL_SUPPORT
+	if (Sol_ClientEntersEvent(self))
+	{
+		return;
+	}
+#endif
 	self->fb.oldwaterlevel = self->fb.oldwatertype = 0;
 	self->fb.desired_angle[0] = self->s.v.angles[0];
 	self->fb.desired_angle[1] = self->s.v.angles[1];
@@ -253,6 +293,12 @@ static float goal_client6(gedict_t *self, gedict_t *other)
 // TODO: any preferences stored against the specific bot to be restored here?
 void BotClientConnectedEvent(gedict_t *self)
 {
+#ifdef SOL_SUPPORT
+	if (Sol_ClientConnectedEvent(self))
+	{
+		return;
+	}
+#endif
 	self->fb.desire = (deathmatch <= 3 ? goal_client : goal_client6);
 	self->fb.T = UNREACHABLE;
 	self->fb.skill.skill_level = g_globalvars.parm3;

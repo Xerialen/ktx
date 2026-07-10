@@ -25,6 +25,10 @@
 
 #include "g_local.h"
 #include "rng.h"
+#ifdef SOL_SUPPORT
+#include "controller_evidence_protocol.h"
+#include "sol_runtime.h"
+#endif
 /* global 4 fix
  entity          self;
  entity          other;
@@ -168,6 +172,9 @@ intptr_t VISIBILITY_VISIBLE vmMain(
 			ClearGlobals();
 			if (arg1)
 			{
+#ifdef SOL_SUPPORT
+				Sol_StartFrame();
+#endif
 #ifdef BOT_SUPPORT
 				extern void BotStartFrame(void);
 
@@ -265,6 +272,9 @@ intptr_t VISIBILITY_VISIBLE vmMain(
 		case GAME_CLIENT_DISCONNECT:
 			ClearGlobals();
 			self = PROG_TO_EDICT(g_globalvars.self);
+#ifdef SOL_SUPPORT
+			Sol_ClientDisconnectedEvent(self);
+#endif
 			RemoveMOTD(); // remove MOTD entitys
 			s_lr_clear(self);
 			if (arg0)
@@ -299,7 +309,11 @@ intptr_t VISIBILITY_VISIBLE vmMain(
 				return 1;
 			}
 
-			if (self->wreg_attack) // client simulate +attack via "cmd wreg" feature
+			if (self->wreg_attack
+#ifdef SOL_SUPPORT
+					&& !Sol_IsClient(self)
+#endif
+					) // client simulate +attack via "cmd wreg" feature
 			{
 				self->s.v.button0 = true;
 			}
@@ -326,7 +340,11 @@ intptr_t VISIBILITY_VISIBLE vmMain(
 			}
 
 			self->k_lastPostThink = g_globalvars.time;
-			if (self->wreg_attack) // client simulate +attack via "cmd wreg" feature
+			if (self->wreg_attack
+#ifdef SOL_SUPPORT
+					&& !Sol_IsClient(self)
+#endif
+					) // client simulate +attack via "cmd wreg" feature
 			{
 				self->s.v.button0 = true;
 			}
@@ -341,6 +359,9 @@ intptr_t VISIBILITY_VISIBLE vmMain(
 			}
 
 			BothPostThink();
+#ifdef SOL_SUPPORT
+			Sol_CapturePostThink(self);
+#endif
 
 			return 1;
 
@@ -661,6 +682,9 @@ static qbool G_InitExtensions(void)
 		{"SetExtFieldPtr",		G_SETEXTFIELDPTR},
 		{"GetExtFieldPtr",		G_GETEXTFIELDPTR},
 		{"setsendneeded",		G_SETSENDNEEDED},
+#ifdef SOL_SUPPORT
+		{CE_EXTENSION_NAME_V1,	G_CONTROLLER_EVIDENCE_V1},
+#endif
 	};
 	int i;
 	for (i = 0; i < sizeof(exttraps)/sizeof(exttraps[0]); i++)

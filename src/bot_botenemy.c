@@ -9,6 +9,9 @@
 
 #include "g_local.h"
 #include "kbot.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 // Removes the look object for the given player
 void ClearLookObject(gedict_t *player)
@@ -27,6 +30,12 @@ void LookEnemy(gedict_t *player, gedict_t *enemy)
 // Called when a player inflicts damage on another
 void BotDamageInflictedEvent(gedict_t *attacker, gedict_t *targ)
 {
+#ifdef SOL_SUPPORT
+	if (Sol_IsClient(targ))
+	{
+		return;
+	}
+#endif
 	targ->fb.last_hurt = g_globalvars.time;
 
 	if (targ->isBot)
@@ -82,7 +91,11 @@ void BotsSoundMadeEvent(gedict_t *entity)
 		// Find all bots which has this entity as enemy
 		for (plr = world; (plr = find_plr(plr));)
 		{
-			if (plr->isBot && !(plr->fb.state & NOTARGET_ENEMY))
+			if (plr->isBot
+#ifdef SOL_SUPPORT
+					&& !Sol_IsClient(plr)
+#endif
+					&& !(plr->fb.state & NOTARGET_ENEMY))
 			{
 				if ((NUM_FOR_EDICT(entity) == plr->s.v.enemy) && (entity != plr->fb.look_object))
 				{

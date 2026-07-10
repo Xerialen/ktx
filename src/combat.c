@@ -24,6 +24,9 @@
  */
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 void ClientObituary(gedict_t *e1, gedict_t *e2);
 void BotPlayerKilledEvent(gedict_t *targ, gedict_t *attacker, gedict_t *inflictor);
@@ -925,7 +928,14 @@ void T_Damage(gedict_t *targ, gedict_t *inflictor, gedict_t *attacker, float dam
 		}
 
 #ifdef BOT_SUPPORT
+#ifdef SOL_SUPPORT
+		if (!Sol_IsClient(targ))
+		{
+			targ->fb.path_state |= AIR_ACCELERATION;
+		}
+#else
 		targ->fb.path_state |= AIR_ACCELERATION;
+#endif
 #endif
 	}
 

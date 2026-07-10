@@ -11,6 +11,9 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 #include "kbot.h"
 
 // Goal functions
@@ -458,7 +461,11 @@ void StartItemFB(gedict_t *ent)
 
 static void BotTookMessage(gedict_t *item, gedict_t *player)
 {
-	if (player->isBot && teamplay)
+	if (player->isBot && teamplay
+#ifdef SOL_SUPPORT
+			&& !Sol_IsClient(player)
+#endif
+			)
 	{
 		TeamplayMessageByName(player, "took");
 	}
@@ -654,7 +661,12 @@ static qbool fb_weapon_touch(gedict_t *item, gedict_t *player)
 
 static void fb_weapon_taken(gedict_t *item, gedict_t *player)
 {
-	player->fb.weapon_refresh_time = 0;
+#ifdef SOL_SUPPORT
+	if (!Sol_IsClient(player))
+#endif
+	{
+		player->fb.weapon_refresh_time = 0;
+	}
 	switch ((int)item->tp_flags)
 	{
 		case it_rl:
@@ -877,7 +889,12 @@ static void fb_powerup_taken(gedict_t *item, gedict_t *player)
 	item->fb.goal_respawn_time = item->s.v.nextthink + AUTOTRACK_POWERUPS_PREDICT_TIME;
 	AssignVirtualGoal(item);
 	item->s.v.solid = SOLID_TRIGGER;
-	player->fb.last_mm2_spot = 0;
+#ifdef SOL_SUPPORT
+	if (!Sol_IsClient(player))
+#endif
+	{
+		player->fb.last_mm2_spot = 0;
+	}
 	BotTookMessage(item, player);
 }
 
@@ -1025,12 +1042,16 @@ static qbool fb_backpack_touch(gedict_t *item, gedict_t *player)
 
 static void fb_backpack_taken(gedict_t *item, gedict_t *player)
 {
-	player->fb.weapon_refresh_time = 0;
-
 	UpdateGoalEntity(item, player);
-	player->fb.old_linked_marker = NULL;
-	SetLinkedMarker(player, LocateMarker(player->s.v.origin), "bp taken");
-	player->fb.linked_marker_time = g_globalvars.time + 5;
+#ifdef SOL_SUPPORT
+	if (!Sol_IsClient(player))
+#endif
+	{
+		player->fb.weapon_refresh_time = 0;
+		player->fb.old_linked_marker = NULL;
+		SetLinkedMarker(player, LocateMarker(player->s.v.origin), "bp taken");
+		player->fb.linked_marker_time = g_globalvars.time + 5;
+	}
 
 	if ((int)item->s.v.items & (IT_ROCKET_LAUNCHER | IT_LIGHTNING))
 	{
@@ -1045,6 +1066,12 @@ void BotsBackpackTouchedNonPlayer(gedict_t *pack, gedict_t *touch_ent)
 
 void BotsBackpackDropped(gedict_t *self, gedict_t *pack)
 {
+	qbool pack_is_reachable =
+#ifdef SOL_SUPPORT
+			Sol_IsClient(self) ||
+#endif
+			!(self->fb.state & BACKPACK_IS_UNREACHABLE);
+
 	pack->think = (func_t) BackpackTimedOut;
 	pack->fb.goal_respawn_time = g_globalvars.time;
 
@@ -1097,7 +1124,7 @@ void BotsBackpackDropped(gedict_t *self, gedict_t *pack)
 	pack->fb.item_touch = fb_backpack_touch;
 	pack->fb.item_taken = fb_backpack_taken;
 
-	if (!(self->fb.state & BACKPACK_IS_UNREACHABLE))
+	if (pack_is_reachable)
 	{
 		LocateDynamicItem(pack);
 		BotDroppedMessage(self, pack);

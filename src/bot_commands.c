@@ -9,6 +9,9 @@
 #include "g_local.h"
 #include "kbot.h"
 #include "nano.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 // Handles all "botcmd x" commands from the user
 
@@ -1963,7 +1966,12 @@ static void FrogbotsFillServer(void)
 
 static void FrogbotsRemoveAll(void)
 {
-	int bot_count = CountBots();
+	int bot_count;
+
+#ifdef SOL_SUPPORT
+	Sol_RemoveAll();
+#endif
+	bot_count = CountBots();
 
 	while (bot_count-- > 0)
 	{
@@ -2367,6 +2375,11 @@ static frogbot_cmd_t std_commands[] =
 		{ "skill", FrogbotsSetSkill, "Set skill level for next bot added" },
 		{ "addbot", FrogbotsAddbot_f, "Adds a bot. Skill & team optional" },
 		{ "addkbot", FrogbotsAddKbot_f, "Adds a komodobot. Skill & team optional" },
+#ifdef SOL_SUPPORT
+		{ "evidencebind", Sol_EvidenceBind_f, "Seal one SOL evidence seat" },
+		{ "addsol", Sol_Add_f, "Adds the sealed SOL seat: addsol 20 red" },
+		{ "evidenceclose", Sol_EvidenceClose_f, "Close and unbind SOL evidence" },
+#endif
 #ifdef NANO_SUPPORT
 		{ "addnano", FrogbotsAddNano_f, "Adds a nano-bot (rtx port). Skill & team optional" },
 #endif
@@ -2441,9 +2454,10 @@ void FrogbotsCommand(void)
 	int num_commands =
 			FrogbotOptionEnabled(FB_OPTION_EDITOR_MODE) ?
 					NUM_EDITOR_COMMANDS : NUM_STANDARD_COMMANDS;
-	char command[64];
+	char command[64] = { 0 };
 	int i;
 	float admin_rules = cvar(FB_CVAR_ADMIN_ONLY);
+	qbool bypass_bot_gates = false;
 
 	if ((admin_rules == 2) && !is_real_adm(self))
 	{
@@ -2457,11 +2471,16 @@ void FrogbotsCommand(void)
 
 		return;
 	}
+	if (trap_CmdArgc() > 1)
+	{
+		trap_CmdArgv(1, command, sizeof(command));
+#ifdef SOL_SUPPORT
+		bypass_bot_gates = Sol_CommandBypassesBotGates(command);
+#endif
+	}
 
 	if (!bots_enabled())
 	{
-		trap_CmdArgv(1, command, sizeof(command));
-
 		if ((trap_CmdArgc() > 1) && streq(command, "enable"))
 		{
 			if (match_in_progress)
@@ -2492,9 +2511,12 @@ void FrogbotsCommand(void)
 			return;
 		}
 
-		G_sprint(self, PRINT_HIGH, "Bots not enabled: to turn on, %s\n", redtext("/botcmd enable"));
-
-		return;
+		if (!bypass_bot_gates)
+		{
+			G_sprint(self, PRINT_HIGH, "Bots not enabled: to turn on, %s\n",
+					redtext("/botcmd enable"));
+			return;
+		}
 	}
 
 	if (trap_CmdArgc() <= 1)
@@ -2504,10 +2526,8 @@ void FrogbotsCommand(void)
 		return;
 	}
 
-	trap_CmdArgv(1, command, sizeof(command));
-
 	if (!FrogbotOptionEnabled(FB_OPTION_EDITOR_MODE) && !streq(command, "disable")
-			&& !FrogbotsCheckMapSupport())
+			&& !bypass_bot_gates && !FrogbotsCheckMapSupport())
 	{
 		G_sprint(self, PRINT_HIGH, "Bots not supported on this map.\n");
 
@@ -2765,6 +2785,12 @@ void BotStartFrame(void)
 			// Logic that gets called every frame for every frogbot
 			if (self->isBot)
 			{
+#ifdef SOL_SUPPORT
+				if (Sol_IsClient(self))
+				{
+					continue;
+				}
+#endif
 				BotCanRocketJump(self);
 
 				SelectWeapon();

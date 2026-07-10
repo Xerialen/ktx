@@ -9,6 +9,9 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 void button_use(void);
 void fd_secret_use(gedict_t *attacked, float take);
@@ -85,16 +88,34 @@ void BotsAssignTeamFlags(void)
 	// Clear teamflag from all items
 	for (p = world; (p = nextent(p));)
 	{
+	#ifdef SOL_SUPPORT
+		if (Sol_IsClient(p))
+		{
+			continue;
+		}
+	#endif
 		p->fb.teamflag = 0;
 	}
 
 	for (p = world; (p = find_plr(p));)
 	{
+	#ifdef SOL_SUPPORT
+		if (Sol_IsClient(p))
+		{
+			continue;
+		}
+	#endif
 		p->k_flag = 0;
 	}
 
 	for (p = world; (p = find_plr(p));)
 	{
+	#ifdef SOL_SUPPORT
+		if (Sol_IsClient(p))
+		{
+			continue;
+		}
+	#endif
 		if (p->k_flag || strnull(s = getteam(p)))
 		{
 			continue;
@@ -104,6 +125,12 @@ void BotsAssignTeamFlags(void)
 		p->fb.teamflag = teamflag;
 		for (p2 = p; (p2 = find_plr(p2));)
 		{
+		#ifdef SOL_SUPPORT
+			if (Sol_IsClient(p2))
+			{
+				continue;
+			}
+		#endif
 			if (streq(s, getteam(p2)))
 			{
 				p2->k_flag = 1;
@@ -122,7 +149,11 @@ gedict_t* BotsFirstBot(void)
 
 	for (ent = world; (ent = find_plr(ent));)
 	{
-		if (ent->isBot)
+		if (ent->isBot
+#ifdef SOL_SUPPORT
+				&& !Sol_IsClient(ent)
+#endif
+				)
 		{
 			first_bot = ent;
 			break;
@@ -137,6 +168,13 @@ void BotsMatchStart(void)
 {
 	gedict_t *first_bot = BotsFirstBot();
 	gedict_t *ent;
+
+#ifdef SOL_SUPPORT
+	if (first_bot == NULL)
+	{
+		return;
+	}
+#endif
 
 	for (ent = world; (ent = find(ent, FOFCLSN, "marker_indicator"));)
 	{

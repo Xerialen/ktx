@@ -24,6 +24,9 @@
  */
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 void ReportMe(void);
 void AdminImpBot(void);
@@ -2879,7 +2882,11 @@ void W_WeaponFrame(void)
 		return; // discard +attack till 50 ms after respawn, like ktpro 
 	}
 
-	if (self->wreg_attack) // client simulate +attack via "cmd wreg" feature
+	if (self->wreg_attack
+#ifdef SOL_SUPPORT
+			&& !Sol_IsClient(self)
+#endif
+			) // client simulate +attack via "cmd wreg" feature
 	{
 		self->s.v.button0 = true;
 	}

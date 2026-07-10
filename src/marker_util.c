@@ -10,6 +10,9 @@
 #ifdef BOT_SUPPORT
 
 #include "g_local.h"
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
 
 // Globals
 void SUB_regen(void);
@@ -20,6 +23,13 @@ void check_marker(gedict_t *self, gedict_t *other)
 {
 	vec3_t temp;
 	float distance;
+
+#ifdef SOL_SUPPORT
+	if (Sol_IsClient(other))
+	{
+		return;
+	}
+#endif
 
 	if (self->fb.T & MARKER_NOTOUCH)
 	{
