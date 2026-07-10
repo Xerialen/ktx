@@ -19,7 +19,6 @@
 
 #define PERIODIC_MM2_STATUS 4
 
-void PlayerReady(qbool startIdlebot);
 void BotBlocked(void);
 
 int weapon_impulse_codes[] =
@@ -406,11 +405,6 @@ void BotPreThink(gedict_t *self)
 	{
 		self->fb.firing = self->s.v.button0;
 		self->fb.jumping = self->s.v.button2;
-
-		if (self->isBot && (match_in_progress == 0) && !self->ready)
-		{
-			PlayerReady(true);
-		}
 
 		if (teamplay && (match_in_progress == 2))
 		{

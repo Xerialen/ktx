@@ -3762,6 +3762,11 @@ void PlayerPreThink(void)
 	}
 
 #ifdef BOT_SUPPORT
+	if (bots_enabled() && self->isBot && (match_in_progress == 0) && !self->ready)
+	{
+		PlayerReady(true);
+	}
+
 	if (bots_enabled()
 #ifdef SOL_SUPPORT
 			&& !Sol_IsClient(self)

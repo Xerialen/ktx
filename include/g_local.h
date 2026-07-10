@@ -570,6 +570,7 @@ float CountPlayers(void);
 float CountBots(void);
 float CountRTeams(void);
 qbool isCanStart(gedict_t *s, qbool forceMembersWarn);
+void PlayerReady(qbool startIdlebot);
 void StartTimer(void);
 void StopTimer(int removeDemo);
 

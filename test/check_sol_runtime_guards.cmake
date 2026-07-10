@@ -44,6 +44,30 @@ require_occurrences("${BOT_COMMANDS}" "Sol_IsClient\\(self\\)" 1
 	"per-client Frogbot StartFrame path excludes SOL")
 require_occurrences("${BOT_CLIENT}" "Sol_Client(Connected|Enters)Event" 2
 	"connect and enter lifecycle dispatch through SOL before Frogbot init")
+require_exact_occurrences("${BOT_CLIENT}" "PlayerReady\\(true\\)" 1
+	"Frogbot connect keeps one eager ready attempt but owns no retry loop")
+require_exact_occurrences("${CLIENT}" "PlayerReady\\(true\\)" 1
+	"shared client lifecycle owns one brain-agnostic bot ready retry")
+file(READ "${CLIENT}" client_contents)
+string(FIND "${client_contents}" "void PlayerPreThink(void)" player_prethink_index)
+string(FIND "${client_contents}" "void PlayerPostThink(void)" player_postthink_index)
+if(player_prethink_index LESS 0 OR player_postthink_index LESS player_prethink_index)
+	message(FATAL_ERROR "player prethink lifecycle boundaries are missing")
+endif()
+math(EXPR player_prethink_length
+	"${player_postthink_index} - ${player_prethink_index}")
+string(SUBSTRING "${client_contents}" ${player_prethink_index}
+	${player_prethink_length} player_prethink_contents)
+string(FIND "${player_prethink_contents}"
+	"if (bots_enabled() && self->isBot && (match_in_progress == 0) && !self->ready)"
+	shared_ready_index)
+string(FIND "${player_prethink_contents}" "&& !Sol_IsClient(self)"
+	stock_brain_exclusion_index)
+if(shared_ready_index LESS 0 OR stock_brain_exclusion_index LESS 0
+		OR shared_ready_index GREATER stock_brain_exclusion_index)
+	message(FATAL_ERROR
+		"bot readiness must run before PlayerPreThink excludes SOL from Frogbot behavior")
+endif()
 require_occurrences("${BOT_CLIENT}" "Sol_IsClient\\(self\\)" 2
 	"death cleanup retains legacy-opponent reset while excluding SOL-private death state")
 require_occurrences("${BOT_STAT}" "Sol_IsClient\\(client\\)" 1
