@@ -411,6 +411,13 @@ intptr_t trap_ControllerEvidenceV1(intptr_t operation, void *payload, intptr_t p
 {
 	return syscall(G_CONTROLLER_EVIDENCE_V1, operation, (intptr_t) payload, payload_size);
 }
+
+intptr_t trap_ControllerObservationV1(intptr_t operation, void *payload,
+		intptr_t payload_size)
+{
+	return syscall(G_CONTROLLER_OBSERVATION_V1, operation, (intptr_t) payload,
+			payload_size);
+}
 #endif
 
 intptr_t trap_AddBot(const char *name, intptr_t bottomcolor, intptr_t topcolor, const char *skin)

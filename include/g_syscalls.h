@@ -124,6 +124,8 @@ intptr_t trap_Map_Extension(const char *ext_name, intptr_t mapto);
 
 #ifdef SOL_SUPPORT
 intptr_t trap_ControllerEvidenceV1(intptr_t operation, void *payload, intptr_t payload_size);
+intptr_t trap_ControllerObservationV1(intptr_t operation, void *payload,
+		intptr_t payload_size);
 #endif
 
 intptr_t trap_AddBot(const char *name, intptr_t bottomcolor, intptr_t topcolor, const char *skin);

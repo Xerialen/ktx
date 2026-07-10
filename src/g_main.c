@@ -27,6 +27,7 @@
 #include "rng.h"
 #ifdef SOL_SUPPORT
 #include "controller_evidence_protocol.h"
+#include "controller_observation_protocol.h"
 #include "sol_runtime.h"
 #endif
 /* global 4 fix
@@ -359,9 +360,6 @@ intptr_t VISIBILITY_VISIBLE vmMain(
 			}
 
 			BothPostThink();
-#ifdef SOL_SUPPORT
-			Sol_CapturePostThink(self);
-#endif
 
 			return 1;
 
@@ -684,6 +682,7 @@ static qbool G_InitExtensions(void)
 		{"setsendneeded",		G_SETSENDNEEDED},
 #ifdef SOL_SUPPORT
 		{CE_EXTENSION_NAME_V1,	G_CONTROLLER_EVIDENCE_V1},
+		{COV_EXTENSION_NAME_V1,	G_CONTROLLER_OBSERVATION_V1},
 #endif
 	};
 	int i;

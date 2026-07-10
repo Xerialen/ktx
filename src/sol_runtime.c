@@ -1,8 +1,9 @@
 #include "g_local.h"
 
 #include "controller_evidence_protocol.h"
-#include "sol_core.h"
+#include "controller_observation_protocol.h"
 #include "sol_ktx_adapter.h"
+#include "sol_observation_client.h"
 #include "sol_runtime.h"
 
 #include <string.h>
@@ -38,34 +39,11 @@ typedef struct sol_registry
 	char config_sha256[CE_SHA256_HEX_CAP];
 	char treatment_digest[CE_SHA256_ID_CAP];
 	char writer_id[CE_WRITER_ID_CAP];
-	sol_core_v1 *core;
-	uint64_t core_frame_seq;
+	sol_observation_client_v1 *observation;
 	uint64_t diagnostic_frame_seq;
-	uint64_t snapshot_serial;
-	uint64_t consumed_snapshot_serial;
-	sol_ktx_snapshot_v1 snapshot;
 } sol_registry;
 
 static sol_registry sol;
-
-static const uint8_t sol_asset_id[32] = {
-	0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-	0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-	0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
-	0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11
-};
-static const uint8_t sol_sensory_id[32] = {
-	0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
-	0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
-	0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
-	0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22
-};
-static const uint8_t sol_goal_id[32] = {
-	0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
-	0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
-	0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33,
-	0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33, 0x33
-};
 
 static void init_header(ce_payload_header_v1 *header, size_t size)
 {
@@ -123,14 +101,26 @@ static int read_sha256_id_arg(int index, char *output, size_t capacity)
 	return read_arg(index, output, capacity) && sha256_id(output);
 }
 
-static int extension_available(void)
+static int evidence_extension_available(void)
 {
 	return HAVEEXTENSION(G_CONTROLLER_EVIDENCE_V1);
 }
 
+static int observation_extension_available(void)
+{
+	return HAVEEXTENSION(G_CONTROLLER_OBSERVATION_V1);
+}
+
+static intptr_t call_observation(void *context, intptr_t operation,
+		void *payload, intptr_t payload_size)
+{
+	(void) context;
+	return trap_ControllerObservationV1(operation, payload, payload_size);
+}
+
 static void reset_registry(void)
 {
-	sol_core_destroy_v1(sol.core);
+	sol_observation_client_destroy_v1(sol.observation);
 	memset(&sol, 0, sizeof(sol));
 }
 
@@ -164,25 +154,14 @@ static int close_evidence(void)
 		unbind_result = trap_ControllerEvidenceV1(CE_UNBIND, &unbind, sizeof(unbind));
 		sol.bound = 0;
 	}
+	sol_observation_client_destroy_v1(sol.observation);
+	sol.observation = NULL;
 	sol.closed = 1;
 	G_cprint("[sol-slice/v1] close end=%d unbind=%d slot=%d\n",
 			end_result, unbind_result, sol.entity);
 	return end_result == CE_RESULT_OK
 			&& (!sol.client_generation || unbind_result == CE_RESULT_OK) ? CE_RESULT_OK
 			: CE_RESULT_INVALID;
-}
-
-static sol_core_v1 *create_core(void)
-{
-	float goal[3] = { cvar("k_sol_goal_x"), cvar("k_sol_goal_y"), cvar("k_sol_goal_z") };
-	float radius = cvar("k_sol_goal_radius");
-	uint8_t init[SOL_CORE_INIT_V1_SIZE];
-
-	if (!sol_ktx_encode_init_v1(sol_asset_id, sol_sensory_id, sol_goal_id, goal, radius, init))
-	{
-		return NULL;
-	}
-	return sol_core_create_v1(init, sizeof(init));
 }
 
 int Sol_IsClient(const struct gedict_s *client)
@@ -234,66 +213,12 @@ void Sol_ClientDisconnectedEvent(struct gedict_s *client)
 	{
 		return;
 	}
-	if (!sol.closed && extension_available())
+	if (!sol.closed && evidence_extension_available())
 	{
 		close_evidence();
 	}
 	G_cprint("[sol-slice/v1] disconnect slot=%d\n", sol.entity);
 	reset_registry();
-}
-
-static float canonical_sensor_float(float value)
-{
-	uint32_t bits;
-
-	memcpy(&bits, &value, sizeof(bits));
-	if ((bits & UINT32_C(0x7f800000)) == UINT32_C(0x7f800000))
-	{
-		return 0.0f;
-	}
-	return value == 0.0f ? 0.0f : value;
-}
-
-static float canonical_angle(float value, float minimum, float maximum)
-{
-	value = canonical_sensor_float(value);
-	if (value < -36000.0f || value > 36000.0f)
-	{
-		return 0.0f;
-	}
-	while (value < minimum)
-	{
-		value += 360.0f;
-	}
-	while (value >= maximum)
-	{
-		value -= 360.0f;
-	}
-	return value == 0.0f ? 0.0f : value;
-}
-
-void Sol_CapturePostThink(struct gedict_s *client)
-{
-	int index;
-
-	if (!Sol_IsClient(client))
-	{
-		return;
-	}
-	sol.snapshot.alive = client->s.v.deadflag == 0 && client->s.v.health > 0;
-	sol.snapshot.on_ground = ((int) client->s.v.flags & FL_ONGROUND) != 0;
-	sol.snapshot.water_level = (uint8_t) bound(0, (int) client->s.v.waterlevel, 3);
-	sol.snapshot.movement_mode = sol.snapshot.alive ? 0 : 1;
-	for (index = 0; index < 3; ++index)
-	{
-		sol.snapshot.origin[index] = canonical_sensor_float(client->s.v.origin[index]);
-		sol.snapshot.velocity[index] = canonical_sensor_float(client->s.v.velocity[index]);
-	}
-	sol.snapshot.view[0] = canonical_sensor_float(client->s.v.v_angle[0]);
-	sol.snapshot.view[0] = bound(-90.0f, sol.snapshot.view[0], 90.0f);
-	sol.snapshot.view[1] = canonical_angle(client->s.v.v_angle[1], -180.0f, 180.0f);
-	sol.snapshot.view[2] = canonical_angle(client->s.v.v_angle[2], -180.0f, 180.0f);
-	sol.snapshot_serial++;
 }
 
 static uint8_t command_msec(void)
@@ -303,35 +228,30 @@ static uint8_t command_msec(void)
 	return (uint8_t) bound(1, msec, 255);
 }
 
-static void neutral_command(uint8_t msec, const sol_ktx_snapshot_v1 *snapshot,
+static void neutral_command(uint8_t msec,
+		const sol_observation_client_v1 *observation,
 		sol_ktx_command_v1 *command)
 {
 	memset(command, 0, sizeof(*command));
 	command->msec = msec;
-	if (snapshot)
-	{
-		memcpy(command->angles, snapshot->view, sizeof(command->angles));
-	}
+	sol_observation_client_neutral_view_v1(observation, command->angles);
 }
 
 void Sol_StartFrame(void)
 {
-	uint8_t observation[SOL_CORE_OBSERVATION_V1_SIZE];
-	uint8_t action[SOL_CORE_ACTION_V1_SIZE];
 	uint8_t command_wire[SOL_KTX_COMMAND_V1_SIZE];
 	ce_frame_request_v1 request;
 	sol_ktx_command_v1 command;
-	const sol_ktx_snapshot_v1 *snapshot = NULL;
+	const uint8_t *batch;
 	gedict_t *client;
-	sol_core_status_v1 status = SOL_CORE_BAD_ARGUMENT;
-	size_t action_size = 0;
+	sol_observation_status_v1 observation_status;
+	size_t batch_length = 0;
 	uint8_t msec;
 	uint32_t dt_us;
-	uint64_t frame_seq;
 	int evidence_result;
-	float origin[3] = { 0.0f, 0.0f, 0.0f };
 
-	if (sol.stage < SOL_STAGE_BOUND || !sol.core || sol.entity < 1 || sol.entity > MAX_CLIENTS)
+	if (sol.stage < SOL_STAGE_BOUND || !sol.bound || !sol.observation ||
+			sol.entity < 1 || sol.entity > MAX_CLIENTS)
 	{
 		return;
 	}
@@ -340,36 +260,27 @@ void Sol_StartFrame(void)
 	{
 		return;
 	}
-	if (sol.snapshot_serial != sol.consumed_snapshot_serial)
-	{
-		snapshot = &sol.snapshot;
-		sol.consumed_snapshot_serial = sol.snapshot_serial;
-		memcpy(origin, snapshot->origin, sizeof(origin));
-	}
 	msec = command_msec();
 	dt_us = (uint32_t) msec * 1000u;
-	frame_seq = sol.core_frame_seq;
-	if (sol_ktx_encode_observation_v1(frame_seq, dt_us, sol_asset_id, sol_sensory_id,
-			snapshot, observation))
+
+	/* Poll/seal phase. The current runtime registry admits one bound SOL slot. */
+	observation_status = sol_observation_client_poll_v1(sol.observation, dt_us);
+	batch = sol_observation_client_batch_v1(sol.observation, &batch_length);
+	if (observation_status != SOL_OBSERVATION_READY)
 	{
-		status = sol_core_step_v1(sol.core, observation, sizeof(observation), action,
-				sizeof(action), &action_size);
+		batch = NULL;
+		batch_length = 0;
 	}
-	if ((status == SOL_CORE_OK || status == SOL_CORE_NEUTRAL)
-			&& sol_ktx_decode_action_v1(action, action_size, frame_seq, msec, &command))
-	{
-		sol.core_frame_seq++;
-	}
-	else
-	{
-		neutral_command(msec, snapshot, &command);
-	}
+
+	/* Policy phase. No legacy tracer core may consume a COV batch. */
+	neutral_command(msec, sol.observation, &command);
 	if (!sol_ktx_encode_command_v1(&command, command_wire))
 	{
 		neutral_command(msec, NULL, &command);
 		sol_ktx_encode_command_v1(&command, command_wire);
 	}
 
+	/* Command phase. Chat remains suppressed while no SOB1/SAC1 core is attached. */
 	memset(&request, 0, sizeof(request));
 	init_header(&request.header, sizeof(request));
 	request.engine_slot = (uint32_t) sol.entity;
@@ -380,10 +291,10 @@ void Sol_StartFrame(void)
 			command.angles[2], command.forwardmove, command.sidemove, command.upmove,
 			command.buttons, command.impulse);
 
-	G_cprint("[sol-slice/v1] frame=%llu sight=0 snapshot=%d origin=%.1f,%.1f,%.1f "
-			"action=%d evidence=%d yaw=%.1f move=%d,%d,%d\n",
-			(unsigned long long) sol.diagnostic_frame_seq++, snapshot != NULL,
-			origin[0], origin[1], origin[2], (int) status, evidence_result,
+	G_cprint("[sol-slice/v1] frame=%llu observation=%d bytes=%lu "
+			"policy=neutral evidence=%d yaw=%.1f move=%d,%d,%d\n",
+			(unsigned long long) sol.diagnostic_frame_seq++, (int) observation_status,
+			(unsigned long) (batch ? batch_length : 0u), evidence_result,
 			command.angles[1], command.forwardmove, command.sidemove, command.upmove);
 }
 
@@ -400,9 +311,10 @@ void Sol_EvidenceBind_f(void)
 	char evidence_seat[CE_SEAT_ID_CAP];
 	int result;
 
-	if (!extension_available())
+	if (!evidence_extension_available() || !observation_extension_available())
 	{
-		G_sprint(self, PRINT_HIGH, "ControllerEvidenceV1 is unavailable.\n");
+		G_sprint(self, PRINT_HIGH,
+				"ControllerEvidenceV1 or ControllerObservationV1 is unavailable.\n");
 		return;
 	}
 	if (trap_CmdArgc() != 13)
@@ -463,7 +375,7 @@ void Sol_Add_f(void)
 	char seat[32];
 	char team[32];
 	ce_bind_v1 bind;
-	sol_core_v1 *core;
+	const cov_profile_v1 *profile;
 	int entity;
 	int result;
 
@@ -478,13 +390,6 @@ void Sol_Add_f(void)
 		G_sprint(self, PRINT_HIGH, "Bind SOL evidence before adding seat 20.\n");
 		return;
 	}
-	core = create_core();
-	if (!core)
-	{
-		G_sprint(self, PRINT_HIGH, "Invalid SOL goal cvars or core allocation failure.\n");
-		return;
-	}
-	sol.core = core;
 	sol.stage = SOL_STAGE_EXPECTING_CLIENT;
 	entity = (int) trap_AddBot(SOL_PLAYER_NAME, 4, 4, "base");
 	if (!entity || sol.stage != SOL_STAGE_CLAIMED || sol.entity != entity)
@@ -496,8 +401,6 @@ void Sol_Add_f(void)
 		}
 		else
 		{
-			sol_core_destroy_v1(sol.core);
-			sol.core = NULL;
 			sol.stage = SOL_STAGE_PENDING;
 		}
 		return;
@@ -536,10 +439,27 @@ void Sol_Add_f(void)
 	}
 	sol.client_generation = bind.client_generation;
 	sol.bound = 1;
+	sol.observation = sol_observation_client_create_v1((uint32_t) entity,
+			bind.client_generation, call_observation, NULL);
+	if (!sol.observation)
+	{
+		G_sprint(self, PRINT_HIGH,
+				"SOL observation profile query rejected for slot %d generation %u.\n",
+				entity, bind.client_generation);
+		close_evidence();
+		trap_RemoveBot(entity);
+		if (sol.stage != SOL_STAGE_EMPTY)
+		{
+			reset_registry();
+		}
+		return;
+	}
+	profile = sol_observation_client_profile_v1(sol.observation);
 	sol.stage = SOL_STAGE_BOUND;
-	G_sprint(self, PRINT_HIGH, "SOL plan seat %s (%s) bound to %s/%s generation %u.\n",
+	G_sprint(self, PRINT_HIGH, "SOL plan seat %s (%s) bound to %s/%s generation %u "
+			"with COV batch cap %u.\n",
 			sol.plan_seat, bind.seat_id, bind.observed_player_name, bind.observed_team,
-			bind.client_generation);
+			bind.client_generation, profile->max_batch_bytes);
 }
 
 void Sol_EvidenceClose_f(void)
@@ -573,7 +493,7 @@ void Sol_RemoveAll(void)
 	{
 		return;
 	}
-	if (!sol.closed && extension_available())
+	if (!sol.closed && evidence_extension_available())
 	{
 		close_evidence();
 	}

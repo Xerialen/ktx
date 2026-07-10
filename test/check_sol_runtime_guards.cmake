@@ -8,6 +8,14 @@ function(require_occurrences path pattern minimum description)
 	endif()
 endfunction()
 
+function(forbid_occurrences path pattern description)
+	file(READ "${path}" contents)
+	if(contents MATCHES "${pattern}")
+		message(FATAL_ERROR
+			"SOL forbidden runtime capability present: ${description} in ${path}")
+	endif()
+endfunction()
+
 require_occurrences("${BOT_PHYS}" "!Sol_IsClient\\((p|self)\\)" 2
 	"both global Frogbot pre-physics passes exclude SOL")
 require_occurrences("${CLIENT}" "!Sol_IsClient\\(self\\)" 5
@@ -42,3 +50,23 @@ require_occurrences("${BOT_GOALS}" "Sol_IsClient\\(plr\\)" 1
 	"item-taken goal refresh excludes the SOL controller while retaining legacy opponents")
 require_occurrences("${MARKER_UTIL}" "Sol_IsClient\\(other\\)" 1
 	"standalone Frogbot marker touches exclude SOL")
+
+require_occurrences("${G_LOCAL}" "G_CONTROLLER_OBSERVATION_V1" 1
+	"closed observer extension owns a mapped game-import slot")
+require_occurrences("${G_MAIN}" "COV_EXTENSION_NAME_V1" 1
+	"KTX maps the exact ControllerObservationV1 extension name")
+require_occurrences("${G_SYSCALLS}" "trap_ControllerObservationV1" 1
+	"native KTX exposes the closed observer syscall wrapper")
+require_occurrences("${SOL_OBSERVATION_CLIENT}" "cov_get_committed_v1 get;" 1
+	"the maximum native GET payload is owned by each heap client")
+forbid_occurrences("${SOL_RUNTIME}"
+	"(sol_core_step_v1|sol_ktx_encode_observation_v1|Sol_CapturePostThink|cov_get_committed_v1)"
+	"legacy observation/core path or stack-sized GET payload")
+
+file(READ "${SOL_RUNTIME}" sol_runtime_contents)
+string(FIND "${sol_runtime_contents}" "sol_observation_client_poll_v1" poll_index)
+string(FIND "${sol_runtime_contents}" "trap_SetBotCMD" command_index)
+if(poll_index LESS 0 OR command_index LESS 0 OR poll_index GREATER command_index)
+	message(FATAL_ERROR
+		"SOL phase order must poll/seal observations before the first command side effect")
+endif()
