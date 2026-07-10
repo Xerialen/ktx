@@ -19,6 +19,10 @@
 
 #include "g_local.h"
 
+#ifdef SOL_SUPPORT
+#include "sol_runtime.h"
+#endif
+
 void NextLevel(void);
 void IdlebotForceStart(void);
 void StartMatch(void);
@@ -2752,6 +2756,13 @@ void PlayerReady(qbool startIdlebot)
 	float nready;
 	char *matchtag = ezinfokey(world, "matchtag");
 	qbool has_matchtag = matchtag != NULL && matchtag[0];
+
+#ifdef SOL_SUPPORT
+	if (self->isBot && !Sol_BotReadyAllowed())
+	{
+		return;
+	}
+#endif
 
 	if (isRACE() && !race_match_mode())
 	{

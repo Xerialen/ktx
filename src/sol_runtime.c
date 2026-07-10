@@ -413,6 +413,33 @@ int Sol_CommandBypassesBotGates(const char *command)
 		|| !strcmp(command, "evidenceclose") || !strcmp(command, "removeall"));
 }
 
+int Sol_BotReadyAllowed(void)
+{
+	const char *run_nonce;
+
+	if (!sol.evidence || !sol_evidence_run_active_v1(sol.evidence))
+	{
+		return 1;
+	}
+	run_nonce = sol_evidence_run_nonce_v1(sol.evidence);
+	if (!run_nonce)
+	{
+		return 0;
+	}
+	if (sol_evidence_run_matches_v1(sol.evidence, run_nonce,
+			"diagnostic-client-lifecycle/v1"))
+	{
+		return 1;
+	}
+	if (!sol_evidence_run_matches_v1(sol.evidence, run_nonce, "ktx-match/v1"))
+	{
+		return 0;
+	}
+	return !sol_evidence_run_cleanup_pending_v1(sol.evidence)
+		&& sol_evidence_run_emissions_open_v1(sol.evidence)
+		&& sol_launch_coordinator_all_complete_v1(sol.launches);
+}
+
 void Sol_EvidenceBind_f(void)
 {
 	sol_launch_metadata_v1 metadata;

@@ -23,6 +23,7 @@ sol_actual_command_route_v1 Sol_ActualCommandLookup(uint32_t engine_slot,
 void Sol_ActualCommandFailStop(void);
 
 int Sol_CommandBypassesBotGates(const char *command);
+int Sol_BotReadyAllowed(void);
 void Sol_EvidenceBind_f(void);
 void Sol_Add_f(void);
 void Sol_EvidenceClose_f(void);

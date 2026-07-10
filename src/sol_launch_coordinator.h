@@ -29,6 +29,8 @@ const sol_launch_metadata_v1 *sol_launch_coordinator_pending_v1(
 	const sol_launch_coordinator_v1 *coordinator, size_t *index);
 int sol_launch_coordinator_complete_v1(sol_launch_coordinator_v1 *coordinator,
 	size_t index);
+int sol_launch_coordinator_all_complete_v1(
+	const sol_launch_coordinator_v1 *coordinator);
 const sol_launch_metadata_v1 *sol_launch_coordinator_seat_v1(
 	const sol_launch_coordinator_v1 *coordinator, size_t index);
 

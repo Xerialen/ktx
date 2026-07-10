@@ -43,6 +43,8 @@ static void test_alternating_eight_launches_allow_only_one_pending_seat(void)
 	size_t launched;
 
 	require(coordinator != NULL, "launch coordinator allocation succeeds");
+	require(!sol_launch_coordinator_all_complete_v1(coordinator),
+		"an empty strict launch cannot release bot readiness");
 	for (launched = 0; launched < SOL_KTX_EVIDENCE_SEAT_COUNT_V1; ++launched)
 	{
 		size_t index = launch_order[launched];
@@ -54,6 +56,8 @@ static void test_alternating_eight_launches_allow_only_one_pending_seat(void)
 
 		require(sol_launch_coordinator_configure_v1(coordinator, index, &metadata),
 				"alternating candidate/control seat becomes the sole launch pending");
+		require(!sol_launch_coordinator_all_complete_v1(coordinator),
+				"a configured but unbound seat keeps readiness closed");
 		require(!sol_launch_coordinator_configure_v1(coordinator,
 				(index + 1u) % SOL_KTX_EVIDENCE_SEAT_COUNT_V1, &blocked),
 				"a second evidencebind cannot overlap the pending selector launch");
@@ -65,6 +69,9 @@ static void test_alternating_eight_launches_allow_only_one_pending_seat(void)
 			&& sol_launch_coordinator_pending_v1(coordinator, &pending) == NULL
 			&& pending == SOL_KTX_EVIDENCE_SEAT_COUNT_V1,
 				"successful selector launch clears only the pending marker");
+		require(sol_launch_coordinator_all_complete_v1(coordinator)
+				== (launched + 1u == SOL_KTX_EVIDENCE_SEAT_COUNT_V1),
+				"readiness opens only after the eighth bound seat completes");
 	}
 	for (launched = 0; launched < SOL_KTX_EVIDENCE_SEAT_COUNT_V1; ++launched)
 	{

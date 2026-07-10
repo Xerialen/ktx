@@ -48,6 +48,18 @@ require_exact_occurrences("${BOT_CLIENT}" "PlayerReady\\(true\\)" 1
 	"Frogbot connect keeps one eager ready attempt but owns no retry loop")
 require_exact_occurrences("${CLIENT}" "PlayerReady\\(true\\)" 1
 	"shared client lifecycle owns one brain-agnostic bot ready retry")
+file(READ "${MATCH}" match_contents)
+string(FIND "${match_contents}" "void PlayerReady(qbool startIdlebot)"
+	player_ready_index)
+string(FIND "${match_contents}"
+	"if (self->isBot && !Sol_BotReadyAllowed())" strict_seating_barrier_index)
+string(FIND "${match_contents}" "self->ready = 1;" ready_mutation_index)
+if(player_ready_index LESS 0
+		OR strict_seating_barrier_index LESS player_ready_index
+		OR ready_mutation_index LESS strict_seating_barrier_index)
+	message(FATAL_ERROR
+		"strict eight-seat launch must gate every bot ready path before ready mutation")
+endif()
 file(READ "${CLIENT}" client_contents)
 string(FIND "${client_contents}" "void PlayerPreThink(void)" player_prethink_index)
 string(FIND "${client_contents}" "void PlayerPostThink(void)" player_postthink_index)
@@ -160,8 +172,8 @@ require_exact_occurrences("${SOL_RUNTIME}"
 	"sol_runtime_schedule_decide_v1\\(" 2
 	"both runtime frame phases use the shared scheduling policy")
 require_exact_occurrences("${SOL_RUNTIME}"
-	"sol_evidence_run_emissions_open_v1\\(" 3
-	"runtime scheduling and the command hook distinguish emissions-open from active")
+	"sol_evidence_run_emissions_open_v1\\(" 4
+	"runtime scheduling, readiness, and the command hook distinguish emissions-open from active")
 require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_candidates\\)" 1
 	"bot frame obeys the candidate scheduling decision")
 require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_cleanup\\)" 1
@@ -187,6 +199,29 @@ if(poll_index LESS 0 OR prepare_index LESS 0 OR emit_index LESS 0
 endif()
 
 file(READ "${SOL_RUNTIME}" sol_runtime_contents)
+string(FIND "${sol_runtime_contents}" "int Sol_BotReadyAllowed(void)"
+	bot_ready_allowed_index)
+string(FIND "${sol_runtime_contents}" "void Sol_EvidenceBind_f(void)"
+	evidence_bind_function_index)
+if(bot_ready_allowed_index LESS 0
+		OR evidence_bind_function_index LESS bot_ready_allowed_index)
+	message(FATAL_ERROR "strict bot-ready policy boundary is missing")
+endif()
+math(EXPR bot_ready_allowed_length
+	"${evidence_bind_function_index} - ${bot_ready_allowed_index}")
+string(SUBSTRING "${sol_runtime_contents}" ${bot_ready_allowed_index}
+	${bot_ready_allowed_length} bot_ready_allowed_contents)
+string(FIND "${bot_ready_allowed_contents}"
+	"diagnostic-client-lifecycle/v1" diagnostic_ready_index)
+string(FIND "${bot_ready_allowed_contents}"
+	"sol_evidence_run_cleanup_pending_v1" cleanup_ready_index)
+string(FIND "${bot_ready_allowed_contents}"
+	"sol_launch_coordinator_all_complete_v1" complete_ready_index)
+if(diagnostic_ready_index LESS 0 OR cleanup_ready_index LESS diagnostic_ready_index
+		OR complete_ready_index LESS cleanup_ready_index)
+	message(FATAL_ERROR
+		"bot readiness must explicitly allow diagnostics then fail closed on cleanup before all-eight completion")
+endif()
 string(FIND "${sol_runtime_contents}" "void Sol_ServerStartFrame(void)" server_start_index)
 string(FIND "${sol_runtime_contents}"
 	"sol_evidence_run_server_cleanup_v1(sol.evidence," safe_cleanup_index)

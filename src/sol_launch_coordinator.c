@@ -97,6 +97,26 @@ int sol_launch_coordinator_complete_v1(sol_launch_coordinator_v1 *coordinator,
 	return 1;
 }
 
+int sol_launch_coordinator_all_complete_v1(
+	const sol_launch_coordinator_v1 *coordinator)
+{
+	size_t index;
+
+	if (!coordinator
+		|| coordinator->pending_index != SOL_KTX_EVIDENCE_SEAT_COUNT_V1)
+	{
+		return 0;
+	}
+	for (index = 0; index < SOL_KTX_EVIDENCE_SEAT_COUNT_V1; ++index)
+	{
+		if (!coordinator->configured[index])
+		{
+			return 0;
+		}
+	}
+	return 1;
+}
+
 const sol_launch_metadata_v1 *sol_launch_coordinator_seat_v1(
 	const sol_launch_coordinator_v1 *coordinator, size_t index)
 {
