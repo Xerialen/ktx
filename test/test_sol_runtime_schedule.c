@@ -44,6 +44,7 @@ struct timing_fixture_v1
 	int remove_calls;
 	int request_calls[SOL_KTX_CANDIDATE_COUNT_V1];
 	int command_calls[SOL_KTX_CANDIDATE_COUNT_V1];
+	int reject_unbind_once[SOL_KTX_CANDIDATE_COUNT_V1];
 	char cleanup_trace[64];
 	size_t cleanup_trace_length;
 };
@@ -146,6 +147,12 @@ static intptr_t fake_evidence_call(void *context, intptr_t operation,
 				&& fixture->bindings[index].generation ==
 					unbind->client_generation)
 			{
+				if (fixture->reject_unbind_once[index])
+				{
+					fixture->reject_unbind_once[index] = 0;
+					append_cleanup_trace(fixture, 'X', index);
+					return CE_RESULT_INVALID;
+				}
 				fixture->bindings[index].active = 0;
 				fixture->unbind_calls++;
 				append_cleanup_trace(fixture, 'U', index);
@@ -322,7 +329,8 @@ static void test_pending_cleanup_keeps_complete_bot_frames_until_server_hook(voi
 			fixture.observers[index].poll_calls = 0;
 		}
 		schedule = sol_runtime_schedule_decide_v1(SOL_RUNTIME_BOT_FRAME_V1,
-			sol_evidence_run_active_v1(fixture.run), fixture.registry != NULL,
+			sol_evidence_run_active_v1(fixture.run),
+			sol_evidence_run_emissions_open_v1(fixture.run), fixture.registry != NULL,
 			sol_evidence_run_cleanup_pending_v1(fixture.run));
 		require(schedule.run_candidates && !schedule.run_cleanup,
 				"cleanup-pending bot callback still schedules all live candidates");
@@ -344,16 +352,57 @@ static void test_pending_cleanup_keeps_complete_bot_frames_until_server_hook(voi
 	}
 
 	schedule = sol_runtime_schedule_decide_v1(SOL_RUNTIME_SERVER_FRAME_V1,
-		sol_evidence_run_active_v1(fixture.run), fixture.registry != NULL,
+		sol_evidence_run_active_v1(fixture.run),
+		sol_evidence_run_emissions_open_v1(fixture.run), fixture.registry != NULL,
 		sol_evidence_run_cleanup_pending_v1(fixture.run));
 	require(!schedule.run_candidates && schedule.run_cleanup,
 			"eventual non-bot callback exclusively schedules safe cleanup");
+	fixture.reject_unbind_once[2] = 1;
 	require(sol_evidence_run_server_cleanup_v1(fixture.run,
+			remove_live_candidate, &fixture) == SOL_EVIDENCE_CLEANUP_RETRY
+		&& !strcmp(fixture.cleanup_trace, "EU1U2X3U4")
+		&& fixture.end_calls == 1 && fixture.unbind_calls == 3
+		&& fixture.remove_calls == 0,
+			"first server callback ends once but retains a rejected UNBIND route");
+
+	for (index = 0; index < SOL_KTX_CANDIDATE_COUNT_V1; ++index)
+	{
+		fixture.observers[index].poll_calls = 0;
+	}
+	schedule = sol_runtime_schedule_decide_v1(SOL_RUNTIME_BOT_FRAME_V1,
+		sol_evidence_run_active_v1(fixture.run),
+		sol_evidence_run_emissions_open_v1(fixture.run), fixture.registry != NULL,
+		sol_evidence_run_cleanup_pending_v1(fixture.run));
+	fixture.bot_phase = 1;
+	if (schedule.run_candidates)
+	{
+		(void) sol_candidate_registry_run_frame_v1(fixture.registry, 13u, 13000u,
+			&frame_ops, results);
+	}
+	fixture.bot_phase = 0;
+	for (index = 0; index < SOL_KTX_CANDIDATE_COUNT_V1; ++index)
+	{
+		require(fixture.observers[index].poll_calls == 0
+			&& fixture.request_calls[index] == 2
+			&& fixture.command_calls[index] == 2,
+				"bot callback after END attempt is fully inert during UNBIND retry");
+	}
+	require(fixture.end_calls == 1 && fixture.unbind_calls == 3
+		&& fixture.remove_calls == 0
+		&& !strcmp(fixture.cleanup_trace, "EU1U2X3U4"),
+			"intervening inert bot callback performs no cleanup operation");
+
+	schedule = sol_runtime_schedule_decide_v1(SOL_RUNTIME_SERVER_FRAME_V1,
+		sol_evidence_run_active_v1(fixture.run),
+		sol_evidence_run_emissions_open_v1(fixture.run), fixture.registry != NULL,
+		sol_evidence_run_cleanup_pending_v1(fixture.run));
+	require(!schedule.run_candidates && schedule.run_cleanup
+		&& sol_evidence_run_server_cleanup_v1(fixture.run,
 			remove_live_candidate, &fixture) == SOL_EVIDENCE_CLEANUP_COMPLETE
-		&& !strcmp(fixture.cleanup_trace, "EU1U2U3U4R1R2R3R4")
+		&& !strcmp(fixture.cleanup_trace, "EU1U2X3U4U3R1R2R3R4")
 		&& fixture.end_calls == 1 && fixture.unbind_calls == 4
 		&& fixture.remove_calls == 4,
-			"server callback performs END, every UNBIND, then every removal");
+			"later server callback retries only UNBIND then removes and completes");
 	require(sol_evidence_run_begin_v1(fixture.run, second_run_nonce,
 			"ktx-match/v1", fake_evidence_call, &fixture)
 		&& fixture.begin_calls == 2,

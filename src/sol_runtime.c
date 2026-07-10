@@ -270,7 +270,8 @@ void Sol_ServerStartFrame(void)
 	sol_runtime_schedule_decision_v1 schedule;
 
 	schedule = sol_runtime_schedule_decide_v1(SOL_RUNTIME_SERVER_FRAME_V1,
-		sol_evidence_run_active_v1(sol.evidence), sol.candidates != NULL,
+		sol_evidence_run_active_v1(sol.evidence),
+		sol_evidence_run_emissions_open_v1(sol.evidence), sol.candidates != NULL,
 		sol_evidence_run_cleanup_pending_v1(sol.evidence));
 	if (!schedule.run_cleanup)
 	{
@@ -345,7 +346,8 @@ void Sol_StartFrame(void)
 	size_t index;
 
 	schedule = sol_runtime_schedule_decide_v1(SOL_RUNTIME_BOT_FRAME_V1,
-		sol_evidence_run_active_v1(sol.evidence), sol.candidates != NULL,
+		sol_evidence_run_active_v1(sol.evidence),
+		sol_evidence_run_emissions_open_v1(sol.evidence), sol.candidates != NULL,
 		sol_evidence_run_cleanup_pending_v1(sol.evidence));
 	if (!schedule.run_candidates)
 	{

@@ -14,7 +14,7 @@ typedef struct sol_runtime_schedule_decision_v1
 } sol_runtime_schedule_decision_v1;
 
 sol_runtime_schedule_decision_v1 sol_runtime_schedule_decide_v1(
-	sol_runtime_frame_phase_v1 phase, int epoch_active,
-	int registry_available, int cleanup_pending);
+	sol_runtime_frame_phase_v1 phase, int lifecycle_active,
+	int evidence_emissions_open, int registry_available, int cleanup_pending);
 
 #endif

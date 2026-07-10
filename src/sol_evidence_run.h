@@ -58,6 +58,7 @@ void sol_evidence_run_fail_stop_v1(sol_evidence_run_v1 *run);
 int sol_evidence_run_note_disconnect_v1(sol_evidence_run_v1 *run,
 	size_t index);
 int sol_evidence_run_active_v1(const sol_evidence_run_v1 *run);
+int sol_evidence_run_emissions_open_v1(const sol_evidence_run_v1 *run);
 int sol_evidence_run_cleanup_pending_v1(const sol_evidence_run_v1 *run);
 
 sol_evidence_cleanup_result_v1 sol_evidence_run_server_cleanup_v1(

@@ -17,6 +17,7 @@ typedef struct sol_evidence_run_seat_v1
 struct sol_evidence_run_v1
 {
 	int active;
+	int emissions_open;
 	int cleanup_pending;
 	int end_attempted;
 	char run_nonce[CE_RUN_NONCE_CAP];
@@ -88,6 +89,7 @@ int sol_evidence_run_begin_v1(sol_evidence_run_v1 *run,
 	}
 	memset(run, 0, sizeof(*run));
 	run->active = 1;
+	run->emissions_open = 1;
 	run->call = call;
 	run->call_context = call_context;
 	copy_string(run->run_nonce, sizeof(run->run_nonce), run_nonce);
@@ -316,6 +318,11 @@ int sol_evidence_run_active_v1(const sol_evidence_run_v1 *run)
 	return run && run->active;
 }
 
+int sol_evidence_run_emissions_open_v1(const sol_evidence_run_v1 *run)
+{
+	return run && run->active && run->emissions_open;
+}
+
 int sol_evidence_run_cleanup_pending_v1(const sol_evidence_run_v1 *run)
 {
 	return run && run->active && run->cleanup_pending;
@@ -346,6 +353,8 @@ sol_evidence_cleanup_result_v1 sol_evidence_run_server_cleanup_v1(
 	{
 		return SOL_EVIDENCE_CLEANUP_IDLE;
 	}
+	/* END ownership closes bot emissions even when later UNBIND must retry. */
+	run->emissions_open = 0;
 	if (!run->end_attempted)
 	{
 		memset(&end, 0, sizeof(end));

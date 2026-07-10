@@ -105,6 +105,9 @@ require_exact_occurrences("${SOL_RUNTIME}"
 require_exact_occurrences("${SOL_RUNTIME}"
 	"sol_runtime_schedule_decide_v1\\(" 2
 	"both runtime frame phases use the shared scheduling policy")
+require_exact_occurrences("${SOL_RUNTIME}"
+	"sol_evidence_run_emissions_open_v1\\(" 2
+	"runtime scheduling distinguishes emissions-open from lifecycle-active")
 require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_candidates\\)" 1
 	"bot frame obeys the candidate scheduling decision")
 require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_cleanup\\)" 1
