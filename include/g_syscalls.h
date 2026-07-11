@@ -123,9 +123,15 @@ intptr_t trap_Map_Extension(const char *ext_name, intptr_t mapto);
  */
 
 #ifdef SOL_SUPPORT
+#include "sol_actual_command.h"
 intptr_t trap_ControllerEvidenceV1(intptr_t operation, void *payload, intptr_t payload_size);
 intptr_t trap_ControllerObservationV1(intptr_t operation, void *payload,
 		intptr_t payload_size);
+#ifndef Q3_VM
+int trap_SetSolBotCMDBatch(const sol_actual_command_input_v1 *inputs,
+	const sol_actual_command_input_v1 *neutral_inputs, size_t count,
+	sol_actual_command_batch_result_v1 *results);
+#endif
 #endif
 
 intptr_t trap_AddBot(const char *name, intptr_t bottomcolor, intptr_t topcolor, const char *skin);

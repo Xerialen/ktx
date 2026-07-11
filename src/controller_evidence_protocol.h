@@ -1,11 +1,14 @@
 #ifndef CONTROLLER_EVIDENCE_PROTOCOL_H
 #define CONTROLLER_EVIDENCE_PROTOCOL_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define CE_EXTENSION_NAME_V1 "ControllerEvidenceV1"
 #define CE_PROTOCOL_VERSION_V1 1u
 #define CE_COMMAND_BYTES_V1_SIZE 25u
+#define CE_ACTION_RESPONSE_MAX_BYTES_V1 115u
+#define CE_DECISION_TRACE_MAX_BYTES_V1 81u
 
 #define CE_EPOCH_KIND_CAP 48u
 #define CE_SEAT_ID_CAP 32u
@@ -32,7 +35,8 @@ typedef enum ce_operation_v1 {
 	CE_MATCH_BEGIN = 3,
 	CE_MATCH_END = 4,
 	CE_UNBIND = 5,
-	CE_FRAME_REPLACE = 6
+	CE_FRAME_REPLACE = 6,
+	CE_FRAME_DECISION = 7
 } ce_operation_v1;
 
 enum {
@@ -86,6 +90,33 @@ typedef struct ce_frame_request_v1 {
 	uint32_t client_generation;
 	ce_command_wire_v1 requested_command;
 } ce_frame_request_v1;
+
+typedef struct ce_frame_decision_v1 {
+	ce_payload_header_v1 header;
+	uint32_t engine_slot;
+	uint32_t client_generation;
+	uint32_t action_response_length;
+	uint32_t decision_trace_length;
+	uint8_t action_response[CE_ACTION_RESPONSE_MAX_BYTES_V1];
+	uint8_t decision_trace[CE_DECISION_TRACE_MAX_BYTES_V1];
+} ce_frame_decision_v1;
+
+_Static_assert(offsetof(ce_frame_decision_v1, header) == 0u,
+	"CE decision header ABI offset");
+_Static_assert(offsetof(ce_frame_decision_v1, engine_slot) == 8u,
+	"CE decision slot ABI offset");
+_Static_assert(offsetof(ce_frame_decision_v1, client_generation) == 12u,
+	"CE decision generation ABI offset");
+_Static_assert(offsetof(ce_frame_decision_v1, action_response_length) == 16u,
+	"CE decision SAC1 length ABI offset");
+_Static_assert(offsetof(ce_frame_decision_v1, decision_trace_length) == 20u,
+	"CE decision SDT1 length ABI offset");
+_Static_assert(offsetof(ce_frame_decision_v1, action_response) == 24u,
+	"CE decision SAC1 ABI offset");
+_Static_assert(offsetof(ce_frame_decision_v1, decision_trace) == 139u,
+	"CE decision SDT1 ABI offset");
+_Static_assert(sizeof(ce_frame_decision_v1) == 220u,
+	"CE decision payload ABI size");
 
 typedef struct ce_unbind_v1 {
 	ce_payload_header_v1 header;

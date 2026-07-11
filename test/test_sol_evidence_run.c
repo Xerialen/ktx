@@ -32,6 +32,9 @@ typedef struct fake_ce_v1
 	int remove_calls;
 	int fail_end_once;
 	int reject_unbind_once[SOL_EVIDENCE_RUN_SEATS_V1];
+	int reject_decision_once;
+	int decision_calls;
+	ce_frame_decision_v1 last_decision;
 } fake_ce_v1;
 
 static const char run_nonce[] =
@@ -96,6 +99,45 @@ static intptr_t fake_call(void *context, intptr_t operation, void *payload,
 		if (fake->fail_end_once)
 		{
 			fake->fail_end_once = 0;
+			return CE_RESULT_INVALID;
+		}
+		return CE_RESULT_OK;
+	}
+	if (operation == CE_FRAME_DECISION)
+	{
+		const ce_frame_decision_v1 *decision = payload;
+		size_t index;
+
+		require(fake->bot_phase && fake->phase == FAKE_OPEN &&
+			payload_size == (intptr_t) sizeof(*decision) &&
+			decision->header.protocol_version == CE_PROTOCOL_VERSION_V1 &&
+			decision->header.struct_size == sizeof(*decision),
+			"FRAME_DECISION is one exact bot-phase ABI payload");
+		require(decision->action_response_length > 0u &&
+			decision->action_response_length <=
+				CE_ACTION_RESPONSE_MAX_BYTES_V1 &&
+			decision->decision_trace_length > 0u &&
+			decision->decision_trace_length <=
+				CE_DECISION_TRACE_MAX_BYTES_V1,
+			"FRAME_DECISION lengths are bounded before the syscall");
+		for (index = decision->action_response_length;
+			index < CE_ACTION_RESPONSE_MAX_BYTES_V1; ++index)
+		{
+			require(decision->action_response[index] == 0u,
+				"unused SAC1 payload tail is canonical zero");
+		}
+		for (index = decision->decision_trace_length;
+			index < CE_DECISION_TRACE_MAX_BYTES_V1; ++index)
+		{
+			require(decision->decision_trace[index] == 0u,
+				"unused SDT1 payload tail is canonical zero");
+		}
+		fake->last_decision = *decision;
+		fake->decision_calls++;
+		trace_char(fake, 'D');
+		if (fake->reject_decision_once)
+		{
+			fake->reject_decision_once = 0;
 			return CE_RESULT_INVALID;
 		}
 		return CE_RESULT_OK;
@@ -196,7 +238,8 @@ static void test_normal_close_waits_for_server_phase_and_is_reusable(void)
 	fake.trace[0] = '\0';
 	fake.bot_phase = 1;
 	sol_evidence_run_request_close_v1(fake.run);
-	require(fake.end_calls == 0 && fake.unbind_calls == 0 && fake.remove_calls == 0,
+	require(!sol_evidence_run_failed_v1(fake.run) && fake.end_calls == 0 &&
+		fake.unbind_calls == 0 && fake.remove_calls == 0,
 			"bot phase only marks close pending and performs no cleanup operation");
 	fake.bot_phase = 0;
 	cleanup = sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake);
@@ -228,8 +271,9 @@ static void test_invalid_end_still_unbinds_and_allows_second_run(void)
 	fake.fail_end_once = 1;
 	fake.bot_phase = 1;
 	sol_evidence_run_fail_stop_v1(fake.run);
-	require(fake.end_calls == 0 && fake.unbind_calls == 0,
-			"bot fail-stop only marks cleanup pending");
+	require(sol_evidence_run_failed_v1(fake.run) && fake.end_calls == 0 &&
+		fake.unbind_calls == 0,
+			"bot fail-stop latches failure while deferring cleanup ownership");
 	fake.bot_phase = 0;
 	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
 			SOL_EVIDENCE_CLEANUP_COMPLETE && !strcmp(fake.trace, "E1R1"),
@@ -237,6 +281,8 @@ static void test_invalid_end_still_unbinds_and_allows_second_run(void)
 	require(sol_evidence_run_begin_v1(fake.run, second_run_nonce, "ktx-match/v1",
 			fake_call, &fake),
 			"failed end followed by successful unbind permits a second run");
+	require(!sol_evidence_run_failed_v1(fake.run),
+			"a new evidence epoch clears the prior failure latch");
 	configure_bound_seat(&fake, 0u);
 	sol_evidence_run_request_close_v1(fake.run);
 	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
@@ -293,8 +339,11 @@ static void test_unexpected_disconnect_keeps_binding_for_safe_unbind(void)
 	fake.bot_phase = 1;
 	require(sol_evidence_run_note_disconnect_v1(fake.run, 0u) &&
 			sol_evidence_run_cleanup_pending_v1(fake.run) &&
+			sol_evidence_run_failed_v1(fake.run) &&
 			sol_evidence_run_binding_v1(fake.run, 0u, &slot, &generation) &&
-			slot == 7u && generation == 100u,
+			slot == 7u && generation == 100u &&
+			sol_evidence_run_command_route_v1(fake.run, 7u, NULL) ==
+				SOL_EVIDENCE_COMMAND_QUARANTINED,
 			"unexpected disconnect retains bind route and marks whole run pending");
 	require(fake.end_calls == 0 && fake.unbind_calls == 0,
 			"disconnect in active bot phase performs no CE cleanup");
@@ -378,6 +427,11 @@ static void test_mismatched_successful_bind_keeps_both_cleanup_routes(void)
 	require(sol_evidence_run_binding_v1(fake.run, 0u, &slot, &generation) &&
 			slot == 8u && generation == 100u,
 			"mismatched successful CE route remains authoritative for UNBIND");
+	require(sol_evidence_run_command_route_v1(fake.run, 8u, &generation) ==
+			SOL_EVIDENCE_COMMAND_BOUND && generation == 100u &&
+		sol_evidence_run_command_route_v1(fake.run, 7u, NULL) ==
+			SOL_EVIDENCE_COMMAND_QUARANTINED,
+			"open mismatch owns its bind route and quarantines its unbound client route");
 	require(!sol_evidence_run_find_client_v1(fake.run, 8u, &index) &&
 			index == SOL_EVIDENCE_RUN_SEATS_V1 &&
 			!sol_evidence_run_cleanup_pending_v1(fake.run),
@@ -387,6 +441,13 @@ static void test_mismatched_successful_bind_keeps_both_cleanup_routes(void)
 	fake.trace_length = 0u;
 	fake.trace[0] = '\0';
 	sol_evidence_run_fail_stop_v1(fake.run);
+	require(sol_evidence_run_command_route_v1(fake.run, 8u, &generation) ==
+			SOL_EVIDENCE_COMMAND_QUARANTINED && generation == 100u &&
+		sol_evidence_run_command_route_v1(fake.run, 7u, NULL) ==
+			SOL_EVIDENCE_COMMAND_QUARANTINED &&
+		sol_evidence_run_command_route_v1(fake.run, 9u, NULL) ==
+			SOL_EVIDENCE_COMMAND_UNOWNED,
+			"latched failure quarantines both mismatched ownership routes only");
 	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
 			SOL_EVIDENCE_CLEANUP_COMPLETE && !strcmp(fake.trace, "E1R1"),
 			"cleanup unbinds CE slot then removes the distinct client slot");
@@ -501,6 +562,75 @@ static void test_all_eight_generic_seats_bind_cleanup_and_reuse(void)
 	sol_evidence_run_destroy_v1(fake.run);
 }
 
+static void test_candidate_decision_uses_bound_route_and_zeroed_fixed_payload(void)
+{
+	fake_ce_v1 fake = { 0 };
+	uint8_t action[33];
+	uint8_t trace[79];
+	int calls;
+
+	memset(action, 0x5a, sizeof(action));
+	memset(trace, 0xa5, sizeof(trace));
+	fake.run = sol_evidence_run_create_v1();
+	require(fake.run != NULL && sol_evidence_run_begin_v1(fake.run, run_nonce,
+		"ktx-match/v1", fake_call, &fake), "decision fixture begins");
+	configure_bound_seat(&fake, 0u);
+	configure_bound_seat(&fake, 4u);
+	fake.trace_length = 0u;
+	fake.trace[0] = '\0';
+	fake.bot_phase = 1;
+	require(sol_evidence_run_submit_decision_v1(fake.run, 0u, action,
+		sizeof(action), trace, sizeof(trace)) && fake.decision_calls == 1 &&
+		!strcmp(fake.trace, "D") &&
+		fake.last_decision.engine_slot == 7u &&
+		fake.last_decision.client_generation == 100u &&
+		fake.last_decision.action_response_length == sizeof(action) &&
+		fake.last_decision.decision_trace_length == sizeof(trace) &&
+		!memcmp(fake.last_decision.action_response, action, sizeof(action)) &&
+		!memcmp(fake.last_decision.decision_trace, trace, sizeof(trace)),
+		"candidate decision submits exact bytes through its retained CE route");
+	calls = fake.decision_calls;
+	require(!sol_evidence_run_submit_decision_v1(fake.run, 4u, action,
+		sizeof(action), trace, sizeof(trace)) &&
+		fake.decision_calls == calls,
+		"control evidence seats cannot submit SOL decisions");
+	require(!sol_evidence_run_submit_decision_v1(fake.run, 1u, action,
+		sizeof(action), trace, sizeof(trace)) &&
+		!sol_evidence_run_submit_decision_v1(fake.run, 0u, action, 0u,
+			trace, sizeof(trace)) &&
+		!sol_evidence_run_submit_decision_v1(fake.run, 0u, action,
+			CE_ACTION_RESPONSE_MAX_BYTES_V1 + 1u, trace, sizeof(trace)) &&
+		!sol_evidence_run_submit_decision_v1(fake.run, 0u, action,
+			sizeof(action), trace, CE_DECISION_TRACE_MAX_BYTES_V1 + 1u) &&
+		fake.decision_calls == calls,
+		"unbound and noncanonical decision payloads never reach the engine");
+	fake.reject_decision_once = 1;
+	require(!sol_evidence_run_submit_decision_v1(fake.run, 0u, action,
+		sizeof(action), trace, sizeof(trace)) &&
+		fake.decision_calls == calls + 1,
+		"engine decision rejection is surfaced to the runtime");
+	sol_evidence_run_request_close_v1(fake.run);
+	require(sol_evidence_run_submit_decision_v1(fake.run, 0u, action,
+		sizeof(action), trace, sizeof(trace)) &&
+		fake.decision_calls == calls + 2,
+		"cleanup-pending bot cadence remains complete until server END owns it");
+	sol_evidence_run_fail_stop_v1(fake.run);
+	require(sol_evidence_run_failed_v1(fake.run) &&
+		!sol_evidence_run_submit_decision_v1(fake.run, 0u, action,
+			sizeof(action), trace, sizeof(trace)) &&
+		fake.decision_calls == calls + 2,
+		"latched failure admits no later active decision proof before cleanup");
+	fake.bot_phase = 0;
+	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
+		SOL_EVIDENCE_CLEANUP_COMPLETE,
+		"decision fixture cleans both retained routes");
+	require(!sol_evidence_run_submit_decision_v1(fake.run, 0u, action,
+		sizeof(action), trace, sizeof(trace)) &&
+		fake.decision_calls == calls + 2,
+		"completed server cleanup admits no later decision submission");
+	sol_evidence_run_destroy_v1(fake.run);
+}
+
 int main(void)
 {
 	test_normal_close_waits_for_server_phase_and_is_reusable();
@@ -513,6 +643,7 @@ int main(void)
 	test_duplicate_successful_ce_routes_are_all_retained();
 	test_late_successful_bind_is_retained_while_reporting_fail_stop();
 	test_all_eight_generic_seats_bind_cleanup_and_reuse();
-	printf("sol_evidence_run: 10 contract tests passed\n");
+	test_candidate_decision_uses_bound_route_and_zeroed_fixed_payload();
+	printf("sol_evidence_run: 11 contract tests passed\n");
 	return 0;
 }

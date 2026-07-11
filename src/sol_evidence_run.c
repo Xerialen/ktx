@@ -19,6 +19,7 @@ struct sol_evidence_run_v1
 	int active;
 	int emissions_open;
 	int cleanup_pending;
+	int failed;
 	int end_attempted;
 	char run_nonce[CE_RUN_NONCE_CAP];
 	char epoch_kind[CE_EPOCH_KIND_CAP];
@@ -331,6 +332,70 @@ sol_evidence_binding_lookup_result_v1 sol_evidence_run_find_binding_v1(
 	return SOL_EVIDENCE_BINDING_EXACT;
 }
 
+sol_evidence_command_route_v1 sol_evidence_run_command_route_v1(
+	const sol_evidence_run_v1 *run, uint32_t engine_slot,
+	uint32_t *client_generation)
+{
+	sol_evidence_binding_lookup_result_v1 binding;
+	int client_owned;
+
+	binding = sol_evidence_run_find_binding_v1(run, engine_slot, NULL,
+		client_generation);
+	client_owned = sol_evidence_run_find_client_v1(run, engine_slot, NULL);
+	if (!run || !run->active)
+	{
+		return SOL_EVIDENCE_COMMAND_UNOWNED;
+	}
+	if (run->failed || !run->emissions_open)
+	{
+		return client_owned || binding != SOL_EVIDENCE_BINDING_NONE ?
+			SOL_EVIDENCE_COMMAND_QUARANTINED : SOL_EVIDENCE_COMMAND_UNOWNED;
+	}
+	if (binding == SOL_EVIDENCE_BINDING_EXACT)
+	{
+		return SOL_EVIDENCE_COMMAND_BOUND;
+	}
+	if (binding == SOL_EVIDENCE_BINDING_AMBIGUOUS)
+	{
+		return SOL_EVIDENCE_COMMAND_AMBIGUOUS;
+	}
+	return client_owned ? SOL_EVIDENCE_COMMAND_QUARANTINED :
+		SOL_EVIDENCE_COMMAND_UNOWNED;
+}
+
+int sol_evidence_run_submit_decision_v1(sol_evidence_run_v1 *run,
+	size_t index, const uint8_t *action_response,
+	size_t action_response_length, const uint8_t *decision_trace,
+	size_t decision_trace_length)
+{
+	ce_frame_decision_v1 decision = {0};
+	const sol_evidence_run_seat_v1 *seat;
+
+	if (!run || !run->active || !run->emissions_open || run->failed
+		|| !run->call || index >= SOL_EVIDENCE_RUN_CANDIDATE_SEATS_V1
+		|| !action_response || !action_response_length
+		|| action_response_length > CE_ACTION_RESPONSE_MAX_BYTES_V1
+		|| !decision_trace || !decision_trace_length
+		|| decision_trace_length > CE_DECISION_TRACE_MAX_BYTES_V1)
+	{
+		return 0;
+	}
+	seat = &run->seats[index];
+	if (!seat->ce_bound || !seat->bind_engine_slot || !seat->client_generation)
+	{
+		return 0;
+	}
+	init_header(&decision.header, sizeof(decision));
+	decision.engine_slot = seat->bind_engine_slot;
+	decision.client_generation = seat->client_generation;
+	decision.action_response_length = (uint32_t) action_response_length;
+	decision.decision_trace_length = (uint32_t) decision_trace_length;
+	memcpy(decision.action_response, action_response, action_response_length);
+	memcpy(decision.decision_trace, decision_trace, decision_trace_length);
+	return run->call(run->call_context, CE_FRAME_DECISION, &decision,
+		(intptr_t) sizeof(decision)) == CE_RESULT_OK;
+}
+
 void sol_evidence_run_request_close_v1(sol_evidence_run_v1 *run)
 {
 	if (run && run->active)
@@ -341,7 +406,11 @@ void sol_evidence_run_request_close_v1(sol_evidence_run_v1 *run)
 
 void sol_evidence_run_fail_stop_v1(sol_evidence_run_v1 *run)
 {
-	sol_evidence_run_request_close_v1(run);
+	if (run && run->active)
+	{
+		run->failed = 1;
+		run->cleanup_pending = 1;
+	}
 }
 
 int sol_evidence_run_note_disconnect_v1(sol_evidence_run_v1 *run,
@@ -356,6 +425,10 @@ int sol_evidence_run_note_disconnect_v1(sol_evidence_run_v1 *run,
 	}
 	seat = &run->seats[index];
 	seat->client_present = 0;
+	if (!run->end_attempted)
+	{
+		run->failed = 1;
+	}
 	if (!(run->end_attempted && !seat->ce_bound))
 	{
 		run->cleanup_pending = 1;
@@ -376,6 +449,11 @@ int sol_evidence_run_emissions_open_v1(const sol_evidence_run_v1 *run)
 int sol_evidence_run_cleanup_pending_v1(const sol_evidence_run_v1 *run)
 {
 	return run && run->active && run->cleanup_pending;
+}
+
+int sol_evidence_run_failed_v1(const sol_evidence_run_v1 *run)
+{
+	return run && run->active && run->failed;
 }
 
 static int any_bound(const sol_evidence_run_v1 *run)

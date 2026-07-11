@@ -250,17 +250,14 @@ static sol_actual_command_route_v1 lookup_command(void *context,
 	uint32_t engine_slot, uint32_t *client_generation)
 {
 	timing_fixture_v1 *fixture = context;
-	sol_evidence_binding_lookup_result_v1 result;
+	sol_evidence_command_route_v1 result;
 
-	if (!sol_evidence_run_emissions_open_v1(fixture->run))
-	{
-		return SOL_ACTUAL_COMMAND_UNBOUND;
-	}
-	result = sol_evidence_run_find_binding_v1(fixture->run, engine_slot, NULL,
+	result = sol_evidence_run_command_route_v1(fixture->run, engine_slot,
 		client_generation);
-	return result == SOL_EVIDENCE_BINDING_EXACT ? SOL_ACTUAL_COMMAND_BOUND :
-		result == SOL_EVIDENCE_BINDING_AMBIGUOUS ? SOL_ACTUAL_COMMAND_AMBIGUOUS :
-		SOL_ACTUAL_COMMAND_UNBOUND;
+	return result == SOL_EVIDENCE_COMMAND_BOUND ? SOL_ACTUAL_COMMAND_BOUND :
+		result == SOL_EVIDENCE_COMMAND_AMBIGUOUS ? SOL_ACTUAL_COMMAND_AMBIGUOUS :
+		result == SOL_EVIDENCE_COMMAND_QUARANTINED ?
+		SOL_ACTUAL_COMMAND_QUARANTINED : SOL_ACTUAL_COMMAND_UNBOUND;
 }
 
 static intptr_t write_complete_request(void *context, ce_operation_v1 operation,
@@ -290,10 +287,15 @@ static intptr_t write_actual_command(void *context,
 {
 	timing_fixture_v1 *fixture = context;
 	size_t index = index_for_slot((uint32_t) command->engine_slot);
+	int quarantined = sol_evidence_run_find_client_v1(fixture->run,
+		(uint32_t) command->engine_slot, NULL) &&
+		(sol_evidence_run_failed_v1(fixture->run) ||
+			!sol_evidence_run_emissions_open_v1(fixture->run));
 
 	require(fixture->bot_phase && index < SOL_KTX_EVIDENCE_SEAT_COUNT_V1
-		&& fixture->request_calls[index] == fixture->command_calls[index] + 1,
-			"actual command follows its complete CE request in the same callback");
+		&& (quarantined ? fixture->request_calls[index] == 0 :
+			fixture->request_calls[index] == fixture->command_calls[index] + 1),
+			"physical command has an accepted request or an owned quarantine route");
 	require(command->msec == 13 && command->angles[0] == 0.0f
 		&& command->angles[1] == 0.0f && command->angles[2] == 0.0f
 		&& command->forwardmove == 0 && command->sidemove == 0
@@ -304,10 +306,11 @@ static intptr_t write_actual_command(void *context,
 	return 1;
 }
 
-static void unexpected_fail_stop(void *context)
+static void mark_fail_stop(void *context)
 {
-	(void) context;
-	require(0, "valid eight-seat command fixture never fail-stops");
+	timing_fixture_v1 *fixture = context;
+
+	sol_evidence_run_fail_stop_v1(fixture->run);
 }
 
 static void submit_command(timing_fixture_v1 *fixture, size_t index,
@@ -316,7 +319,7 @@ static void submit_command(timing_fixture_v1 *fixture, size_t index,
 	sol_actual_command_input_v1 input;
 	sol_actual_command_ops_v1 ops = {
 		fixture, lookup_command, write_complete_request, write_actual_command,
-		unexpected_fail_stop
+		mark_fail_stop
 	};
 
 	memset(&input, 0, sizeof(input));
@@ -332,14 +335,87 @@ static void submit_command(timing_fixture_v1 *fixture, size_t index,
 			"global command hook submits one exact actual command");
 }
 
-static void write_candidate_command(void *context, size_t index, int entity,
-	const sol_ktx_command_v1 *command)
+static int write_candidate_commands(void *context,
+	const sol_candidate_command_batch_item_v1 *items, size_t count,
+	sol_candidate_command_batch_result_v1 *results)
 {
 	timing_fixture_v1 *fixture = context;
+	sol_actual_command_input_v1 inputs[SOL_KTX_CANDIDATE_COUNT_V1];
+	sol_actual_command_input_v1 neutral_inputs[SOL_KTX_CANDIDATE_COUNT_V1];
+	ce_operation_v1 operations[SOL_KTX_CANDIDATE_COUNT_V1];
+	sol_actual_command_batch_result_v1 actual_results[
+		SOL_KTX_CANDIDATE_COUNT_V1];
+	sol_actual_command_ops_v1 ops = {
+		fixture, lookup_command, write_complete_request, write_actual_command,
+		mark_fail_stop
+	};
+	int accepted;
+	size_t item;
 
-	require(entity == (int) slots[index],
-			"candidate registry targets its exact bound engine slot");
-	submit_command(fixture, index, command);
+	memset(inputs, 0, sizeof(inputs));
+	memset(neutral_inputs, 0, sizeof(neutral_inputs));
+	memset(operations, 0, sizeof(operations));
+	memset(actual_results, 0, sizeof(actual_results));
+	for (item = 0u; item < count; ++item)
+	{
+		size_t index = items[item].index;
+
+		require(index < SOL_KTX_CANDIDATE_COUNT_V1 &&
+			items[item].entity == (int) slots[index],
+				"candidate batch targets each exact bound engine slot");
+		inputs[item].engine_slot = items[item].entity;
+		inputs[item].msec = items[item].command.msec;
+		memcpy(inputs[item].angles, items[item].command.angles,
+			sizeof(inputs[item].angles));
+		inputs[item].forwardmove = items[item].command.forwardmove;
+		inputs[item].sidemove = items[item].command.sidemove;
+		inputs[item].upmove = items[item].command.upmove;
+		inputs[item].buttons = items[item].command.buttons;
+		inputs[item].impulse = items[item].command.impulse;
+		neutral_inputs[item].engine_slot = items[item].entity;
+		neutral_inputs[item].msec = items[item].neutral_command.msec;
+		memcpy(neutral_inputs[item].angles,
+			items[item].neutral_command.angles,
+			sizeof(neutral_inputs[item].angles));
+		neutral_inputs[item].forwardmove =
+			items[item].neutral_command.forwardmove;
+		neutral_inputs[item].sidemove = items[item].neutral_command.sidemove;
+		neutral_inputs[item].upmove = items[item].neutral_command.upmove;
+		neutral_inputs[item].buttons = items[item].neutral_command.buttons;
+		neutral_inputs[item].impulse = items[item].neutral_command.impulse;
+		operations[item] = CE_FRAME_REQUEST;
+	}
+	accepted = sol_actual_command_submit_batch_v1(inputs, neutral_inputs,
+		operations, count, &ops, actual_results);
+	for (item = 0u; item < count; ++item)
+	{
+		results[item].request_status = actual_results[item].request_status ==
+			SOL_ACTUAL_COMMAND_REQUEST_ACCEPTED ?
+			SOL_CANDIDATE_REQUEST_ACCEPTED :
+			(actual_results[item].request_status ==
+				SOL_ACTUAL_COMMAND_REQUEST_REJECTED ?
+				SOL_CANDIDATE_REQUEST_REJECTED :
+				SOL_CANDIDATE_REQUEST_NOT_RUN);
+		results[item].emitted = actual_results[item].emitted;
+	}
+	return accepted;
+}
+
+static int unexpected_candidate_decision(void *context, size_t index,
+	int entity, uint32_t client_generation, const uint8_t *action_response,
+	size_t action_response_length, const uint8_t *decision_trace,
+	size_t decision_trace_length)
+{
+	(void) context;
+	(void) index;
+	(void) entity;
+	(void) client_generation;
+	(void) action_response;
+	(void) action_response_length;
+	(void) decision_trace;
+	(void) decision_trace_length;
+	require(0, "EMPTY timing fixture must not submit decision evidence");
+	return 0;
 }
 
 static void bind_eight_live_seats(timing_fixture_v1 *fixture)
@@ -403,7 +479,10 @@ static void test_pending_cleanup_keeps_complete_bot_frames_until_server_hook(voi
 {
 	timing_fixture_v1 fixture = { 0 };
 	sol_candidate_frame_ops_v1 frame_ops = {
-		&fixture, candidate_healthy, write_candidate_command
+		.context = &fixture,
+		.healthy = candidate_healthy,
+		.decision = unexpected_candidate_decision,
+		.commands = write_candidate_commands
 	};
 	sol_ktx_command_v1 control_command = { 13u, { 0.0f, 0.0f, 0.0f },
 		0, 0, 0, 0u, 0u };
@@ -447,9 +526,9 @@ static void test_pending_cleanup_keeps_complete_bot_frames_until_server_hook(voi
 		fixture.bot_phase = 0;
 		for (index = 0; index < SOL_KTX_EVIDENCE_SEAT_COUNT_V1; ++index)
 		{
-			require(fixture.request_calls[index] == (int) frame + 1
+			require(fixture.request_calls[index] == 0
 				&& fixture.command_calls[index] == (int) frame + 1,
-					"all eight seats receive exactly one request and syscall per frame");
+					"latched failure emits fresh neutral without new evidence requests");
 			if (index < SOL_KTX_CANDIDATE_COUNT_V1)
 			{
 				require(results[index].emitted,
@@ -489,12 +568,18 @@ static void test_pending_cleanup_keeps_complete_bot_frames_until_server_hook(voi
 		(void) sol_candidate_registry_run_frame_v1(fixture.registry, 13u, 13000u,
 			&frame_ops, results);
 	}
+	for (index = SOL_KTX_CANDIDATE_COUNT_V1;
+		index < SOL_KTX_EVIDENCE_SEAT_COUNT_V1; ++index)
+	{
+		submit_command(&fixture, index, &control_command);
+	}
 	fixture.bot_phase = 0;
 	for (index = 0; index < SOL_KTX_EVIDENCE_SEAT_COUNT_V1; ++index)
 	{
-		require(fixture.request_calls[index] == 2
-			&& fixture.command_calls[index] == 2,
-				"bot callback after END attempt is fully inert during UNBIND retry");
+		require(fixture.request_calls[index] == 0 &&
+			fixture.command_calls[index] ==
+				(index < SOL_KTX_CANDIDATE_COUNT_V1 ? 2 : 3),
+				"retained controls stay physically neutral after partial UNBIND retry");
 		if (index < SOL_KTX_CANDIDATE_COUNT_V1)
 		{
 			require(fixture.observers[index].poll_calls == 0,

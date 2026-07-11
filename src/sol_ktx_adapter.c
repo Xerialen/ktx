@@ -1,5 +1,7 @@
 #include "sol_ktx_adapter.h"
 
+#include "sol_wire.h"
+
 #include <string.h>
 
 #define SOL_INIT_GOAL_OFFSET 100
@@ -204,6 +206,31 @@ int sol_ktx_decode_action_v1(const uint8_t *action, size_t action_size,
 	output->upmove = (int16_t) read_u16_le(action + SOL_ACTION_FORWARD_OFFSET + 4);
 	output->buttons = action[SOL_ACTION_BUTTONS_OFFSET];
 	output->impulse = action[SOL_ACTION_WEAPON_OFFSET];
+	return 1;
+}
+
+int sol_ktx_decode_sac1_v1(const uint8_t *action, size_t action_size,
+		uint64_t expected_frame_seq, uint8_t msec, sol_ktx_command_v1 *output)
+{
+	sol_action_response_v1 decoded;
+	sol_ktx_command_v1 command;
+
+	if (!action || !output || !msec
+			|| !sol_wire_decode_action_v1(action, action_size, &decoded)
+			|| decoded.frame_seq != expected_frame_seq
+			|| decoded.teamsay_present)
+	{
+		return 0;
+	}
+	memset(&command, 0, sizeof(command));
+	command.msec = msec;
+	memcpy(command.angles, decoded.view_angles, sizeof(command.angles));
+	command.forwardmove = decoded.forwardmove;
+	command.sidemove = decoded.sidemove;
+	command.upmove = decoded.upmove;
+	command.buttons = decoded.buttons;
+	command.impulse = decoded.weapon_select;
+	*output = command;
 	return 1;
 }
 

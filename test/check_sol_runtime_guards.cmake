@@ -117,7 +117,7 @@ forbid_occurrences("${SOL_EVIDENCE_RUN}"
 	"(sol_core_step_v1|sol_ktx_encode_observation_v1|\"SLO1\"|\"SLA1\")"
 	"evidence lifecycle coupled to the old diagnostic core")
 forbid_occurrences("${SOL_RUNTIME_SCHEDULE}"
-	"(CE_MATCH_END|CE_UNBIND|trap_RemoveBot|trap_SetBotCMD|CE_FRAME_REQUEST|CE_FRAME_REPLACE)"
+	"(CE_MATCH_END|CE_UNBIND|trap_RemoveBot|trap_SetBotCMD|CE_FRAME_REQUEST|CE_FRAME_REPLACE|CE_FRAME_DECISION)"
 	"pure runtime scheduling policy performing a frame or cleanup side effect")
 
 require_exact_occurrences("${SOL_EVIDENCE_RUN}"
@@ -128,6 +128,8 @@ require_exact_occurrences("${SOL_EVIDENCE_RUN}"
 	"one run-level evidence end call site")
 require_exact_occurrences("${SOL_EVIDENCE_RUN}" "CE_UNBIND" 1
 	"one safe evidence unbind call site")
+require_exact_occurrences("${SOL_EVIDENCE_RUN}" "CE_FRAME_DECISION" 1
+	"one generation-bound decision evidence submission call site")
 require_exact_occurrences("${G_SYSCALLS}"
 	"trap_ControllerEvidenceV1\\(operation" 1
 	"one global actual-command evidence writer")
@@ -137,14 +139,19 @@ require_exact_occurrences("${G_SYSCALLS_H}"
 	"#define trap_ReplaceBotCMD trap_SetBotCMD" 1
 	"QVM replacement commands reuse the existing SetBotCMD import")
 require_exact_occurrences("${G_SYSCALLS}" "sol_actual_command_submit_v1\\(" 1
-	"public command wrapper delegates exactly once to the global hook")
-forbid_occurrences("${SOL_RUNTIME}" "(CE_FRAME_REQUEST|CE_FRAME_REPLACE)"
+	"ordinary command wrapper delegates exactly once to the global hook")
+require_exact_occurrences("${G_SYSCALLS}"
+	"sol_actual_command_submit_batch_v1\\(" 1
+	"candidate quartet delegates once to the atomic batch hook")
+forbid_occurrences("${SOL_RUNTIME}" "(CE_FRAME_REQUEST|CE_FRAME_REPLACE|CE_FRAME_DECISION)"
 	"candidate-specific frame-evidence callback after global interception")
 forbid_occurrences("${SOL_CANDIDATE_REGISTRY}"
-	"(CE_FRAME_REQUEST|CE_FRAME_REPLACE|candidate_evidence)"
+	"(CE_FRAME_REQUEST|CE_FRAME_REPLACE|CE_FRAME_DECISION|candidate_evidence)"
 	"candidate registry owning evidence instead of command preparation")
-require_exact_occurrences("${SOL_RUNTIME}" "trap_SetBotCMD\\(" 1
-	"candidate commands use the public globally intercepted writer")
+require_exact_occurrences("${SOL_RUNTIME}" "trap_SetSolBotCMDBatch\\(" 1
+	"candidate commands use one request-all then emit-all provenance seam")
+forbid_occurrences("${SOL_RUNTIME}" "trap_SetBotCMD\\("
+	"candidate quartet falling back to sequential physical command hooks")
 require_exact_occurrences("${BOT_MOVEMENT}" "trap_SetBotCMD\\(" 1
 	"stock movement uses the public globally intercepted writer")
 require_exact_occurrences("${BOT_MOVEMENT}" "trap_ReplaceBotCMD\\(" 1
@@ -172,8 +179,8 @@ require_exact_occurrences("${SOL_RUNTIME}"
 	"sol_runtime_schedule_decide_v1\\(" 2
 	"both runtime frame phases use the shared scheduling policy")
 require_exact_occurrences("${SOL_RUNTIME}"
-	"sol_evidence_run_emissions_open_v1\\(" 4
-	"runtime scheduling, readiness, and the command hook distinguish emissions-open from active")
+	"sol_evidence_run_emissions_open_v1\\(" 3
+	"runtime scheduling and readiness distinguish emissions-open from active")
 require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_candidates\\)" 1
 	"bot frame obeys the candidate scheduling decision")
 require_exact_occurrences("${SOL_RUNTIME}" "if \\(!schedule.run_cleanup\\)" 1
@@ -184,18 +191,35 @@ require_occurrences("${SOL_CANDIDATE_REGISTRY}"
 require_occurrences("${SOL_CANDIDATE_REGISTRY}"
 	"sol_observation_client_v1 \\*observation" 1
 	"every registry entry owns its private observation client")
+foreach(brain_surface "${SOL_BRAIN}" "${SOL_BRAIN_H}")
+	forbid_occurrences("${brain_surface}"
+		"(seat_ordinal|engine_slot|client_generation|gedict_t|g_edicts|g_globalvars|trap_[A-Z])"
+		"brain surface exposing host assignment or engine capability")
+endforeach()
+require_exact_occurrences("${SOL_CANDIDATE_REGISTRY}"
+	"sol_ktx_decode_sac1_v1\\(" 1
+	"the registry uses one canonical SAC1-to-command adapter")
+require_exact_occurrences("${SOL_CANDIDATE_REGISTRY}"
+	"sol_decision_trace_action_is_authorized_v1\\(" 1
+	"the registry independently closes final SOB1-SDT1-SAC1 action semantics")
+forbid_occurrences("${SOL_CANDIDATE_REGISTRY}"
+	"sol_wire_decode_action_v1\\("
+	"the registry must not grow a second SAC1 decoder")
 
 file(READ "${SOL_CANDIDATE_REGISTRY}" sol_registry_contents)
 string(FIND "${sol_registry_contents}"
 	"poll_all_bound_v1(registry, dt_us, ops, prepared, results);" poll_index)
 string(FIND "${sol_registry_contents}"
-	"prepare_all_bound_v1(registry, msec, prepared);" prepare_index)
+	"prepare_all_bound_v1(registry, msec, prepared, results);" prepare_index)
 string(FIND "${sol_registry_contents}"
-	"emit_all_bound_v1(registry, ops, prepared, results);" emit_index)
-if(poll_index LESS 0 OR prepare_index LESS 0 OR emit_index LESS 0
-		OR poll_index GREATER prepare_index OR prepare_index GREATER emit_index)
+	"submit_all_bound_v1(registry, ops, prepared, results);" submit_index)
+string(FIND "${sol_registry_contents}"
+	"emit_all_bound_v1(registry, ops, prepared, results, cancelled);" emit_index)
+if(poll_index LESS 0 OR prepare_index LESS 0 OR submit_index LESS 0
+		OR emit_index LESS 0 OR poll_index GREATER prepare_index
+		OR prepare_index GREATER submit_index OR submit_index GREATER emit_index)
 	message(FATAL_ERROR
-		"SOL phase order must complete all polls, then all preparation, then all command side effects")
+		"SOL phase order must complete all polls, preparation, and decision proofs before command side effects")
 endif()
 
 file(READ "${SOL_RUNTIME}" sol_runtime_contents)
@@ -311,20 +335,23 @@ require_occurrences("${SOL_ACTUAL_COMMAND}"
 require_occurrences("${SOL_ACTUAL_COMMAND}"
 	"input->forwardmove < INT16_MIN \\|\\| input->forwardmove > INT16_MAX" 1
 	"bound command evidence requires exact int16-representable movement")
-forbid_occurrences("${SOL_ACTUAL_COMMAND}" "(bound\\(|clamp|normalize|trunc)"
+forbid_occurrences("${SOL_ACTUAL_COMMAND}" "(clamp|normalize|trunc)"
 	"global command hook normalizing or truncating an actual command")
 
 file(READ "${SOL_ACTUAL_COMMAND}" sol_actual_command_contents)
 string(FIND "${sol_actual_command_contents}"
-	"evidence_result = ops->evidence" command_evidence_index)
-string(FIND "${sol_actual_command_contents}"
-	"actual_result = ops->actual" command_actual_index)
-string(FIND "${sol_actual_command_contents}"
-	"fail_after_actual(ops);" command_fail_index)
-if(command_evidence_index LESS 0 OR command_actual_index LESS command_evidence_index
-		OR command_fail_index LESS command_actual_index)
+	"if (!all_accepted)" command_neutral_barrier_index)
+if(command_neutral_barrier_index LESS 0)
 	message(FATAL_ERROR
-		"canonical exact request must immediately precede actual command and fail-stop must follow it")
+		"candidate batch must have an all-requested neutralization barrier")
+endif()
+string(SUBSTRING "${sol_actual_command_contents}" ${command_neutral_barrier_index} -1
+	command_after_barrier)
+string(FIND "${command_after_barrier}" "ops->actual" command_actual_index)
+string(FIND "${command_after_barrier}" "fail_after_neutral(ops);" command_fail_index)
+if(command_actual_index LESS 0 OR command_fail_index LESS command_actual_index)
+	message(FATAL_ERROR
+		"candidate batch must physically emit only after its barrier and then fail-stop")
 endif()
 
 file(READ "${G_MAIN}" g_main_contents)

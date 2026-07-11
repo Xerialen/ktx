@@ -12,8 +12,13 @@ typedef struct command_fixture_v1
 	uint32_t generation;
 	ce_operation_v1 expected_operation;
 	int evidence_result;
+	int reject_evidence_call;
 	intptr_t actual_result;
 	sol_actual_command_input_v1 expected_actual;
+	sol_actual_command_input_v1 batch_actual[SOL_ACTUAL_COMMAND_BATCH_MAX_V1];
+	uint32_t batch_slots[SOL_ACTUAL_COMMAND_BATCH_MAX_V1];
+	uint32_t batch_generations[SOL_ACTUAL_COMMAND_BATCH_MAX_V1];
+	size_t batch_count;
 	uint8_t expected_wire[CE_COMMAND_BYTES_V1_SIZE];
 	int lookup_calls;
 	int evidence_calls;
@@ -44,14 +49,19 @@ static sol_actual_command_route_v1 lookup_route(void *context,
 	uint32_t engine_slot, uint32_t *client_generation)
 {
 	command_fixture_v1 *fixture = context;
+	size_t call = (size_t) fixture->lookup_calls;
+	uint32_t expected_slot = fixture->batch_count ? fixture->batch_slots[call] :
+		fixture->expected_slot;
 
-	require(engine_slot == fixture->expected_slot,
+	require(call < (fixture->batch_count ? fixture->batch_count : 1u) &&
+		engine_slot == expected_slot,
 			"binding lookup receives the exact original engine slot");
 	fixture->lookup_calls++;
 	if (client_generation)
 	{
 		*client_generation = fixture->route == SOL_ACTUAL_COMMAND_BOUND ?
-			fixture->generation : 0u;
+			(fixture->batch_count ? fixture->batch_generations[call] :
+				fixture->generation) : 0u;
 	}
 	return fixture->route;
 }
@@ -60,6 +70,11 @@ static intptr_t write_evidence(void *context, ce_operation_v1 operation,
 	const ce_frame_request_v1 *request)
 {
 	command_fixture_v1 *fixture = context;
+	size_t call = (size_t) fixture->evidence_calls;
+	uint32_t expected_slot = fixture->batch_count ? fixture->batch_slots[call] :
+		fixture->expected_slot;
+	uint32_t expected_generation = fixture->batch_count ?
+		fixture->batch_generations[call] : fixture->generation;
 
 	trace(fixture, 'E');
 	fixture->evidence_calls++;
@@ -67,31 +82,37 @@ static intptr_t write_evidence(void *context, ce_operation_v1 operation,
 		&& request != NULL
 		&& request->header.protocol_version == CE_PROTOCOL_VERSION_V1
 		&& request->header.struct_size == sizeof(*request)
-		&& request->engine_slot == fixture->expected_slot
-		&& request->client_generation == fixture->generation
+		&& call < (fixture->batch_count ? fixture->batch_count : 1u)
+		&& request->engine_slot == expected_slot
+		&& request->client_generation == expected_generation
 		&& !memcmp(request->requested_command.bytes, fixture->expected_wire,
 			sizeof(fixture->expected_wire)),
 			"evidence request seals the exact original representable command");
-	return fixture->evidence_result;
+	return fixture->reject_evidence_call == fixture->evidence_calls ?
+		CE_RESULT_INVALID : fixture->evidence_result;
 }
 
 static intptr_t write_actual(void *context,
 	const sol_actual_command_input_v1 *command)
 {
 	command_fixture_v1 *fixture = context;
+	size_t call = (size_t) fixture->actual_calls;
+	const sol_actual_command_input_v1 *expected = fixture->batch_count ?
+		&fixture->batch_actual[call] : &fixture->expected_actual;
 
 	trace(fixture, 'A');
 	fixture->actual_calls++;
 	require(command != NULL
-		&& command->engine_slot == fixture->expected_actual.engine_slot
-		&& command->msec == fixture->expected_actual.msec
-		&& !memcmp(command->angles, fixture->expected_actual.angles,
+		&& call < (fixture->batch_count ? fixture->batch_count : 1u)
+		&& command->engine_slot == expected->engine_slot
+		&& command->msec == expected->msec
+		&& !memcmp(command->angles, expected->angles,
 			sizeof(command->angles))
-		&& command->forwardmove == fixture->expected_actual.forwardmove
-		&& command->sidemove == fixture->expected_actual.sidemove
-		&& command->upmove == fixture->expected_actual.upmove
-		&& command->buttons == fixture->expected_actual.buttons
-		&& command->impulse == fixture->expected_actual.impulse,
+		&& command->forwardmove == expected->forwardmove
+		&& command->sidemove == expected->sidemove
+		&& command->upmove == expected->upmove
+		&& command->buttons == expected->buttons
+		&& command->impulse == expected->impulse,
 			"real syscall receives every original argument without normalization");
 	return fixture->actual_result;
 }
@@ -155,6 +176,24 @@ static sol_actual_command_ops_v1 ops_for(command_fixture_v1 *fixture)
 	return ops;
 }
 
+static void expect_fresh_neutral(command_fixture_v1 *fixture,
+	const sol_actual_command_input_v1 *input)
+{
+	fixture->expected_actual = *input;
+	fixture->expected_actual.forwardmove = 0;
+	fixture->expected_actual.sidemove = 0;
+	fixture->expected_actual.upmove = 0;
+	fixture->expected_actual.buttons = 0;
+	fixture->expected_actual.impulse = 0;
+	fixture->expected_actual.angles[0] = 0.0f;
+	fixture->expected_actual.angles[1] = 0.0f;
+	fixture->expected_actual.angles[2] = 0.0f;
+	if (fixture->expected_actual.msec < 1 || fixture->expected_actual.msec > 255)
+	{
+		fixture->expected_actual.msec = 1;
+	}
+}
+
 static void test_bound_valid_command_requests_then_calls_actual_once(void)
 {
 	sol_actual_command_input_v1 input = valid_command();
@@ -181,6 +220,96 @@ static void test_bound_replacement_routes_explicit_evidence_operation(void)
 			"declared blocked replacement reaches the distinct evidence operation");
 }
 
+static void test_candidate_batch_requests_all_before_any_physical_emit(void)
+{
+	sol_actual_command_input_v1 inputs[SOL_ACTUAL_COMMAND_BATCH_MAX_V1];
+	sol_actual_command_input_v1 neutrals[SOL_ACTUAL_COMMAND_BATCH_MAX_V1];
+	ce_operation_v1 operations[SOL_ACTUAL_COMMAND_BATCH_MAX_V1];
+	sol_actual_command_batch_result_v1 results[SOL_ACTUAL_COMMAND_BATCH_MAX_V1];
+	sol_actual_command_input_v1 input = valid_command();
+	command_fixture_v1 fixture;
+	sol_actual_command_ops_v1 ops;
+	size_t index;
+
+	fixture = fixture_for(&input);
+	ops = ops_for(&fixture);
+	for (index = 0u; index < SOL_ACTUAL_COMMAND_BATCH_MAX_V1; ++index)
+	{
+		inputs[index] = input;
+		inputs[index].engine_slot = (intptr_t) (7u + index);
+		neutrals[index] = inputs[index];
+		neutrals[index].angles[0] = 1.0f + (float) index;
+		neutrals[index].angles[1] = 10.0f + (float) index;
+		neutrals[index].angles[2] = 0.0f;
+		neutrals[index].forwardmove = 0;
+		neutrals[index].sidemove = 0;
+		neutrals[index].upmove = 0;
+		neutrals[index].buttons = 0;
+		neutrals[index].impulse = 0;
+		operations[index] = CE_FRAME_REQUEST;
+		fixture.batch_slots[index] = (uint32_t) inputs[index].engine_slot;
+		fixture.batch_generations[index] = 42u + (uint32_t) index;
+		fixture.batch_actual[index] = inputs[index];
+	}
+	fixture.batch_count = SOL_ACTUAL_COMMAND_BATCH_MAX_V1;
+	require(sol_actual_command_submit_batch_v1(inputs, neutrals, operations,
+			SOL_ACTUAL_COMMAND_BATCH_MAX_V1, &ops, results)
+		&& !strcmp(fixture.trace, "EEEEAAAA") && fixture.lookup_calls == 4
+		&& fixture.evidence_calls == 4 && fixture.actual_calls == 4
+		&& fixture.fail_calls == 0,
+			"candidate batch requests every command before any physical emission");
+	for (index = 0u; index < SOL_ACTUAL_COMMAND_BATCH_MAX_V1; ++index)
+	{
+		require(results[index].request_status ==
+				SOL_ACTUAL_COMMAND_REQUEST_ACCEPTED && results[index].emitted,
+				"successful batch reports every accepted request and physical write");
+	}
+	fixture = fixture_for(&input);
+	fixture.reject_evidence_call = 2;
+	fixture.batch_count = SOL_ACTUAL_COMMAND_BATCH_MAX_V1;
+	for (index = 0u; index < SOL_ACTUAL_COMMAND_BATCH_MAX_V1; ++index)
+	{
+		fixture.batch_slots[index] = (uint32_t) inputs[index].engine_slot;
+		fixture.batch_generations[index] = 42u + (uint32_t) index;
+		fixture.batch_actual[index] = neutrals[index];
+	}
+	ops = ops_for(&fixture);
+	require(!sol_actual_command_submit_batch_v1(inputs, neutrals, operations,
+			SOL_ACTUAL_COMMAND_BATCH_MAX_V1, &ops, results)
+		&& !strcmp(fixture.trace, "EEEEAAAAF") && fixture.lookup_calls == 4
+		&& fixture.evidence_calls == 4 && fixture.actual_calls == 4
+		&& fixture.fail_calls == 1,
+			"one request rejection neutralizes every physical command after all requests");
+	for (index = 0u; index < SOL_ACTUAL_COMMAND_BATCH_MAX_V1; ++index)
+	{
+		require(results[index].request_status ==
+				(index == 1u ? SOL_ACTUAL_COMMAND_REQUEST_REJECTED :
+					SOL_ACTUAL_COMMAND_REQUEST_ACCEPTED) && results[index].emitted,
+				"failed batch retains truthful per-request status without active leakage");
+	}
+	fixture = fixture_for(&input);
+	fixture.route = SOL_ACTUAL_COMMAND_UNBOUND;
+	fixture.batch_count = SOL_ACTUAL_COMMAND_BATCH_MAX_V1;
+	for (index = 0u; index < SOL_ACTUAL_COMMAND_BATCH_MAX_V1; ++index)
+	{
+		fixture.batch_slots[index] = (uint32_t) inputs[index].engine_slot;
+		fixture.batch_actual[index] = neutrals[index];
+	}
+	ops = ops_for(&fixture);
+	require(!sol_actual_command_submit_batch_v1(inputs, neutrals, operations,
+			SOL_ACTUAL_COMMAND_BATCH_MAX_V1, &ops, results)
+		&& !strcmp(fixture.trace, "AAAAF") && fixture.lookup_calls == 4
+		&& fixture.evidence_calls == 0 && fixture.actual_calls == 4
+		&& fixture.fail_calls == 1,
+			"strict candidate batch never treats an unbound route as a bypass");
+	for (index = 0u; index < SOL_ACTUAL_COMMAND_BATCH_MAX_V1; ++index)
+	{
+		require(results[index].request_status ==
+				SOL_ACTUAL_COMMAND_REQUEST_NOT_RUN && results[index].emitted,
+				"every unbound candidate route is explicit and physically neutral");
+	}
+}
+
 static void test_unbound_command_is_byte_and_behavior_bypass(void)
 {
 	sol_actual_command_input_v1 input = valid_command();
@@ -201,18 +330,19 @@ static void test_unbound_command_is_byte_and_behavior_bypass(void)
 			"unbound command bypasses evidence and validation without changing bytes");
 }
 
-static void test_evidence_failure_calls_actual_once_then_fail_stops(void)
+static void test_evidence_failure_emits_neutral_once_then_fail_stops(void)
 {
 	sol_actual_command_input_v1 input = valid_command();
 	command_fixture_v1 fixture = fixture_for(&input);
 	sol_actual_command_ops_v1 ops;
 
 	fixture.evidence_result = CE_RESULT_INVALID;
+	expect_fresh_neutral(&fixture, &input);
 	ops = ops_for(&fixture);
 	require(sol_actual_command_submit_v1(&input, CE_FRAME_REQUEST, &ops) == 77
 		&& !strcmp(fixture.trace, "EAF") && fixture.evidence_calls == 1
 		&& fixture.actual_calls == 1 && fixture.fail_calls == 1,
-			"evidence rejection cannot suppress actual syscall and fails afterward");
+			"evidence rejection physically emits only fresh neutral then fail-stops");
 }
 
 static void test_invalid_bound_commands_call_actual_once_without_fabricated_request(void)
@@ -239,11 +369,13 @@ static void test_invalid_bound_commands_call_actual_once_without_fabricated_requ
 		command_fixture_v1 fixture = fixture_for(&invalid[index]);
 		sol_actual_command_ops_v1 ops = ops_for(&fixture);
 
+		expect_fresh_neutral(&fixture, &invalid[index]);
+
 		require(sol_actual_command_submit_v1(&invalid[index], CE_FRAME_REQUEST,
 			&ops) == 77
 			&& !strcmp(fixture.trace, "AF") && fixture.evidence_calls == 0
 			&& fixture.actual_calls == 1 && fixture.fail_calls == 1,
-				"non-representable bound command is actual once then fail-stop");
+				"non-representable bound command emits sanitized neutral then fail-stop");
 	}
 }
 
@@ -254,6 +386,7 @@ static void test_ambiguous_binding_calls_actual_once_then_fail_stops(void)
 	sol_actual_command_ops_v1 ops;
 
 	fixture.route = SOL_ACTUAL_COMMAND_AMBIGUOUS;
+	expect_fresh_neutral(&fixture, &input);
 	ops = ops_for(&fixture);
 	require(sol_actual_command_submit_v1(&input, CE_FRAME_REQUEST, &ops) == 77
 		&& !strcmp(fixture.trace, "AF") && fixture.evidence_calls == 0
@@ -261,14 +394,31 @@ static void test_ambiguous_binding_calls_actual_once_then_fail_stops(void)
 			"ambiguous successful routes never fabricate one evidence owner");
 }
 
+static void test_quarantined_client_emits_neutral_without_evidence(void)
+{
+	sol_actual_command_input_v1 input = valid_command();
+	command_fixture_v1 fixture = fixture_for(&input);
+	sol_actual_command_ops_v1 ops;
+
+	fixture.route = SOL_ACTUAL_COMMAND_QUARANTINED;
+	expect_fresh_neutral(&fixture, &input);
+	ops = ops_for(&fixture);
+	require(sol_actual_command_submit_v1(&input, CE_FRAME_REQUEST, &ops) == 77
+		&& !strcmp(fixture.trace, "AF") && fixture.evidence_calls == 0
+		&& fixture.actual_calls == 1 && fixture.fail_calls == 1,
+			"owned client without an open exact evidence route stays physically neutral");
+}
+
 int main(void)
 {
 	test_bound_valid_command_requests_then_calls_actual_once();
 	test_bound_replacement_routes_explicit_evidence_operation();
+	test_candidate_batch_requests_all_before_any_physical_emit();
 	test_unbound_command_is_byte_and_behavior_bypass();
-	test_evidence_failure_calls_actual_once_then_fail_stops();
+	test_evidence_failure_emits_neutral_once_then_fail_stops();
 	test_invalid_bound_commands_call_actual_once_without_fabricated_request();
 	test_ambiguous_binding_calls_actual_once_then_fail_stops();
-	printf("sol_actual_command: 6 wrapper contracts passed\n");
+	test_quarantined_client_emits_neutral_without_evidence();
+	printf("sol_actual_command: 8 wrapper contracts passed\n");
 	return 0;
 }

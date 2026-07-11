@@ -64,6 +64,11 @@ int sol_ktx_encode_observation_v1(uint64_t frame_seq, uint32_t dt_us,
 int sol_ktx_decode_action_v1(const uint8_t *action, size_t action_size,
 		uint64_t expected_frame_seq, uint8_t msec, sol_ktx_command_v1 *output);
 
+/* Decode the canonical variable-length SAC1 response. Team chat is delivered
+ * in a later phase and is therefore rejected by this command-only adapter. */
+int sol_ktx_decode_sac1_v1(const uint8_t *action, size_t action_size,
+		uint64_t expected_frame_seq, uint8_t msec, sol_ktx_command_v1 *output);
+
 int sol_ktx_encode_command_v1(const sol_ktx_command_v1 *command,
 		uint8_t output[SOL_KTX_COMMAND_V1_SIZE]);
 

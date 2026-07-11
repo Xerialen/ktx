@@ -480,6 +480,30 @@ static void sol_command_fail_stop(void *context)
 	(void) context;
 	Sol_ActualCommandFailStop();
 }
+
+int trap_SetSolBotCMDBatch(const sol_actual_command_input_v1 *inputs,
+	const sol_actual_command_input_v1 *neutral_inputs, size_t count,
+	sol_actual_command_batch_result_v1 *results)
+{
+	ce_operation_v1 operations[SOL_ACTUAL_COMMAND_BATCH_MAX_V1];
+	sol_actual_command_ops_v1 ops = {
+		NULL, sol_command_lookup, sol_command_evidence, sol_command_actual,
+		sol_command_fail_stop
+	};
+	size_t index;
+
+	if (!inputs || !neutral_inputs || !count ||
+		count > SOL_ACTUAL_COMMAND_BATCH_MAX_V1)
+	{
+		return 0;
+	}
+	for (index = 0u; index < count; ++index)
+	{
+		operations[index] = CE_FRAME_REQUEST;
+	}
+	return sol_actual_command_submit_batch_v1(inputs, neutral_inputs, operations,
+		count, &ops, results);
+}
 #endif
 
 static intptr_t trap_SetBotCMDWithEvidence(ce_operation_v1 operation,

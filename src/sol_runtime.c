@@ -320,14 +320,81 @@ static int frame_candidate_healthy(void *context, size_t index, int entity,
 		&& Sol_IsClient(&g_edicts[entity]);
 }
 
-static void frame_write_command(void *context, size_t index, int entity,
-	const sol_ktx_command_v1 *command)
+static int frame_submit_decision(void *context, size_t index, int entity,
+	uint32_t client_generation, const uint8_t *action_response,
+	size_t action_response_length, const uint8_t *decision_trace,
+	size_t decision_trace_length)
 {
+	sol_evidence_run_v1 *evidence = context;
+	uint32_t bound_slot = 0u;
+	uint32_t bound_generation = 0u;
+
+	return evidence &&
+		sol_evidence_run_binding_v1(evidence, index, &bound_slot,
+			&bound_generation) && bound_slot == (uint32_t) entity &&
+		bound_generation == client_generation &&
+		sol_evidence_run_submit_decision_v1(evidence, index,
+			action_response, action_response_length, decision_trace,
+			decision_trace_length);
+}
+
+static int frame_write_commands(void *context,
+	const sol_candidate_command_batch_item_v1 *items, size_t count,
+	sol_candidate_command_batch_result_v1 *results)
+{
+	sol_actual_command_input_v1 inputs[SOL_KTX_CANDIDATE_COUNT_V1];
+	sol_actual_command_input_v1 neutral_inputs[SOL_KTX_CANDIDATE_COUNT_V1];
+	sol_actual_command_batch_result_v1 actual_results[
+		SOL_KTX_CANDIDATE_COUNT_V1];
+	int accepted;
+	size_t item;
+
 	(void) context;
-	(void) index;
-	trap_SetBotCMD(entity, command->msec, command->angles[0], command->angles[1],
-		command->angles[2], command->forwardmove, command->sidemove,
-		command->upmove, command->buttons, command->impulse);
+	if (!items || !results || !count || count > SOL_KTX_CANDIDATE_COUNT_V1)
+	{
+		return 0;
+	}
+	memset(inputs, 0, sizeof(inputs));
+	memset(neutral_inputs, 0, sizeof(neutral_inputs));
+	memset(actual_results, 0, sizeof(actual_results));
+	for (item = 0u; item < count; ++item)
+	{
+		inputs[item].engine_slot = items[item].entity;
+		inputs[item].msec = items[item].command.msec;
+		memcpy(inputs[item].angles, items[item].command.angles,
+			sizeof(inputs[item].angles));
+		inputs[item].forwardmove = items[item].command.forwardmove;
+		inputs[item].sidemove = items[item].command.sidemove;
+		inputs[item].upmove = items[item].command.upmove;
+		inputs[item].buttons = items[item].command.buttons;
+		inputs[item].impulse = items[item].command.impulse;
+		neutral_inputs[item].engine_slot = items[item].entity;
+		neutral_inputs[item].msec = items[item].neutral_command.msec;
+		memcpy(neutral_inputs[item].angles,
+			items[item].neutral_command.angles,
+			sizeof(neutral_inputs[item].angles));
+		neutral_inputs[item].forwardmove =
+			items[item].neutral_command.forwardmove;
+		neutral_inputs[item].sidemove = items[item].neutral_command.sidemove;
+		neutral_inputs[item].upmove = items[item].neutral_command.upmove;
+		neutral_inputs[item].buttons = items[item].neutral_command.buttons;
+		neutral_inputs[item].impulse = items[item].neutral_command.impulse;
+	}
+	accepted = trap_SetSolBotCMDBatch(inputs, neutral_inputs, count,
+		actual_results);
+	for (item = 0u; item < count; ++item)
+	{
+		results[item].request_status =
+			actual_results[item].request_status ==
+				SOL_ACTUAL_COMMAND_REQUEST_ACCEPTED ?
+				SOL_CANDIDATE_REQUEST_ACCEPTED :
+				(actual_results[item].request_status ==
+					SOL_ACTUAL_COMMAND_REQUEST_REJECTED ?
+					SOL_CANDIDATE_REQUEST_REJECTED :
+					SOL_CANDIDATE_REQUEST_NOT_RUN);
+		results[item].emitted = actual_results[item].emitted;
+	}
+	return accepted;
 }
 
 void Sol_StartFrame(void)
@@ -335,7 +402,10 @@ void Sol_StartFrame(void)
 	sol_candidate_frame_result_v1 results[SOL_KTX_CANDIDATE_COUNT_V1];
 	sol_runtime_schedule_decision_v1 schedule;
 	sol_candidate_frame_ops_v1 ops = {
-		NULL, frame_candidate_healthy, frame_write_command
+		.context = sol.evidence,
+		.healthy = frame_candidate_healthy,
+		.decision = frame_submit_decision,
+		.commands = frame_write_commands
 	};
 	uint8_t msec;
 	uint32_t dt_us;
@@ -362,14 +432,26 @@ void Sol_StartFrame(void)
 			continue;
 		}
 		G_cprint("[sol-slice/v1] seat=%u frame=%llu observation=%d bytes=%lu "
-			"policy=neutral emitted=%d\n",
+			"policy=%d action=%lu trace=%lu proof=%d request=%d "
+			"cancelled=%d emitted=%d\n",
 			(unsigned) index + 1u,
 			(unsigned long long) sol.diagnostic_frame_seq[index]++,
 			(int) results[index].observation_status,
 			(unsigned long) results[index].batch_length,
+			(int) results[index].brain_status,
+			(unsigned long) results[index].action_length,
+			(unsigned long) results[index].trace_length,
+			(int) results[index].decision_status,
+			(int) results[index].request_status,
+			results[index].frame_cancelled,
 			results[index].emitted);
-		if (results[index].emitted &&
-			results[index].observation_status == SOL_OBSERVATION_INVALID)
+		if (results[index].frame_cancelled ||
+			(results[index].emitted &&
+				(results[index].observation_status == SOL_OBSERVATION_INVALID
+				|| results[index].brain_status < SOL_BRAIN_NEUTRAL
+				|| (results[index].observation_status == SOL_OBSERVATION_READY
+					&& results[index].decision_status !=
+						SOL_CANDIDATE_DECISION_SUBMITTED))))
 		{
 			sol_evidence_run_fail_stop_v1(sol.evidence);
 		}
@@ -379,25 +461,25 @@ void Sol_StartFrame(void)
 sol_actual_command_route_v1 Sol_ActualCommandLookup(uint32_t engine_slot,
 	uint32_t *client_generation)
 {
-	sol_evidence_binding_lookup_result_v1 result;
+	sol_evidence_command_route_v1 result;
 
 	if (client_generation)
 	{
 		*client_generation = 0u;
 	}
-	if (!sol_evidence_run_emissions_open_v1(sol.evidence))
-	{
-		return SOL_ACTUAL_COMMAND_UNBOUND;
-	}
-	result = sol_evidence_run_find_binding_v1(sol.evidence, engine_slot, NULL,
+	result = sol_evidence_run_command_route_v1(sol.evidence, engine_slot,
 		client_generation);
-	if (result == SOL_EVIDENCE_BINDING_EXACT)
+	if (result == SOL_EVIDENCE_COMMAND_BOUND)
 	{
 		return SOL_ACTUAL_COMMAND_BOUND;
 	}
-	if (result == SOL_EVIDENCE_BINDING_AMBIGUOUS)
+	if (result == SOL_EVIDENCE_COMMAND_AMBIGUOUS)
 	{
 		return SOL_ACTUAL_COMMAND_AMBIGUOUS;
+	}
+	if (result == SOL_EVIDENCE_COMMAND_QUARANTINED)
+	{
+		return SOL_ACTUAL_COMMAND_QUARANTINED;
 	}
 	return SOL_ACTUAL_COMMAND_UNBOUND;
 }

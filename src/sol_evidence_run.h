@@ -8,7 +8,8 @@
 
 enum
 {
-	SOL_EVIDENCE_RUN_SEATS_V1 = 8
+	SOL_EVIDENCE_RUN_SEATS_V1 = 8,
+	SOL_EVIDENCE_RUN_CANDIDATE_SEATS_V1 = 4
 };
 
 typedef enum sol_evidence_bind_record_result_v1
@@ -24,6 +25,14 @@ typedef enum sol_evidence_binding_lookup_result_v1
 	SOL_EVIDENCE_BINDING_EXACT = 1,
 	SOL_EVIDENCE_BINDING_AMBIGUOUS = 2
 } sol_evidence_binding_lookup_result_v1;
+
+typedef enum sol_evidence_command_route_v1
+{
+	SOL_EVIDENCE_COMMAND_UNOWNED = 0,
+	SOL_EVIDENCE_COMMAND_BOUND = 1,
+	SOL_EVIDENCE_COMMAND_AMBIGUOUS = 2,
+	SOL_EVIDENCE_COMMAND_QUARANTINED = 3
+} sol_evidence_command_route_v1;
 
 typedef struct sol_evidence_run_v1 sol_evidence_run_v1;
 
@@ -70,6 +79,14 @@ int sol_evidence_run_find_client_v1(const sol_evidence_run_v1 *run,
 sol_evidence_binding_lookup_result_v1 sol_evidence_run_find_binding_v1(
 	const sol_evidence_run_v1 *run, uint32_t engine_slot, size_t *index,
 	uint32_t *client_generation);
+sol_evidence_command_route_v1 sol_evidence_run_command_route_v1(
+	const sol_evidence_run_v1 *run, uint32_t engine_slot,
+	uint32_t *client_generation);
+
+int sol_evidence_run_submit_decision_v1(sol_evidence_run_v1 *run,
+	size_t index, const uint8_t *action_response,
+	size_t action_response_length, const uint8_t *decision_trace,
+	size_t decision_trace_length);
 
 void sol_evidence_run_request_close_v1(sol_evidence_run_v1 *run);
 void sol_evidence_run_fail_stop_v1(sol_evidence_run_v1 *run);
@@ -78,6 +95,7 @@ int sol_evidence_run_note_disconnect_v1(sol_evidence_run_v1 *run,
 int sol_evidence_run_active_v1(const sol_evidence_run_v1 *run);
 int sol_evidence_run_emissions_open_v1(const sol_evidence_run_v1 *run);
 int sol_evidence_run_cleanup_pending_v1(const sol_evidence_run_v1 *run);
+int sol_evidence_run_failed_v1(const sol_evidence_run_v1 *run);
 
 sol_evidence_cleanup_result_v1 sol_evidence_run_server_cleanup_v1(
 	sol_evidence_run_v1 *run, sol_evidence_run_remove_v1 remove,

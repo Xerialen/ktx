@@ -117,6 +117,65 @@ static void test_previous_self_snapshot_drives_exact_active_command(void)
 	sol_core_destroy_v1(core);
 }
 
+static void test_canonical_sac1_decodes_atomically(void)
+{
+	static const uint8_t action[33] = {
+		'S', 'A', 'C', '1', 42, 0, 0, 0, 0, 0, 0, 0,
+		/* pitch=-10, yaw=45, roll=0 */
+		0, 0, 0x20, 0xc1, 0, 0, 0x34, 0x42, 0, 0, 0, 0,
+		/* forward=400, side=-25, up=16, buttons=attack+jump, RL, no chat */
+		0x90, 0x01, 0xe7, 0xff, 0x10, 0, 3, 7, 0
+	};
+	uint8_t mutated[37];
+	sol_ktx_command_v1 command;
+	sol_ktx_command_v1 before;
+
+	memset(&command, 0xa5, sizeof(command));
+	expect(sol_ktx_decode_sac1_v1(action, sizeof(action), 42, 13, &command),
+			"canonical SAC1 decodes through the command-only adapter");
+	expect(command.msec == 13 && command.angles[0] == -10.0f
+			&& command.angles[1] == 45.0f && command.angles[2] == 0.0f
+			&& command.forwardmove == 400 && command.sidemove == -25
+			&& command.upmove == 16 && command.buttons == 3
+			&& command.impulse == 7,
+			"SAC1 fields project exactly into the KTX command");
+
+	memset(&before, 0xa5, sizeof(before));
+	command = before;
+	expect(!sol_ktx_decode_sac1_v1(action, sizeof(action), 43, 13, &command)
+			&& !memcmp(&command, &before, sizeof(command)),
+			"wrong-frame SAC1 fails without partial output");
+	command = before;
+	expect(!sol_ktx_decode_sac1_v1(action, sizeof(action) - 1u, 42, 13, &command)
+			&& !memcmp(&command, &before, sizeof(command)),
+			"truncated SAC1 fails without partial output");
+	memcpy(mutated, action, sizeof(action));
+	mutated[sizeof(action)] = 0;
+	command = before;
+	expect(!sol_ktx_decode_sac1_v1(mutated, sizeof(action) + 1u, 42, 13, &command)
+			&& !memcmp(&command, &before, sizeof(command)),
+			"trailing SAC1 bytes fail without partial output");
+	memcpy(mutated, action, sizeof(action));
+	mutated[12] = 0;
+	mutated[13] = 0;
+	mutated[14] = 0;
+	mutated[15] = 0x80;
+	command = before;
+	expect(!sol_ktx_decode_sac1_v1(mutated, sizeof(action), 42, 13, &command)
+			&& !memcmp(&command, &before, sizeof(command)),
+			"negative-zero SAC1 view fails canonical decoding atomically");
+	memcpy(mutated, action, sizeof(action));
+	mutated[32] = 1;
+	mutated[33] = 2;
+	mutated[34] = 0;
+	mutated[35] = 'o';
+	mutated[36] = 'k';
+	command = before;
+	expect(!sol_ktx_decode_sac1_v1(mutated, sizeof(mutated), 42, 13, &command)
+			&& !memcmp(&command, &before, sizeof(command)),
+			"canonical teamsay is rejected from the command emission phase");
+}
+
 static void test_plan_seat_evidence_identity_and_skill_token_stay_distinct(void)
 {
 	static const char *const plan_seats[SOL_KTX_EVIDENCE_SEAT_COUNT_V1] = {
@@ -176,10 +235,11 @@ int main(void)
 {
 	test_first_frame_without_snapshot_is_exact_neutral();
 	test_previous_self_snapshot_drives_exact_active_command();
+	test_canonical_sac1_decodes_atomically();
 	test_plan_seat_evidence_identity_and_skill_token_stay_distinct();
 	if (!failures)
 	{
-		printf("sol_ktx_adapter: 3 contract tests passed\n");
+		printf("sol_ktx_adapter: 4 contract tests passed\n");
 	}
 	return failures ? 1 : 0;
 }
