@@ -67,15 +67,16 @@ typedef struct ce_epoch_end_v1 {
 	char run_nonce[CE_RUN_NONCE_CAP];
 } ce_epoch_end_v1;
 
-/* KTX supplies only the active run identity. The engine replaces the zero
- * timestamp with its exact MVD/server time at the match origin. */
+/* KTX supplies only the active run identity. The engine replaces zero with
+ * the exact decoded-MVD millisecond projection at the semantic match event. */
 typedef struct ce_match_timeline_begin_v1 {
 	ce_payload_header_v1 header;
 	char run_nonce[CE_RUN_NONCE_CAP];
-	uint64_t mvd_time_us;
+	uint64_t projected_mvd_origin_ms;
 } ce_match_timeline_begin_v1;
 
-_Static_assert(offsetof(ce_match_timeline_begin_v1, mvd_time_us) == 80u,
+_Static_assert(offsetof(ce_match_timeline_begin_v1,
+	projected_mvd_origin_ms) == 80u,
 	"CE match timeline timestamp ABI offset");
 _Static_assert(sizeof(ce_match_timeline_begin_v1) == 88u,
 	"CE match timeline payload ABI size");

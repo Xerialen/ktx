@@ -131,7 +131,7 @@ int sol_evidence_run_match_timeline_begin_v1(sol_evidence_run_v1 *run)
 		|| timeline.header.protocol_version != CE_PROTOCOL_VERSION_V1
 		|| timeline.header.struct_size != sizeof(timeline)
 		|| strcmp(timeline.run_nonce, run->run_nonce)
-		|| !timeline.mvd_time_us)
+		|| !timeline.projected_mvd_origin_ms)
 	{
 		return 0;
 	}

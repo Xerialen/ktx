@@ -116,8 +116,8 @@ static intptr_t fake_call(void *context, intptr_t operation, void *payload,
 			timeline->header.protocol_version == CE_PROTOCOL_VERSION_V1 &&
 			timeline->header.struct_size == sizeof(*timeline) &&
 			!strcmp(timeline->run_nonce, run_nonce) &&
-			timeline->mvd_time_us == 0u,
-			"MATCH_TIMELINE_BEGIN is one exact engine-authored server-time request");
+			timeline->projected_mvd_origin_ms == 0u,
+			"MATCH_TIMELINE_BEGIN is one exact engine-authored decoded-MVD projection request");
 		fake->timeline_calls++;
 		trace_char(fake, 'T');
 		if (fake->reject_timeline_once)
@@ -130,7 +130,7 @@ static intptr_t fake_call(void *context, intptr_t operation, void *payload,
 			fake->omit_timeline_time_once = 0;
 			return CE_RESULT_OK;
 		}
-		timeline->mvd_time_us = UINT64_C(123456789);
+		timeline->projected_mvd_origin_ms = UINT64_C(123456789);
 		fake->last_timeline = *timeline;
 		return CE_RESULT_OK;
 	}
@@ -303,8 +303,8 @@ static void test_match_timeline_origin_is_engine_authored_once(void)
 		"OK without an engine-authored timestamp cannot open the timeline");
 	require(sol_evidence_run_match_timeline_begin_v1(fake.run) &&
 		fake.timeline_calls == 2 && !strcmp(fake.trace, "BTT") &&
-		fake.last_timeline.mvd_time_us == UINT64_C(123456789),
-		"engine authors the exact MVD-time origin for the active run");
+		fake.last_timeline.projected_mvd_origin_ms == UINT64_C(123456789),
+		"engine authors the exact decoded-MVD origin projection for the active run");
 	require(!sol_evidence_run_match_timeline_begin_v1(fake.run) &&
 		fake.timeline_calls == 2,
 		"duplicate match origin is rejected locally without a second syscall");
