@@ -1263,6 +1263,9 @@ void StartMatch(void)
 
 	match_start_time = g_globalvars.time;
 	g_matchstarttime = (int)(g_globalvars.time * 1000);
+#ifdef SOL_SUPPORT
+	Sol_MatchTimelineBegin();
+#endif
 	match_in_progress = 2;
 
 	// Disable berzerk at start

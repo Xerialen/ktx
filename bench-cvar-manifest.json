@@ -1,6 +1,8 @@
 {
   "schema": "komodobots2.cvar_manifest.v1",
-  "sweepable_cvars": [],
+  "sweepable_cvars": [
+    "k_sol_stuck_replan_ms"
+  ],
   "sweepable_patterns": [
     "k_kbot_dial_*"
   ]

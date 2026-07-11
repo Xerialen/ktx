@@ -178,8 +178,8 @@ int sol_candidate_registry_claim_v1(sol_candidate_registry_v1 *registry,
 }
 
 int sol_candidate_registry_bind_v1(sol_candidate_registry_v1 *registry,
-	size_t index, uint32_t client_generation, sol_observation_call_v1 call,
-	void *call_context)
+	size_t index, uint32_t client_generation, uint32_t stuck_replan_ms,
+	sol_observation_call_v1 call, void *call_context)
 {
 	sol_candidate_entry_v1 *entry;
 	sol_observation_client_v1 *observation;
@@ -187,7 +187,9 @@ int sol_candidate_registry_bind_v1(sol_candidate_registry_v1 *registry,
 	sol_brain_v1 *brain;
 	const cov_profile_v1 *profile;
 
-	if (!registry || !valid_index(index) || !client_generation || !call)
+	if (!registry || !valid_index(index) || !client_generation
+		|| stuck_replan_ms < SOL_BRAIN_STUCK_REPLAN_MIN_MS_V1
+		|| stuck_replan_ms > SOL_BRAIN_STUCK_REPLAN_MAX_MS_V1 || !call)
 	{
 		return 0;
 	}
@@ -210,6 +212,7 @@ int sol_candidate_registry_bind_v1(sol_candidate_registry_v1 *registry,
 		return 0;
 	}
 	bootstrap.struct_size = sizeof(bootstrap);
+	bootstrap.stuck_replan_ms = stuck_replan_ms;
 	memcpy(bootstrap.static_asset_set_id, profile->static_asset_set_id,
 		sizeof(bootstrap.static_asset_set_id));
 	memcpy(bootstrap.sensory_profile_id, profile->sensory_profile_id,

@@ -1,6 +1,7 @@
 #include "sol_brain.h"
 
 #include "sol_decision_trace.h"
+#include "sol_motion_reducer.h"
 #include "sol_wire.h"
 
 #include <math.h>
@@ -8,6 +9,7 @@
 #include <string.h>
 
 #define SOL_OBSERVATION_FRAME_OFFSET 4u
+#define SOL_OBSERVATION_DT_US_OFFSET 12u
 #define SOL_OBSERVATION_EVENT_COUNT_OFFSET 98u
 #define SOL_OBSERVATION_EVENTS_OFFSET 102u
 #define SOL_OBSERVATION_ASSET_ID_OFFSET 16u
@@ -50,6 +52,7 @@ typedef struct sol_brain_facts_v1 {
 	uint8_t alive;
 	uint8_t movement_mode;
 	int16_t origin[3];
+	int16_t velocity[3];
 	int16_t view_height;
 	float view[3];
 	uint8_t top_color;
@@ -71,6 +74,7 @@ struct sol_brain_v1 {
 	size_t sac1_length;
 	uint8_t sdt1[SOL_BRAIN_TRACE_MAX_V1];
 	size_t sdt1_length;
+	sol_motion_state_v1 motion;
 	int poisoned;
 };
 
@@ -190,7 +194,7 @@ static int parse_self(sol_brain_cursor_v1 *cursor, sol_brain_facts_v1 *facts)
 	}
 	for (index = 0; index < 3u; ++index)
 	{
-		(void) cursor_u16(cursor);
+		facts->velocity[index] = (int16_t) cursor_u16(cursor);
 	}
 	for (index = 0; index < 3u; ++index)
 	{
@@ -410,8 +414,11 @@ static sol_brain_status_v1 poison(sol_brain_v1 *brain,
 sol_brain_v1 *sol_brain_open_v1(const sol_brain_bootstrap_v1 *bootstrap)
 {
 	sol_brain_v1 *brain;
+	sol_motion_config_v1 motion_config = {0};
 
 	if (!bootstrap || bootstrap->struct_size != sizeof(*bootstrap)
+		|| bootstrap->stuck_replan_ms < SOL_BRAIN_STUCK_REPLAN_MIN_MS_V1
+		|| bootstrap->stuck_replan_ms > SOL_BRAIN_STUCK_REPLAN_MAX_MS_V1
 		|| !nonzero_identity(bootstrap->static_asset_set_id)
 		|| !nonzero_identity(bootstrap->sensory_profile_id))
 	{
@@ -423,6 +430,14 @@ sol_brain_v1 *sol_brain_open_v1(const sol_brain_bootstrap_v1 *bootstrap)
 		return NULL;
 	}
 	brain->bootstrap = *bootstrap;
+	motion_config.struct_size = sizeof(motion_config);
+	motion_config.stuck_replan_ms = bootstrap->stuck_replan_ms;
+	if (sol_motion_init_v1(&brain->motion, &motion_config) != SOL_MOTION_OK_V1)
+	{
+		memset(brain, 0, sizeof(*brain));
+		free(brain);
+		return NULL;
+	}
 	return brain;
 }
 
@@ -467,6 +482,8 @@ sol_brain_status_v1 sol_brain_decide_v1(sol_brain_v1 *brain,
 		sol_action_response_v1 action = {0};
 		sol_decision_trace_decision_v1 trace_decision = {0};
 		sol_brain_facts_v1 facts;
+		sol_motion_sample_v1 motion_sample = {0};
+		sol_motion_result_v1 motion_result;
 		int respawn;
 		int explore;
 		int engage;
@@ -485,6 +502,22 @@ sol_brain_status_v1 sol_brain_decide_v1(sol_brain_v1 *brain,
 		explore = !respawn
 			&& facts.movement_mode == SOL_MOVEMENT_NORMAL_V1;
 		engage = explore && facts.has_target;
+		motion_sample.frame_seq = frame_seq;
+		motion_sample.dt_us = read_u32(sob1 + SOL_OBSERVATION_DT_US_OFFSET);
+		memcpy(motion_sample.origin, facts.origin, sizeof(motion_sample.origin));
+		memcpy(motion_sample.velocity, facts.velocity,
+			sizeof(motion_sample.velocity));
+		motion_sample.can_move = explore ? 1u : 0u;
+		if (explore)
+		{
+			motion_sample.intent.epoch = 1u;
+			motion_sample.intent.forwardmove = SOL_MOVE_SPEED_V1;
+		}
+		if (sol_motion_step_v1(&brain->motion, &motion_sample, &motion_result)
+			!= SOL_MOTION_OK_V1)
+		{
+			return poison(brain, SOL_BRAIN_INTERNAL_ERROR);
+		}
 		if (respawn)
 		{
 			action.buttons = SOL_BUTTON_ATTACK_V1;
@@ -493,7 +526,9 @@ sol_brain_status_v1 sol_brain_decide_v1(sol_brain_v1 *brain,
 		}
 		else if (explore)
 		{
-			action.forwardmove = SOL_MOVE_SPEED_V1;
+			action.forwardmove = motion_result.forwardmove;
+			action.sidemove = motion_result.sidemove;
+			action.upmove = motion_result.upmove;
 			trace_decision.decision_class = SOL_DECISION_CLASS_EXPLORE_V1;
 			if (engage)
 			{

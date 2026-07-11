@@ -35,6 +35,10 @@ typedef struct fake_ce_v1
 	int reject_decision_once;
 	int decision_calls;
 	ce_frame_decision_v1 last_decision;
+	int reject_timeline_once;
+	int omit_timeline_time_once;
+	int timeline_calls;
+	ce_match_timeline_begin_v1 last_timeline;
 } fake_ce_v1;
 
 static const char run_nonce[] =
@@ -101,6 +105,33 @@ static intptr_t fake_call(void *context, intptr_t operation, void *payload,
 			fake->fail_end_once = 0;
 			return CE_RESULT_INVALID;
 		}
+		return CE_RESULT_OK;
+	}
+	if (operation == CE_MATCH_TIMELINE_BEGIN)
+	{
+		ce_match_timeline_begin_v1 *timeline = payload;
+
+		require(!fake->bot_phase && fake->phase == FAKE_OPEN &&
+			payload_size == (intptr_t) sizeof(*timeline) &&
+			timeline->header.protocol_version == CE_PROTOCOL_VERSION_V1 &&
+			timeline->header.struct_size == sizeof(*timeline) &&
+			!strcmp(timeline->run_nonce, run_nonce) &&
+			timeline->mvd_time_us == 0u,
+			"MATCH_TIMELINE_BEGIN is one exact engine-authored server-time request");
+		fake->timeline_calls++;
+		trace_char(fake, 'T');
+		if (fake->reject_timeline_once)
+		{
+			fake->reject_timeline_once = 0;
+			return CE_RESULT_INVALID;
+		}
+		if (fake->omit_timeline_time_once)
+		{
+			fake->omit_timeline_time_once = 0;
+			return CE_RESULT_OK;
+		}
+		timeline->mvd_time_us = UINT64_C(123456789);
+		fake->last_timeline = *timeline;
 		return CE_RESULT_OK;
 	}
 	if (operation == CE_FRAME_DECISION)
@@ -255,6 +286,46 @@ static void test_normal_close_waits_for_server_phase_and_is_reusable(void)
 	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
 			SOL_EVIDENCE_CLEANUP_COMPLETE,
 			"empty second run closes cleanly");
+	sol_evidence_run_destroy_v1(fake.run);
+}
+
+static void test_match_timeline_origin_is_engine_authored_once(void)
+{
+	fake_ce_v1 fake = { 0 };
+
+	fake.run = sol_evidence_run_create_v1();
+	require(fake.run != NULL && sol_evidence_run_begin_v1(fake.run, run_nonce,
+			"ktx-match/v1", fake_call, &fake),
+		"match-timeline fixture begins one typed epoch");
+	fake.omit_timeline_time_once = 1;
+	require(!sol_evidence_run_match_timeline_begin_v1(fake.run) &&
+		fake.timeline_calls == 1 && !strcmp(fake.trace, "BT"),
+		"OK without an engine-authored timestamp cannot open the timeline");
+	require(sol_evidence_run_match_timeline_begin_v1(fake.run) &&
+		fake.timeline_calls == 2 && !strcmp(fake.trace, "BTT") &&
+		fake.last_timeline.mvd_time_us == UINT64_C(123456789),
+		"engine authors the exact MVD-time origin for the active run");
+	require(!sol_evidence_run_match_timeline_begin_v1(fake.run) &&
+		fake.timeline_calls == 2,
+		"duplicate match origin is rejected locally without a second syscall");
+	sol_evidence_run_request_close_v1(fake.run);
+	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
+		SOL_EVIDENCE_CLEANUP_COMPLETE,
+		"match-timeline fixture closes cleanly");
+	sol_evidence_run_destroy_v1(fake.run);
+
+	memset(&fake, 0, sizeof(fake));
+	fake.run = sol_evidence_run_create_v1();
+	require(fake.run != NULL && sol_evidence_run_begin_v1(fake.run, run_nonce,
+			"diagnostic-client-lifecycle/v1", fake_call, &fake),
+		"diagnostic epoch begins independently");
+	require(!sol_evidence_run_match_timeline_begin_v1(fake.run) &&
+		fake.timeline_calls == 0,
+		"non-match evidence epoch cannot claim an MVD match origin");
+	sol_evidence_run_request_close_v1(fake.run);
+	require(sol_evidence_run_server_cleanup_v1(fake.run, fake_remove, &fake) ==
+		SOL_EVIDENCE_CLEANUP_COMPLETE,
+		"diagnostic timeline fixture closes cleanly");
 	sol_evidence_run_destroy_v1(fake.run);
 }
 
@@ -634,6 +705,7 @@ static void test_candidate_decision_uses_bound_route_and_zeroed_fixed_payload(vo
 int main(void)
 {
 	test_normal_close_waits_for_server_phase_and_is_reusable();
+	test_match_timeline_origin_is_engine_authored_once();
 	test_invalid_end_still_unbinds_and_allows_second_run();
 	test_rejected_unbind_retains_route_until_retry_succeeds();
 	test_unexpected_disconnect_keeps_binding_for_safe_unbind();
@@ -644,6 +716,6 @@ int main(void)
 	test_late_successful_bind_is_retained_while_reporting_fail_stop();
 	test_all_eight_generic_seats_bind_cleanup_and_reuse();
 	test_candidate_decision_uses_bound_route_and_zeroed_fixed_payload();
-	printf("sol_evidence_run: 11 contract tests passed\n");
+	printf("sol_evidence_run: 12 contract tests passed\n");
 	return 0;
 }

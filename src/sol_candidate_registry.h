@@ -104,8 +104,8 @@ int sol_candidate_registry_cancel_expect_v1(sol_candidate_registry_v1 *registry,
 int sol_candidate_registry_claim_v1(sol_candidate_registry_v1 *registry,
 	const char *player_name, int entity, size_t *claimed_index);
 int sol_candidate_registry_bind_v1(sol_candidate_registry_v1 *registry,
-	size_t index, uint32_t client_generation, sol_observation_call_v1 call,
-	void *call_context);
+	size_t index, uint32_t client_generation, uint32_t stuck_replan_ms,
+	sol_observation_call_v1 call, void *call_context);
 int sol_candidate_registry_unbind_v1(sol_candidate_registry_v1 *registry,
 	size_t index);
 int sol_candidate_registry_release_v1(sol_candidate_registry_v1 *registry,

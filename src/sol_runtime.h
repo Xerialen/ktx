@@ -13,6 +13,7 @@ int Sol_ClientEntersEvent(struct gedict_s *client);
 void Sol_ClientDisconnectedEvent(struct gedict_s *client);
 void Sol_ServerStartFrame(void);
 void Sol_StartFrame(void);
+void Sol_MatchTimelineBegin(void);
 
 int Sol_StockPendingBotName(int skill_level, const char *team,
 	char *output, size_t capacity);

@@ -5,13 +5,17 @@
 #include <stdint.h>
 
 enum {
-	SOL_BRAIN_TRACE_MAX_V1 = 81
+	SOL_BRAIN_TRACE_MAX_V1 = 81,
+	SOL_BRAIN_STUCK_REPLAN_MIN_MS_V1 = 50,
+	SOL_BRAIN_STUCK_REPLAN_MAX_MS_V1 = 5000,
+	SOL_BRAIN_STUCK_REPLAN_DEFAULT_MS_V1 = 500
 };
 
 typedef struct sol_brain_v1 sol_brain_v1;
 
 typedef struct sol_brain_bootstrap_v1 {
 	uint32_t struct_size;
+	uint32_t stuck_replan_ms;
 	uint8_t static_asset_set_id[32];
 	uint8_t sensory_profile_id[32];
 } sol_brain_bootstrap_v1;

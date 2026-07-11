@@ -10,6 +10,7 @@
 #include "sol_runtime.h"
 #include "sol_runtime_schedule.h"
 
+#include <math.h>
 #include <string.h>
 
 typedef struct sol_runtime_v1
@@ -458,6 +459,21 @@ void Sol_StartFrame(void)
 	}
 }
 
+void Sol_MatchTimelineBegin(void)
+{
+	const char *run_nonce = sol_evidence_run_nonce_v1(sol.evidence);
+
+	if (!run_nonce || !sol_evidence_run_matches_v1(sol.evidence, run_nonce,
+			"ktx-match/v1"))
+	{
+		return;
+	}
+	if (!sol_evidence_run_match_timeline_begin_v1(sol.evidence))
+	{
+		sol_evidence_run_fail_stop_v1(sol.evidence);
+	}
+}
+
 sol_actual_command_route_v1 Sol_ActualCommandLookup(uint32_t engine_slot,
 	uint32_t *client_generation)
 {
@@ -650,6 +666,26 @@ static int pending_candidate_index(size_t *pending_index)
 	return 1;
 }
 
+static int configured_stuck_replan_ms(uint32_t *output)
+{
+	float value = cvar("k_sol_stuck_replan_ms");
+	uint32_t parsed;
+
+	if (!output || !isfinite((double) value)
+		|| value < (float) SOL_BRAIN_STUCK_REPLAN_MIN_MS_V1
+		|| value > (float) SOL_BRAIN_STUCK_REPLAN_MAX_MS_V1)
+	{
+		return 0;
+	}
+	parsed = (uint32_t) value;
+	if ((float) parsed != value)
+	{
+		return 0;
+	}
+	*output = parsed;
+	return 1;
+}
+
 static int bind_initialized_client(size_t index, int entity,
 	const char *initialized_name, const char *initialized_team)
 {
@@ -660,6 +696,7 @@ static int bind_initialized_client(size_t index, int entity,
 	const cov_profile_v1 *profile = NULL;
 	const char *run_nonce;
 	ce_bind_v1 bind;
+	uint32_t stuck_replan_ms = 0u;
 	size_t pending_index;
 	int result;
 
@@ -715,10 +752,12 @@ static int bind_initialized_client(size_t index, int entity,
 	}
 	if (identity->role == SOL_KTX_SEAT_CANDIDATE_V1)
 	{
-		if (!sol_candidate_registry_entry_v1(sol.candidates, index, &entry)
+		if (!configured_stuck_replan_ms(&stuck_replan_ms)
+			|| !sol_candidate_registry_entry_v1(sol.candidates, index, &entry)
 			|| entry.stage != SOL_CANDIDATE_CLAIMED || entry.entity != entity
 			|| !sol_candidate_registry_bind_v1(sol.candidates, index,
-				bind.client_generation, call_observation, NULL))
+				bind.client_generation, stuck_replan_ms,
+				call_observation, NULL))
 		{
 			sol_evidence_run_fail_stop_v1(sol.evidence);
 			G_sprint(self, PRINT_HIGH,

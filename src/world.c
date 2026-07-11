@@ -1057,6 +1057,7 @@ void FirstFrame(void)
 	RegisterCvarEx("k_demotxt_format", "xml"); // what format for .txt files
 
 #ifdef SOL_SUPPORT
+	RegisterCvarEx("k_sol_stuck_replan_ms", "500");
 	RegisterCvarEx("k_sol_goal_x", "705");
 	RegisterCvarEx("k_sol_goal_y", "146");
 	RegisterCvarEx("k_sol_goal_z", "56");

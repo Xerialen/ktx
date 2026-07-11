@@ -60,6 +60,18 @@ if(player_ready_index LESS 0
 	message(FATAL_ERROR
 		"strict eight-seat launch must gate every bot ready path before ready mutation")
 endif()
+string(FIND "${match_contents}" "match_start_time = g_globalvars.time;"
+	match_time_origin_index)
+string(FIND "${match_contents}" "Sol_MatchTimelineBegin();"
+	match_timeline_begin_index)
+string(FIND "${match_contents}" "match_in_progress = 2;"
+	match_live_index)
+if(match_time_origin_index LESS 0
+		OR match_timeline_begin_index LESS match_time_origin_index
+		OR match_live_index LESS match_timeline_begin_index)
+	message(FATAL_ERROR
+		"engine-authored SOL timeline origin must bind after KTX time origin and before live match state")
+endif()
 file(READ "${CLIENT}" client_contents)
 string(FIND "${client_contents}" "void PlayerPreThink(void)" player_prethink_index)
 string(FIND "${client_contents}" "void PlayerPostThink(void)" player_postthink_index)
@@ -116,6 +128,12 @@ forbid_occurrences("${SOL_CANDIDATE_REGISTRY}"
 forbid_occurrences("${SOL_EVIDENCE_RUN}"
 	"(sol_core_step_v1|sol_ktx_encode_observation_v1|\"SLO1\"|\"SLA1\")"
 	"evidence lifecycle coupled to the old diagnostic core")
+forbid_occurrences("${SOL_MOTION_REDUCER}"
+	"(g_edicts|g_globalvars|world|self|trap_[A-Za-z0-9_]*|cvar|cvar_string|g_random|find_plr|syscall|gettimeofday|#[ \t]*include[ \t]*\"g_local.h\")"
+	"observer-only motion reducer importing an engine or world capability")
+forbid_occurrences("${SOL_MOTION_REDUCER_H}"
+	"(g_edicts|g_globalvars|world|self|trap_[A-Za-z0-9_]*|cvar|cvar_string|g_random|find_plr|syscall|gettimeofday|#[ \t]*include[ \t]*\"g_local.h\")"
+	"motion reducer interface exposing an engine or world capability")
 forbid_occurrences("${SOL_RUNTIME_SCHEDULE}"
 	"(CE_MATCH_END|CE_UNBIND|trap_RemoveBot|trap_SetBotCMD|CE_FRAME_REQUEST|CE_FRAME_REPLACE|CE_FRAME_DECISION)"
 	"pure runtime scheduling policy performing a frame or cleanup side effect")
@@ -126,6 +144,9 @@ require_exact_occurrences("${SOL_EVIDENCE_RUN}"
 require_exact_occurrences("${SOL_EVIDENCE_RUN}"
 	"CE_MATCH_END" 1
 	"one run-level evidence end call site")
+require_exact_occurrences("${SOL_EVIDENCE_RUN}"
+	"CE_MATCH_TIMELINE_BEGIN" 1
+	"one run-level engine-authored match timeline call site")
 require_exact_occurrences("${SOL_EVIDENCE_RUN}" "CE_UNBIND" 1
 	"one safe evidence unbind call site")
 require_exact_occurrences("${SOL_EVIDENCE_RUN}" "CE_FRAME_DECISION" 1

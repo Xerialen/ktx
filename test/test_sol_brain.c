@@ -65,6 +65,19 @@ static void fixture_u64(uint8_t *output, uint64_t value)
 	fixture_u32(output + 4u, (uint32_t) (value >> 32));
 }
 
+static void fixture_frame(uint8_t *observation, uint64_t frame_seq)
+{
+	fixture_u64(observation + 4u, frame_seq);
+}
+
+static void fixture_self_origin(uint8_t *observation,
+	int16_t x, int16_t y, int16_t z)
+{
+	fixture_u16(observation + 118u, (uint16_t) x);
+	fixture_u16(observation + 120u, (uint16_t) y);
+	fixture_u16(observation + 122u, (uint16_t) z);
+}
+
 static size_t append_visible_player(uint8_t observation[236],
 	uint8_t top_color, uint8_t bottom_color)
 {
@@ -129,14 +142,21 @@ static size_t append_visible_other_with_player_model(uint8_t observation[219])
 	return offset;
 }
 
-static sol_brain_v1 *open_brain_for_observation(const uint8_t *observation)
+static sol_brain_v1 *open_brain_with_stuck_threshold(
+	const uint8_t *observation, uint32_t stuck_replan_ms)
 {
 	sol_brain_bootstrap_v1 bootstrap = {0};
 
 	bootstrap.struct_size = sizeof(bootstrap);
+	bootstrap.stuck_replan_ms = stuck_replan_ms;
 	memcpy(bootstrap.static_asset_set_id, observation + 16u, 32u);
 	memcpy(bootstrap.sensory_profile_id, observation + 48u, 32u);
 	return sol_brain_open_v1(&bootstrap);
+}
+
+static sol_brain_v1 *open_brain_for_observation(const uint8_t *observation)
+{
+	return open_brain_with_stuck_threshold(observation, 500u);
 }
 
 static sol_action_response_v1 require_exploration_without_fire(
@@ -235,6 +255,7 @@ static void test_dead_self_requests_one_respawn_action(void)
 	sol_brain_v1 *brain;
 
 	bootstrap.struct_size = sizeof(bootstrap);
+	bootstrap.stuck_replan_ms = 500u;
 	memcpy(bootstrap.static_asset_set_id, observation + 16u, 32u);
 	memcpy(bootstrap.sensory_profile_id, observation + 48u, 32u);
 	observation[113] = 0u;
@@ -271,6 +292,7 @@ static void test_alive_self_without_player_sight_explores_without_firing(void)
 	sol_brain_v1 *brain;
 
 	bootstrap.struct_size = sizeof(bootstrap);
+	bootstrap.stuck_replan_ms = 500u;
 	memcpy(bootstrap.static_asset_set_id, observation + 16u, 32u);
 	memcpy(bootstrap.sensory_profile_id, observation + 48u, 32u);
 	brain = sol_brain_open_v1(&bootstrap);
@@ -343,6 +365,7 @@ static void test_visible_live_different_palette_player_authorizes_fire(void)
 	require(sol_wire_observation_is_canonical_v1(observation,
 		observation_length), "different-palette PLAYER fixture is canonical SOB1");
 	bootstrap.struct_size = sizeof(bootstrap);
+	bootstrap.stuck_replan_ms = 500u;
 	memcpy(bootstrap.static_asset_set_id, observation + 16u, 32u);
 	memcpy(bootstrap.sensory_profile_id, observation + 48u, 32u);
 	brain = sol_brain_open_v1(&bootstrap);
@@ -501,6 +524,93 @@ static void test_target_disappearance_clears_fire_on_next_contiguous_frame(void)
 	sol_brain_close_v1(brain);
 }
 
+static void test_stationary_drive_replans_then_observed_progress_recovers(void)
+{
+	uint8_t observation[202];
+	size_t observation_length = hex_to_bytes(observation_golden_hex,
+		observation, sizeof(observation));
+	sol_brain_decision_view_v1 decision = {0};
+	sol_action_response_v1 action;
+	sol_brain_v1 *brain = open_brain_with_stuck_threshold(observation, 50u);
+	uint64_t frame;
+
+	require(brain != NULL, "stuck-replan fixture opens one private brain");
+	for (frame = 0u; frame <= 4u; ++frame)
+	{
+		fixture_frame(observation, frame);
+		require(sol_brain_decide_v1(brain, observation, observation_length,
+				&decision) == SOL_BRAIN_DECISION &&
+			sol_wire_decode_action_v1(decision.sac1, decision.sac1_length,
+				&action),
+			"each stationary frame produces one canonical decision");
+	}
+	require(action.frame_seq == 4u && action.forwardmove == 0 &&
+		action.sidemove == 400 && action.upmove == 0 &&
+		action.view_angles[0] == 0.0f && action.view_angles[1] == 90.0f &&
+		action.view_angles[2] == -180.0f && action.buttons == 0u,
+		"exact observer time threshold rotates motion right without rotating view");
+	require_trace(&decision, observation, observation_length,
+		SOL_DECISION_CLASS_EXPLORE_V1, SOL_ATTACK_GATE_NONE_V1,
+		SOL_SELECTED_SIGHTING_NONE_V1, 0u);
+
+	fixture_frame(observation, 5u);
+	fixture_self_origin(observation, -8, 24, 24);
+	require(sol_brain_decide_v1(brain, observation, observation_length,
+			&decision) == SOL_BRAIN_DECISION &&
+		sol_wire_decode_action_v1(decision.sac1, decision.sac1_length, &action),
+		"observed recovery progress produces the next decision");
+	require(action.frame_seq == 5u && action.forwardmove == 400 &&
+		action.sidemove == 0 && action.upmove == 0,
+		"eight units of observed progress restores nominal exploration");
+	sol_brain_close_v1(brain);
+}
+
+static void test_recovery_movement_preserves_visible_combat_aim_and_fire(void)
+{
+	uint8_t observation[236];
+	size_t observation_length = hex_to_bytes(observation_golden_hex,
+		observation, sizeof(observation));
+	sol_brain_decision_view_v1 decision = {0};
+	sol_action_response_v1 action;
+	sol_brain_v1 *brain;
+	uint64_t frame;
+
+	observation[179] = 4u;
+	observation[180] = 4u;
+	observation_length = append_visible_player(observation, 13u, 13u);
+	brain = open_brain_with_stuck_threshold(observation, 50u);
+	require(brain != NULL, "combat-recovery fixture opens one private brain");
+	for (frame = 0u; frame <= 4u; ++frame)
+	{
+		fixture_frame(observation, frame);
+		require(sol_brain_decide_v1(brain, observation, observation_length,
+				&decision) == SOL_BRAIN_DECISION &&
+			sol_wire_decode_action_v1(decision.sac1, decision.sac1_length,
+				&action),
+			"visible stationary target produces contiguous combat decisions");
+	}
+	require(action.buttons == 1u && action.forwardmove == 0 &&
+		action.sidemove == 400 && action.upmove == 0 &&
+		action.view_angles[1] == 0.0f && action.view_angles[0] > 10.0f &&
+		action.view_angles[0] < 15.0f,
+		"recovery changes only movement while visible-target aim and fire persist");
+	require_trace(&decision, observation, observation_length,
+		SOL_DECISION_CLASS_ENGAGE_VISIBLE_V1,
+		SOL_ATTACK_GATE_VISIBLE_LIVE_PLAYER_DIFFERENT_BOTTOM_COLOR_V1,
+		SOL_SELECTED_SIGHTING_PRESENT_V1, 0u);
+	sol_brain_close_v1(brain);
+}
+
+static void test_zero_stuck_threshold_rejects_bootstrap(void)
+{
+	uint8_t observation[202];
+
+	(void) hex_to_bytes(observation_golden_hex, observation,
+		sizeof(observation));
+	require(open_brain_with_stuck_threshold(observation, 0u) == NULL,
+		"zero stuck-replan threshold cannot open a brain");
+}
+
 static void test_malformed_observation_clears_output_and_poisons(void)
 {
 	uint8_t initial[202];
@@ -613,10 +723,13 @@ int main(void)
 	test_visible_gib_player_does_not_authorize_fire();
 	test_visible_other_with_player_model_does_not_authorize_fire();
 	test_target_disappearance_clears_fire_on_next_contiguous_frame();
+	test_stationary_drive_replans_then_observed_progress_recovers();
+	test_recovery_movement_preserves_visible_combat_aim_and_fire();
+	test_zero_stuck_threshold_rejects_bootstrap();
 	test_malformed_observation_clears_output_and_poisons();
 	test_profile_mismatch_clears_output_and_poisons();
 	test_sequence_error_clears_output_and_poisons();
 	test_bad_caller_arguments_poison_a_live_brain();
-	printf("sol_brain: 13 contract tests passed\n");
+	printf("sol_brain: 16 contract tests passed\n");
 	return 0;
 }

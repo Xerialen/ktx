@@ -449,7 +449,8 @@ static void bind_eight_live_seats(timing_fixture_v1 *fixture)
 					identity->player_name, (int) slots[index], &claimed)
 				&& claimed == index
 				&& sol_candidate_registry_bind_v1(fixture->registry, index,
-					generations[index], fake_observation_call,
+					generations[index], SOL_BRAIN_STUCK_REPLAN_DEFAULT_MS_V1,
+					fake_observation_call,
 					&fixture->observers[index])
 				&& fixture->observers[index].profile_calls == 1,
 					"exactly four candidates bind one profile; controls bind none");

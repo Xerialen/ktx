@@ -57,6 +57,7 @@ int sol_evidence_run_begin_v1(sol_evidence_run_v1 *run,
 int sol_evidence_run_matches_v1(const sol_evidence_run_v1 *run,
 	const char *run_nonce, const char *epoch_kind);
 const char *sol_evidence_run_nonce_v1(const sol_evidence_run_v1 *run);
+int sol_evidence_run_match_timeline_begin_v1(sol_evidence_run_v1 *run);
 int sol_evidence_run_configure_seat_v1(sol_evidence_run_v1 *run,
 	size_t index, const char *seat_nonce);
 int sol_evidence_run_seat_configured_v1(const sol_evidence_run_v1 *run,

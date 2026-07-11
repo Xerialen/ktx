@@ -318,7 +318,15 @@ static void bind_four_private_candidates(sol_candidate_registry_v1 *registry,
 		require(sol_candidate_registry_claim_v1(registry, identity->player_name,
 				(int) slots[index], &claimed) && claimed == index,
 				"expected bot name claims only its matching candidate entry");
+		if (index == 0u)
+		{
+			require(!sol_candidate_registry_bind_v1(registry, index,
+					generations[index], 0u, fake_observation_call,
+					&fixture->observers[index]),
+				"candidate bind rejects an undeclared zero motion threshold");
+		}
 		require(sol_candidate_registry_bind_v1(registry, index, generations[index],
+				SOL_BRAIN_STUCK_REPLAN_DEFAULT_MS_V1,
 				fake_observation_call, &fixture->observers[index]),
 				"claimed candidate creates one private generation-bound observer");
 		require(fixture->observers[index].profile_calls == 1,
@@ -677,7 +685,8 @@ static void test_rebind_gets_a_fresh_initial_empty_lifecycle(void)
 	{
 		require(sol_candidate_registry_unbind_v1(registry, index) &&
 			sol_candidate_registry_bind_v1(registry, index,
-				fixture.observers[index].generation, fake_observation_call,
+				fixture.observers[index].generation,
+				SOL_BRAIN_STUCK_REPLAN_DEFAULT_MS_V1, fake_observation_call,
 				&fixture.observers[index]) &&
 			fixture.observers[index].profile_calls == 2,
 				"each observer can be safely destroyed and rebound to the same client");

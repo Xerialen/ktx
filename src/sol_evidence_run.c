@@ -21,6 +21,7 @@ struct sol_evidence_run_v1
 	int cleanup_pending;
 	int failed;
 	int end_attempted;
+	int match_timeline_started;
 	char run_nonce[CE_RUN_NONCE_CAP];
 	char epoch_kind[CE_EPOCH_KIND_CAP];
 	sol_evidence_run_call_v1 call;
@@ -109,6 +110,33 @@ int sol_evidence_run_matches_v1(const sol_evidence_run_v1 *run,
 const char *sol_evidence_run_nonce_v1(const sol_evidence_run_v1 *run)
 {
 	return run && run->active ? run->run_nonce : NULL;
+}
+
+int sol_evidence_run_match_timeline_begin_v1(sol_evidence_run_v1 *run)
+{
+	ce_match_timeline_begin_v1 timeline;
+
+	if (!run || !run->active || !run->emissions_open || run->cleanup_pending
+		|| run->match_timeline_started
+		|| strcmp(run->epoch_kind, "ktx-match/v1"))
+	{
+		return 0;
+	}
+	memset(&timeline, 0, sizeof(timeline));
+	init_header(&timeline.header, sizeof(timeline));
+	if (!copy_string(timeline.run_nonce, sizeof(timeline.run_nonce),
+			run->run_nonce)
+		|| run->call(run->call_context, CE_MATCH_TIMELINE_BEGIN, &timeline,
+			(intptr_t) sizeof(timeline)) != CE_RESULT_OK
+		|| timeline.header.protocol_version != CE_PROTOCOL_VERSION_V1
+		|| timeline.header.struct_size != sizeof(timeline)
+		|| strcmp(timeline.run_nonce, run->run_nonce)
+		|| !timeline.mvd_time_us)
+	{
+		return 0;
+	}
+	run->match_timeline_started = 1;
+	return 1;
 }
 
 int sol_evidence_run_configure_seat_v1(sol_evidence_run_v1 *run,
